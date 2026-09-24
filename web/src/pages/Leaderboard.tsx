@@ -18,7 +18,7 @@ import {
 import { useApp } from '../context/AppContext';
 
 export default function Leaderboard() {
-  const { reps, addRep, dbEngine, refreshAllData } = useApp();
+  const { reps, addRep, dbEngine, refreshAllData, getPageSection } = useApp();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [repName, setRepName] = useState('');
   const [repRole, setRepRole] = useState('Account Executive');
@@ -57,14 +57,14 @@ export default function Leaderboard() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Sales Team Performance & Device Fleet
+              {getPageSection('leaderboard', 'hero')?.title}
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-amber)', fontSize: '0.75rem' }}>
               <Trophy size={14} /> Season 4 Active
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            Real-time rep rankings, call activity streaks, and live mobile device telemetry.
+            {getPageSection('leaderboard', 'hero')?.subtitle}
           </p>
         </div>
 

@@ -17,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/auth_token.php';
 
 try {
     $conn = getDatabaseConnection();
@@ -620,6 +621,13 @@ try {
 
     // Multi-tenant organization isolation resolution
     $tenantId = $_SERVER['HTTP_X_TENANT_ID'] ?? ($_GET['org_id'] ?? ($_POST['org_id'] ?? 'all'));
+    $authPayload = verifyRingviaToken($_SERVER['HTTP_AUTHORIZATION'] ?? null);
+    if ($authPayload) {
+        // Tenant members cannot select another organization through a request parameter.
+        if (($authPayload['role'] ?? '') !== 'super_admin') {
+            $tenantId = (string) ($authPayload['orgId'] ?? '');
+        }
+    }
     if (!$tenantId || $tenantId === 'undefined' || $tenantId === 'null') {
         $tenantId = 'all';
     }
@@ -648,6 +656,11 @@ try {
 
         // Case A: Multipart File Upload
         if (!empty($_FILES['audio']['tmp_name']) && is_uploaded_file($_FILES['audio']['tmp_name'])) {
+            if (($_FILES['audio']['size'] ?? 0) > 25 * 1024 * 1024) {
+                http_response_code(413);
+                echo json_encode(['success' => false, 'error' => 'Audio recording exceeds the 25 MB limit']);
+                exit();
+            }
             $ext = pathinfo($_FILES['audio']['name'], PATHINFO_EXTENSION) ?: 'mp3';
             $safeExt = in_array(strtolower($ext), ['mp3', 'm4a', 'wav', 'aac', 'ogg']) ? strtolower($ext) : 'mp3';
             $filename = 'rec_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $safeExt;
@@ -711,6 +724,11 @@ try {
     // 5. ALL DATA (Single Round-Trip Fetch Scoped by Multi-Tenant Isolation)
     // =========================================================
     if ($action === 'all_data' && $method === 'GET') {
+        if (!$authPayload) {
+            http_response_code(401);
+            echo json_encode(['success' => false, 'error' => 'Authentication is required for live feeds']);
+            exit();
+        }
         if ($tenantId === 'all') {
             $calls = $db->query("SELECT * FROM call_logs ORDER BY created_at DESC LIMIT 100")->fetchAll();
             $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
@@ -725,9 +743,6 @@ try {
             $stmtR = $db->prepare("SELECT * FROM sales_reps WHERE org_id = :org_id ORDER BY rank_order ASC");
             $stmtR->execute([':org_id' => $tenantId]);
             $reps = $stmtR->fetchAll();
-            if (empty($reps)) {
-                $reps = $db->query("SELECT * FROM sales_reps LIMIT 5")->fetchAll();
-            }
 
             $stmtCRM = $db->prepare("SELECT * FROM crm_connectors WHERE org_id = :org_id OR org_id = 'org-tcs' OR org_id IS NULL ORDER BY id ASC");
             $stmtCRM->execute([':org_id' => $tenantId]);
@@ -736,16 +751,10 @@ try {
             $stmtA = $db->prepare("SELECT * FROM admin_users WHERE org_id = :org_id ORDER BY id ASC");
             $stmtA->execute([':org_id' => $tenantId]);
             $admins = $stmtA->fetchAll();
-            if (empty($admins)) {
-                $admins = $db->query("SELECT * FROM admin_users LIMIT 5")->fetchAll();
-            }
 
             $stmtL = $db->prepare("SELECT * FROM leads_contacts WHERE org_id = :org_id ORDER BY created_at DESC LIMIT 50");
             $stmtL->execute([':org_id' => $tenantId]);
             $leads = $stmtL->fetchAll();
-            if (empty($leads)) {
-                $leads = $db->query("SELECT * FROM leads_contacts LIMIT 10")->fetchAll();
-            }
         }
 
         $formattedCalls = array_map(function ($row) {
@@ -778,6 +787,12 @@ try {
                 'createdAt' => (string) $row['created_at']
             ];
         }, $calls);
+
+        // Sales members may only retrieve activity assigned to themselves.
+        if (($authPayload['role'] ?? '') === 'rep') {
+            $memberName = strtolower(trim((string) ($authPayload['name'] ?? '')));
+            $formattedCalls = array_values(array_filter($formattedCalls, fn($call) => strtolower(trim($call['repName'])) === $memberName));
+        }
 
         // Fetch Reps
         $formattedReps = array_map(function ($r) {
@@ -1284,7 +1299,7 @@ try {
         $crmType = !empty($payload['crmType']) ? (string) $payload['crmType'] : 'RingVia360';
         $simSlot = !empty($payload['simSlot']) ? (string) $payload['simSlot'] : 'SIM 1 (Airtel Enterprise)';
         $isEncrypted = isset($payload['isEncrypted']) ? ($payload['isEncrypted'] ? 1 : 0) : 1;
-        $recordingUrl = !empty($payload['recordingUrl']) ? (string) $payload['recordingUrl'] : 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+        $recordingUrl = !empty($payload['recordingUrl']) ? (string) $payload['recordingUrl'] : null;
 
         $waveform = !empty($payload['waveform']) ? json_encode($payload['waveform']) : json_encode([30, 45, 65, 80, 70, 85, 90, 75, 60, 50, 65, 80, 95, 75, 60, 45, 40, 55, 70, 60]);
         $transcript = !empty($payload['transcript']) ? json_encode($payload['transcript']) : json_encode([

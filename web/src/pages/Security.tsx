@@ -14,7 +14,7 @@ import {
 import { useApp } from '../context/AppContext';
 
 export default function Security() {
-  const { securitySettings, updateSecuritySettings, auditLogs } = useApp();
+  const { securitySettings, updateSecuritySettings, auditLogs, getPageSection } = useApp();
   const [e2ee, setE2ee] = useState(securitySettings.e2eeEnabled);
   const [consentMode, setConsentMode] = useState(securitySettings.callRecordingConsent);
   const [autoRedact, setAutoRedact] = useState(securitySettings.autoRedactPii);
@@ -36,14 +36,14 @@ export default function Security() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Security, Cryptography & Compliance Vault
+              {getPageSection('security', 'hero')?.title}
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
-              <ShieldCheck size={14} /> SOC2 Type II • GDPR Ready
+              <ShieldCheck size={14} /> {getPageSection('security', 'hero')?.data?.badge}
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            Hardware-backed encryption keys, automated two-party consent enforcement, and tamper-evident audit trails.
+            {getPageSection('security', 'hero')?.subtitle}
           </p>
         </div>
 

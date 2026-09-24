@@ -14,7 +14,7 @@ import {
 import { useApp } from '../context/AppContext';
 
 export default function CrmSync() {
-  const { crmConnectors, toggleCrmConnector, dbEngine } = useApp();
+  const { crmConnectors, toggleCrmConnector, dbEngine, getPageSection } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
 
@@ -35,14 +35,14 @@ export default function CrmSync() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              CRM Integration & Webhook Pipeline
+              {getPageSection('crm_sync', 'hero')?.title}
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
               Bi-Directional Sync Active • {dbEngine.toUpperCase()}
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            Automated event streaming: mobile call recordings, transcripts, notes, and WhatsApp messages auto-populate CRM records.
+            {getPageSection('crm_sync', 'hero')?.subtitle}
           </p>
         </div>
 

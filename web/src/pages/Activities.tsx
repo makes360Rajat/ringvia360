@@ -14,7 +14,6 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   PhoneMissed,
-  PhoneIncoming,
   MessageSquare,
   ChevronDown,
   ChevronUp,
@@ -35,9 +34,6 @@ export default function Activities() {
     whatsAppLogs,
     activeAudioCall,
     setActiveAudioCall,
-    triggerIncomingCall,
-    startOutboundCallSession,
-    setIsSimulatorOpen,
     deleteCallLog,
     refreshCalls,
     dbEngine,
@@ -202,63 +198,20 @@ export default function Activities() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              {getPageSection('activities', 'hero')?.title || 'Live Feed & Audio Podcast Recordings'}
+              {getPageSection('activities', 'hero')?.title}
             </h1>
             <span className="glass-pill" style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
               <Radio size={12} color="var(--primary)" /> {calls.length} Active Records
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            {getPageSection('activities', 'hero')?.subtitle || 'Real-time call telemetry, dual-SIM recordings, E2EE audio podcast streaming, and Whisper AI transcriptions.'}
+            {getPageSection('activities', 'hero')?.subtitle}
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => triggerIncomingCall({
-              contactName: 'Pooja Iyer (Inbound Lead)',
-              company: 'Reliance Digital Solutions',
-              phoneNumber: '+91 98330 11223',
-              dealValue: 64000
-            })}
-            className="btn-primary"
-            style={{
-              fontSize: '0.82rem',
-              padding: '0.55rem 1rem',
-              background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
-              border: 'none',
-              boxShadow: '0 4px 14px rgba(6, 182, 212, 0.4)'
-            }}
-            title="Simulate receiving an inbound call from customer"
-          >
-            <PhoneIncoming size={14} />
-            <span>Simulate Inbound Call</span>
-          </button>
-
-          <button
-            onClick={() => startOutboundCallSession('+91 98201 43210', 'Aarav Sharma', 'Tata Consultancy Services')}
-            className="btn-primary"
-            style={{
-              fontSize: '0.82rem',
-              padding: '0.55rem 1rem',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-              border: 'none',
-              boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)'
-            }}
-            title="Start live outbound call session"
-          >
-            <PhoneCall size={14} />
-            <span>Start Live Call</span>
-          </button>
-
-          <button
-            onClick={() => setIsSimulatorOpen(true)}
-            className="btn-secondary"
-            style={{ fontSize: '0.82rem', padding: '0.55rem 1rem' }}
-          >
-            <span>Launch Phone Simulator</span>
-          </button>
-        </div>
+        <span className="glass-pill" style={{ color: 'var(--accent-cyan)', fontSize: '0.75rem' }}>
+          Read-only admin feed • records are sent from mobile
+        </span>
       </div>
 
       {/* Prominent Audio Pod Live Banner */}
@@ -554,26 +507,6 @@ export default function Activities() {
                     }}>
                       ✓ {call.crmType}
                     </span>
-
-                    <button
-                      onClick={() => startOutboundCallSession(call.phoneNumber, call.contactName, call.company)}
-                      className="btn-ghost"
-                      style={{
-                        fontSize: '0.8rem',
-                        padding: '0.45rem 0.75rem',
-                        color: '#34d399',
-                        border: '1px solid rgba(16, 185, 129, 0.3)',
-                        background: 'rgba(16, 185, 129, 0.1)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                        cursor: 'pointer'
-                      }}
-                      title={`Start call session with ${call.contactName}`}
-                    >
-                      <PhoneCall size={14} />
-                      <span>Call</span>
-                    </button>
 
                     <button
                       onClick={() => setActiveAudioCall(call)}

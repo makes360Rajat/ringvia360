@@ -20,7 +20,7 @@ import { useApp } from '../context/AppContext';
 export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { login, signup, toastMessage } = useApp();
+  const { login, signup, toastMessage, getPageSection } = useApp();
 
   const [mode, setMode] = useState<'login' | 'signup'>(
     searchParams.get('mode') === 'signup' ? 'signup' : 'login'
@@ -38,7 +38,7 @@ export default function Login() {
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [signupPhone, setSignupPhone] = useState('+91 98200 12345');
-  const [selectedPlan, setSelectedPlan] = useState('Pro Growth (₹14,999/mo)');
+  const [selectedPlan, setSelectedPlan] = useState('Pro Growth');
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +69,7 @@ export default function Login() {
         email: signupEmail,
         password: signupPassword,
         phone: signupPhone,
-        plan: selectedPlan.split(' ')[0]
+        plan: selectedPlan
       });
       if (success) {
         navigate('/dashboard');
@@ -141,7 +141,7 @@ export default function Login() {
             </div>
 
             <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.5, marginBottom: '1.75rem' }}>
-              Every customer organization operates in complete isolation with dedicated call tracking, 320kbps MP3 audio recording KMS vaults, Knox container separation, and CRM sync.
+              {getPageSection('login', 'hero')?.subtitle}
             </p>
 
             <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-dim)', marginBottom: '0.75rem' }}>
@@ -181,7 +181,7 @@ export default function Login() {
                 <ArrowRight size={14} color="#f59e0b" />
               </button>
 
-              {/* Customer 1: Tata */}
+              {/* Customer demo account 1 */}
               <button
                 type="button"
                 onClick={() => {
@@ -203,17 +203,17 @@ export default function Login() {
                   <Building size={18} color="var(--primary)" />
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      Tata Consultancy Services (Customer Admin)
+                      Customer Demo Account (Admin)
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      aarav.sharma@tcs.com • 120 Licenses Active
+                      Demo administrator • 120 Licenses Active
                     </div>
                   </div>
                 </div>
                 <ArrowRight size={14} color="var(--primary)" />
               </button>
 
-              {/* Customer 2: Infosys */}
+              {/* Customer demo account 2 */}
               <button
                 type="button"
                 onClick={() => {
@@ -235,10 +235,10 @@ export default function Login() {
                   <Briefcase size={18} color="#06b6d4" />
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      Infosys Technologies (Customer Admin)
+                      Customer Demo Account (Admin)
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      priya.patel@infosys.com • 50 Licenses Active
+                      Demo administrator • 50 Licenses Active
                     </div>
                   </div>
                 </div>
@@ -525,9 +525,10 @@ export default function Login() {
                     fontSize: '0.85rem'
                   }}
                 >
-                  <option value="Starter (₹4,999/mo)">Starter — 10 Reps • ₹4,999/mo</option>
-                  <option value="Pro Growth (₹14,999/mo)">Pro Growth — 50 Reps • ₹14,999/mo (Recommended)</option>
-                  <option value="Enterprise (₹45,000/mo)">Enterprise Plus — Unlimited Seats & Knox MDM • ₹45,000/mo</option>
+                  <option value="Starter">Starter — 10 members • ₹4,999/mo</option>
+                  <option value="Growth">Growth — 20 members • ₹8,999/mo</option>
+                  <option value="Pro Growth">Pro Growth — 50 members • ₹14,999/mo (Recommended)</option>
+                  <option value="Enterprise Plus">Enterprise Plus — 120 members • ₹45,000/mo</option>
                 </select>
               </div>
 

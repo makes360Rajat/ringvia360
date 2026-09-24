@@ -1,7 +1,8 @@
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
-  # Exclude /app directory so Flutter web app runs independently
+  # Exclude /api and /app directories so PHP endpoints and Flutter run directly
+  RewriteRule ^api(/.*)?$ - [L]
   RewriteRule ^app(/.*)?$ - [L]
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f

@@ -214,11 +214,7 @@ class CallRepository {
   }
 
   Future<void> addCall(CallRecord call) async {
-    final callWithRecording = call.copyWith(
-      recordingPath: (call.recordingPath != null && call.recordingPath!.isNotEmpty)
-          ? call.recordingPath
-          : 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
-    );
+    final callWithRecording = call;
 
     // 1. Immediately insert into local memory list
     _cachedCalls.removeWhere((c) => c.id == callWithRecording.id);

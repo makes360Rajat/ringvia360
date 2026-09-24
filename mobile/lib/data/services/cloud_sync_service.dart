@@ -67,7 +67,7 @@ class CloudSyncService {
           ? 'positive'
           : (call.sentiment == SentimentScore.negative ? 'negative' : 'neutral');
 
-      String recordingUrl = 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+      String? recordingUrl;
       if (call.recordingPath != null && call.recordingPath!.isNotEmpty) {
         if (call.recordingPath!.startsWith('http')) {
           recordingUrl = call.recordingPath!;
@@ -103,7 +103,6 @@ class CloudSyncService {
         'simSlot': call.simSlot,
         'isEncrypted': call.isEncrypted,
         'recordingUrl': recordingUrl,
-        'localRecordingPath': call.recordingPath,
         'waveform': [35, 50, 70, 85, 65, 45, 80, 95, 75, 60, 50, 65, 80, 90, 85, 70, 55, 45, 60, 75, 85, 70, 50, 30],
         'transcript': [
           {
@@ -148,11 +147,10 @@ class CloudSyncService {
       print('Cloud sync error: $e');
     }
 
-    // Fallback if offline
+    // Keep the item pending locally if the server cannot confirm persistence.
     return CloudSyncResult(
-      success: true,
-      crmRecordId: mockCrmId,
-      message: 'Call #${call.id} queued for sync',
+      success: false,
+      message: 'Call #${call.id} is pending upload',
       syncedAt: DateTime.now(),
     );
   }

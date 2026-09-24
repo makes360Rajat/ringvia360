@@ -7,8 +7,6 @@ import {
   Trophy,
   Share2,
   ShieldCheck,
-  Smartphone,
-  PhoneIncoming,
   Sun,
   Moon,
   Zap,
@@ -30,8 +28,6 @@ export const Navbar: React.FC = () => {
     setAccent,
     selectedRole,
     setSelectedRole,
-    setIsSimulatorOpen,
-    triggerIncomingCall,
     calls,
     currentUser,
     currentOrg,
@@ -224,45 +220,6 @@ export const Navbar: React.FC = () => {
 
       {/* Action Hub & Utilities */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-        {/* Test Incoming Call Trigger */}
-        <button
-          onClick={() => triggerIncomingCall()}
-          className="btn-ghost"
-          style={{
-            padding: '0.45rem 0.85rem',
-            fontSize: '0.8rem',
-            borderRadius: 'var(--radius-md)',
-            background: 'rgba(56, 189, 248, 0.12)',
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            color: '#38bdf8',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            cursor: 'pointer'
-          }}
-          title="Simulate an incoming customer call arriving on the system"
-        >
-          <PhoneIncoming size={15} />
-          <span>Test Inbound Call</span>
-        </button>
-
-        {/* Mobile App Simulator Launcher */}
-        <button
-          onClick={() => setIsSimulatorOpen(true)}
-          className="btn-primary"
-          style={{
-            padding: '0.45rem 0.95rem',
-            fontSize: '0.82rem',
-            borderRadius: 'var(--radius-md)',
-            background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
-            boxShadow: '0 4px 14px rgba(6, 182, 212, 0.35)'
-          }}
-          title="Open interactive Mobile Companion app dialer simulator"
-        >
-          <Smartphone size={16} />
-          <span>Mobile Simulator</span>
-        </button>
-
         {/* Role Toggle */}
         <button
           onClick={() => setSelectedRole(selectedRole === 'admin' ? 'rep' : 'admin')}
@@ -362,7 +319,7 @@ export const Navbar: React.FC = () => {
             <button
               onClick={() => {
                 logout();
-                navigate('/login');
+                navigate('/login', { replace: true });
               }}
               style={{
                 background: 'none',

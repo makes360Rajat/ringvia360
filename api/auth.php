@@ -17,6 +17,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/auth_token.php';
 
 try {
     $conn = getDatabaseConnection();
@@ -87,6 +88,31 @@ try {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ");
+    }
+
+    // Subscription plans are platform-managed. Organizations purchase seats from one plan.
+    if ($isMysql) {
+        $db->exec("CREATE TABLE IF NOT EXISTS subscription_plans (
+            id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(128) NOT NULL UNIQUE,
+            seat_limit INT NOT NULL, monthly_price_inr DECIMAL(10,2) NOT NULL,
+            status VARCHAR(16) NOT NULL DEFAULT 'active', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+    } else {
+        $db->exec("CREATE TABLE IF NOT EXISTS subscription_plans (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, seat_limit INTEGER NOT NULL,
+            monthly_price_inr REAL NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );");
+    }
+    if ((int) $db->query("SELECT COUNT(*) FROM subscription_plans")->fetchColumn() === 0) {
+        $seedPlans = [
+            ['starter', 'Starter', 10, 4999], ['growth', 'Growth', 20, 8999],
+            ['pro', 'Pro Growth', 50, 14999], ['enterprise', 'Enterprise Plus', 120, 45000],
+            ['banking', 'Enterprise Banking', 200, 85000],
+        ];
+        $seed = $db->prepare("INSERT INTO subscription_plans (id, name, seat_limit, monthly_price_inr, status) VALUES (?, ?, ?, ?, 'active')");
+        foreach ($seedPlans as $plan) { $seed->execute($plan); }
     }
 
     // Ensure org_id column exists on call_logs table
@@ -265,12 +291,13 @@ try {
 
         $tokenPayload = [
             'userId' => $user['id'],
+            'name' => $user['name'],
             'email' => $user['email'],
             'role' => $user['role'],
             'orgId' => $user['org_id'],
             'exp' => time() + (86400 * 30)
         ];
-        $token = base64_encode(json_encode($tokenPayload));
+        $token = issueRingviaToken($tokenPayload);
 
         echo json_encode([
             'success' => true,
@@ -329,16 +356,27 @@ try {
         $slug = trim($slug, '-');
         $orgId = 'org-' . $slug . '-' . substr(bin2hex(random_bytes(3)), 0, 5);
 
-        // 1. Provision new Organization
+        $planStmt = $db->prepare("SELECT * FROM subscription_plans WHERE name = :name AND status = 'active' LIMIT 1");
+        $planStmt->execute([':name' => $plan]);
+        $selectedPlan = $planStmt->fetch();
+        if (!$selectedPlan) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Selected subscription plan is unavailable']);
+            exit();
+        }
+
+        // 1. Provision new Organization with its purchased seat allocation.
         $orgInsert = $db->prepare("
             INSERT INTO organizations (id, name, slug, plan, seats, monthly_price_inr, status, owner_email)
-            VALUES (:id, :name, :slug, :plan, 50, 14999.00, 'active', :owner_email)
+            VALUES (:id, :name, :slug, :plan, :seats, :price, 'active', :owner_email)
         ");
         $orgInsert->execute([
             ':id' => $orgId,
             ':name' => $companyName,
             ':slug' => $slug,
             ':plan' => $plan,
+            ':seats' => (int) $selectedPlan['seat_limit'],
+            ':price' => (float) $selectedPlan['monthly_price_inr'],
             ':owner_email' => $email
         ]);
 
@@ -372,12 +410,13 @@ try {
 
         $tokenPayload = [
             'userId' => $userId,
+            'name' => $name,
             'email' => $email,
             'role' => 'org_admin',
             'orgId' => $orgId,
             'exp' => time() + (86400 * 30)
         ];
-        $token = base64_encode(json_encode($tokenPayload));
+        $token = issueRingviaToken($tokenPayload);
 
         http_response_code(201);
         echo json_encode([
@@ -398,7 +437,7 @@ try {
                 'name' => $companyName,
                 'slug' => $slug,
                 'plan' => $plan,
-                'seats' => 50,
+                'seats' => (int) $selectedPlan['seat_limit'],
                 'status' => 'active'
             ]
         ]);
@@ -433,10 +472,41 @@ try {
                     'platformHealth' => '99.98% SLA'
                 ],
                 'organizations' => $orgs,
-                'users' => $users
+                'users' => $users,
+                'plans' => $db->query("SELECT * FROM subscription_plans ORDER BY monthly_price_inr ASC")->fetchAll()
             ]
         ]);
         exit();
+    }
+
+    // =========================================================
+    // ACTION: SUBSCRIPTION PLANS (Super Admin)
+    // =========================================================
+    if ($action === 'plans') {
+        if ($method === 'GET') {
+            echo json_encode(['success' => true, 'plans' => $db->query("SELECT * FROM subscription_plans ORDER BY monthly_price_inr ASC")->fetchAll()]);
+            exit();
+        }
+        $body = json_decode(file_get_contents('php://input'), true) ?: [];
+        $id = trim($body['id'] ?? '');
+        $name = trim($body['name'] ?? '');
+        $seats = (int) ($body['seat_limit'] ?? 0);
+        $price = (float) ($body['monthly_price_inr'] ?? 0);
+        $status = ($body['status'] ?? 'active') === 'active' ? 'active' : 'disabled';
+        if (!$id || !$name || $seats < 1 || $price < 0) {
+            http_response_code(400); echo json_encode(['success' => false, 'error' => 'Plan id, name, seats, and price are required']); exit();
+        }
+        if ($method === 'POST') {
+            $existing = $db->prepare("SELECT id FROM subscription_plans WHERE id = :id"); $existing->execute([':id' => $id]);
+            if ($existing->fetch()) {
+                $db->prepare("UPDATE subscription_plans SET name=:name, seat_limit=:seats, monthly_price_inr=:price, status=:status WHERE id=:id")
+                    ->execute([':id'=>$id, ':name'=>$name, ':seats'=>$seats, ':price'=>$price, ':status'=>$status]);
+            } else {
+                $db->prepare("INSERT INTO subscription_plans (id,name,seat_limit,monthly_price_inr,status) VALUES (:id,:name,:seats,:price,:status)")
+                    ->execute([':id'=>$id, ':name'=>$name, ':seats'=>$seats, ':price'=>$price, ':status'=>$status]);
+            }
+            echo json_encode(['success' => true]); exit();
+        }
     }
 
     // =========================================================

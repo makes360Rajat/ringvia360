@@ -205,7 +205,7 @@ class DialerViewModel extends ChangeNotifier {
     _isSpeakerOn = false;
 
     _currentCallId = 'call-${DateTime.now().millisecondsSinceEpoch}';
-    _audioRecorderService.startRecording(callId: _currentCallId!);
+    await _audioRecorderService.startRecording(callId: _currentCallId!);
 
     _telephonyService.startOutboundCall(
       phoneNumber: number,
@@ -311,7 +311,7 @@ class DialerViewModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  void endCall() {
+  Future<void> endCall() async {
     final number = _inputNumber.isEmpty ? '+91 98201 43210' : _inputNumber;
     final event = _telephonyService.endCurrentCall(
       phoneNumber: number,
@@ -326,7 +326,10 @@ class DialerViewModel extends ChangeNotifier {
 
     final callId = _currentCallId ?? 'call-${DateTime.now().millisecondsSinceEpoch}';
     final duration = event.durationSeconds > 0 ? event.durationSeconds : (_callDurationSeconds > 0 ? _callDurationSeconds : 52);
-    final recordingResult = _audioRecorderService.stopRecording(callId: callId, durationSeconds: duration);
+    final recordingResult = await _audioRecorderService.stopRecording(
+      callId: callId,
+      durationSeconds: duration,
+    );
     _currentCallId = null;
 
     final initialCallRecord = CallRecord(
@@ -350,7 +353,7 @@ class DialerViewModel extends ChangeNotifier {
       crmType: 'RingVia360',
       simSlot: _selectedSim.label,
       isEncrypted: true,
-      recordingPath: recordingResult.cloudRecordingUrl,
+      recordingPath: recordingResult.localFilePath,
       keyActionItems: [
         'Send follow-up recap email',
         'Provision trial access in CRM'
@@ -386,7 +389,7 @@ class DialerViewModel extends ChangeNotifier {
       sentiment: sentiment,
       dealValue: dealValue,
       crmType: crmType,
-      recordingPath: _wrapUpCall!.recordingPath ?? 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
+      recordingPath: _wrapUpCall!.recordingPath,
       crmSyncStatus: CrmSyncStatus.pending,
     );
 
@@ -406,6 +409,7 @@ class DialerViewModel extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _sub?.cancel();
+    _audioRecorderService.dispose();
     super.dispose();
   }
 }

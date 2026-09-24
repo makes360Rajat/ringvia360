@@ -12,17 +12,15 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Filter,
-  RefreshCw,
-  Smartphone
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export default function Dashboard() {
-  const { calls, reps, setActiveAudioCall, setIsSimulatorOpen, simulateNewCall, getPageSection } = useApp();
+  const { calls, reps, setActiveAudioCall, getPageSection } = useApp();
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today');
 
-  const totalCalls = calls.length + 1485;
-  const totalDurationMinutes = Math.round(calls.reduce((acc, c) => acc + c.duration, 0) / 60) + 4320;
+  const totalCalls = calls.length;
+  const totalDurationMinutes = Math.round(calls.reduce((acc, c) => acc + c.duration, 0) / 60);
   const connectedCalls = calls.filter(c => c.duration > 0).length;
   const connectRate = Math.round((connectedCalls / Math.max(1, calls.length)) * 100);
 
@@ -33,14 +31,14 @@ export default function Dashboard() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              {getPageSection('dashboard', 'hero')?.title || 'Executive Sales Intelligence'}
+              {getPageSection('dashboard', 'hero')?.title}
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
               <span className="live-dot" /> Live Telemetry
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            {getPageSection('dashboard', 'hero')?.subtitle || 'Real-time call logs, WhatsApp outreach, and CRM pipeline progression across 34 reps.'}
+            {getPageSection('dashboard', 'hero')?.subtitle}
           </p>
         </div>
 
@@ -68,29 +66,9 @@ export default function Dashboard() {
             ))}
           </div>
 
-          <button
-            onClick={() => simulateNewCall({
-              direction: 'inbound',
-              contactName: 'Ananya Deshmukh (Inbound Lead)',
-              company: 'HCL Technologies',
-              outcome: 'Inbound Qualified - Demo Booked',
-              dealValue: 64000
-            })}
-            className="btn-primary"
-            style={{ fontSize: '0.82rem', padding: '0.55rem 1rem' }}
-          >
-            <RefreshCw size={14} />
-            <span>Simulate Inbound Call</span>
-          </button>
-
-          <button
-            onClick={() => setIsSimulatorOpen(true)}
-            className="btn-secondary"
-            style={{ fontSize: '0.82rem', padding: '0.55rem 1rem' }}
-          >
-            <Smartphone size={14} color="var(--accent-cyan)" />
-            <span>Mobile Companion</span>
-          </button>
+          <span className="glass-pill" style={{ color: 'var(--accent-cyan)', fontSize: '0.75rem' }}>
+            Call controls are available in the mobile app
+          </span>
         </div>
       </div>
 

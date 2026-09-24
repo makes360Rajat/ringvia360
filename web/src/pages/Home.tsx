@@ -4,7 +4,6 @@ import {
   ShieldCheck,
   Zap,
   Sparkles,
-  Smartphone,
   Share2,
   CheckCircle,
   ArrowRight,
@@ -24,31 +23,22 @@ const ICON_MAP: Record<string, React.ReactNode> = {
 };
 
 export default function Home() {
-  const { setIsSimulatorOpen, getPageSection } = useApp();
+  const { getPageSection } = useApp();
 
-  // Fetch dynamic sections from DB (falls back to defaultSitePages in AppContext)
+  // Every editable section is supplied by site_pages through the CMS API.
   const hero = getPageSection('home', 'hero');
   const stats = getPageSection('home', 'stats');
   const featuresHighlight = getPageSection('home', 'features_highlight');
+  const comparison = getPageSection('home', 'comparison');
 
   const heroData = hero?.data || {};
   const statsData = stats?.data || {};
   const featData = featuresHighlight?.data || {};
 
-  const statItems: Array<{ value: string; label: string; desc: string }> = statsData.items || [
-    { value: '99.8%', label: 'Automated Call Capture', desc: 'Zero manual rep logging required' },
-    { value: '₹48.5L+', label: 'Daily Deal Volume Tracked', desc: 'Integrated CRM pipeline attribution' },
-    { value: '45%', label: 'Productivity Increase', desc: 'Saved 1.5 hrs/rep/day in data entry' },
-    { value: '100%', label: 'Knox E2EE Isolation', desc: 'Complete hardware privacy protection' }
-  ];
+  const statItems: Array<{ value: string; label: string; desc: string }> = Array.isArray(statsData.items) ? statsData.items : [];
 
-  const featureCards: Array<{ icon: string; title: string; desc: string }> = featData.features || [
-    { icon: 'ShieldCheck', title: 'Hardware Knox Dual-SIM Isolation', desc: 'Only business SIM activity is tracked. Personal SIM calls, SMS, and data remain 100% private.' },
-    { icon: 'Lock', title: 'End-to-End Encrypted Call Audio', desc: 'All call recordings and transcripts are encrypted with AES-256 before leaving the mobile device.' },
-    { icon: 'Sparkles', title: 'AI Sentiment & Waveform Pod', desc: 'Immediate post-call sentiment classification with interactive audio scrubbing.' },
-    { icon: 'MessageCircle', title: 'Automated WhatsApp Dispatch', desc: 'Instantly dispatches corporate WhatsApp message templates with meeting links upon call wrap-up.' },
-    { icon: 'RefreshCw', title: 'Bi-Directional CRM Sync', desc: 'Direct real-time webhooks sync to HubSpot, Zoho CRM, LeadSquared, and Freshsales.' }
-  ];
+  const featureCards: Array<{ icon: string; title: string; desc: string }> = Array.isArray(featData.features) ? featData.features : [];
+  const comparisonRows: Array<{ feature: string; legacy: string; rv: string }> = Array.isArray(comparison?.data?.rows) ? comparison.data.rows : [];
 
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1280px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '3.5rem' }}>
@@ -74,7 +64,7 @@ export default function Home() {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }} className="glass-pill">
             <Sparkles size={14} color="var(--primary)" />
             <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-              {heroData.badge || '⚡ ENTERPRISE TELEPHONY AUTOMATION 2026'}
+              {heroData.badge}
             </span>
           </div>
 
@@ -82,26 +72,16 @@ export default function Home() {
             fontSize: 'clamp(2.2rem, 5vw, 3.6rem)', fontWeight: 800,
             lineHeight: 1.15, letterSpacing: '-1.5px', color: 'var(--text-main)', marginBottom: '1.25rem'
           }}>
-            {hero?.title ? (
+            {hero?.title && (
               <span style={{
                 background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent-cyan) 100%)',
                 WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
               }}>{hero.title}</span>
-            ) : (
-              <>
-                Zero-Click Sales Activity Tracking,{' '}
-                <span style={{
-                  background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent-cyan) 100%)',
-                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
-                }}>
-                  Automated Calls, WhatsApp &amp; CRM Sync
-                </span>
-              </>
             )}
           </h1>
 
           <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: '680px', margin: '0 auto 2rem' }}>
-            {hero?.subtitle || 'Never ask sales reps to manually log another call or message. RingVia360 runs in the background of iOS and Android devices, encrypts audio, transcribes conversations with AI, and syncs directly to your CRM.'}
+            {hero?.subtitle}
           </p>
 
           {hero?.body && (
@@ -120,16 +100,8 @@ export default function Home() {
           <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
             <Link to="/dashboard" className="btn-primary" style={{ padding: '0.85rem 1.8rem', fontSize: '1rem' }}>
               <TrendingUp size={18} />
-              <span>{heroData.cta_primary || 'Open Executive Dashboard'}</span>
+              <span>{heroData.cta_primary}</span>
             </Link>
-            <button
-              onClick={() => setIsSimulatorOpen(true)}
-              className="btn-secondary"
-              style={{ padding: '0.85rem 1.6rem', fontSize: '1rem' }}
-            >
-              <Smartphone size={18} color="var(--accent-cyan)" />
-              <span>{heroData.cta_secondary || 'Launch Mobile Dialer Simulator'}</span>
-            </button>
             <Link to="/activities" className="btn-ghost" style={{ padding: '0.85rem 1.25rem' }}>
               <span>View Live Activity Stream</span>
               <ArrowRight size={16} />
@@ -160,10 +132,10 @@ export default function Home() {
       <section>
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)' }}>
-            {featuresHighlight?.title || 'Core Differentiators That Outperform Legacy Dialers'}
+            {featuresHighlight?.title}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '1rem', marginTop: '0.5rem' }}>
-            {featuresHighlight?.subtitle || 'Enterprise compliance, automated CRM logging, and instant WhatsApp customer follow-up.'}
+            {featuresHighlight?.subtitle}
           </p>
         </div>
 
@@ -193,7 +165,7 @@ export default function Home() {
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <span className="glass-pill" style={{ color: 'var(--accent-cyan)' }}>Competitive Audit</span>
           <h2 style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>
-            Why Enterprise Teams Choose RingVia360
+            {comparison?.title}
           </h2>
         </div>
 
@@ -207,16 +179,7 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {[
-                { feature: 'Automatic Call & WhatsApp Logging', legacy: 'Basic mobile logger', rv: 'Zero-latency native background event engine' },
-                { feature: 'Speech-to-Text Transcription', legacy: 'Third-party add-on', rv: 'Native Whisper AI diarization included' },
-                { feature: 'AI Sentiment & Deal Health Scoring', legacy: 'Not available', rv: 'Automated deal risk & sentiment detection' },
-                { feature: 'Dual-SIM Personal Privacy Isolation', legacy: 'Partial Android only', rv: 'Hardware-enforced SIM policy (iOS & Android)' },
-                { feature: 'End-to-End Encryption (E2EE)', legacy: 'Server-side standard', rv: 'Client-side AES-256-GCM + Cloud KMS vault' },
-                { feature: 'Two-Party Consent Enforcement', legacy: 'Manual rep note', rv: 'Automatic audio beep & consent compliance' },
-                { feature: 'CRM Custom Field Mapping', legacy: 'Fixed templates', rv: 'Bi-directional visual schema mapper' },
-                { feature: 'Interactive Rep Mobile Simulator', legacy: 'None', rv: 'Embedded in-browser test phone simulator' }
-              ].map((row, idx) => (
+              {comparisonRows.map((row, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <td style={{ padding: '0.9rem 1rem', fontWeight: 600, color: 'var(--text-main)', fontSize: '0.88rem' }}>{row.feature}</td>
                   <td style={{ padding: '0.9rem 1rem', color: 'var(--text-dim)', fontSize: '0.84rem' }}>{row.legacy}</td>

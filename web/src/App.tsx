@@ -3,10 +3,6 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AppProvider, useApp } from './context/AppContext';
 import { Navbar } from './components/Navbar';
 import { AudioPlayerModal } from './components/AudioPlayerModal';
-import { MobileSimulatorModal } from './components/MobileSimulatorModal';
-import { IncomingCallBanner } from './components/IncomingCallBanner';
-import { LiveInCallBar } from './components/LiveInCallBar';
-import { PostCallWrapUpModal } from './components/PostCallWrapUpModal';
 
 import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
@@ -56,6 +52,16 @@ const ToastNotification: React.FC = () => {
 };
 
 function MainLayout() {
+  const { pagesLoaded } = useApp();
+
+  if (!pagesLoaded) {
+    return (
+      <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', color: 'var(--text-muted)' }}>
+        Loading website content…
+      </main>
+    );
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
@@ -99,12 +105,7 @@ function MainLayout() {
         </div>
       </footer>
 
-      {/* Global Interactive Modals & Telephony Overlays */}
-      <IncomingCallBanner />
-      <LiveInCallBar />
-      <PostCallWrapUpModal />
       <AudioPlayerModal />
-      <MobileSimulatorModal />
       <ToastNotification />
     </div>
   );

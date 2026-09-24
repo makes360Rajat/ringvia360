@@ -88,6 +88,7 @@ interface AppContextType {
   toastMessage: string | null;
   clearToast: () => void;
   sitePages: PageContentMap;
+  pagesLoaded: boolean;
   fetchPageContent: (pageKey?: string) => Promise<void>;
   savePageSection: (section: Partial<SitePageSection>) => Promise<boolean>;
   deletePageSection: (id: string) => Promise<boolean>;
@@ -97,8 +98,6 @@ interface AppContextType {
 
 // NO hardcoded content. All content is fetched from the site_pages MySQL table.
 // Default is empty — DB is the single source of truth.
-const defaultSitePages: PageContentMap = {};
-
 const initialCalls: CallLog[] = [
   {
     id: 'call-101',
@@ -516,7 +515,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(initialAdminUsers);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialAuditLogs);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings>(initialSecurity);
-  const [activeAudioCall, setActiveAudioCall] = useState<CallLog | null>(initialCalls[0]);
+  // The audio player is opened only when a user explicitly selects a recording.
+  const [activeAudioCall, setActiveAudioCall] = useState<CallLog | null>(null);
   const [selectedRole, setSelectedRole] = useState<'admin' | 'rep'>('admin');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [accent, setAccent] = useState<'violet' | 'emerald' | 'cyan' | 'amber'>('violet');
@@ -528,15 +528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem('ringvia360_user');
-      return saved ? JSON.parse(saved) : {
-        id: 'user-super-01',
-        name: 'Rajesh Sharma (Super Admin)',
-        email: 'superadmin@ringvia360.com',
-        role: 'super_admin' as const,
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-        phone: '+91 98200 99999',
-        orgId: null
-      };
+      return saved ? JSON.parse(saved) : null;
     } catch (_) {
       return null;
     }
@@ -570,10 +562,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const fetchPageContent = async (_pageKey?: string): Promise<void> => {
-    // Always fetch all pages from DB — single source of truth
+    // The database is the only content source.  Do not retain a browser copy:
+    // it becomes stale and lets the UI drift from the CMS.
     const endpoints = [
-      'https://ringvia360.com/api/pages.php?action=all',
       '/api/pages.php?action=all',
+      'https://ringvia360.com/api/pages.php?action=all',
     ];
 
     for (const url of endpoints) {
@@ -594,25 +587,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         setSitePages(map);
-        // Cache in localStorage so UI shows content on next load before DB responds
-        try { localStorage.setItem('ringvia360_site_pages', JSON.stringify(map)); } catch (_) {}
         setPagesLoaded(true);
         return; // Success — stop trying endpoints
       } catch (_) {}
     }
 
-    // If DB fetch failed, try loading from localStorage cache
-    try {
-      const cached = localStorage.getItem('ringvia360_site_pages');
-      if (cached) {
-        setSitePages(JSON.parse(cached));
-        setPagesLoaded(true);
-      }
-    } catch (_) {}
+    // A failed request must not be replaced with old browser content.
+    setSitePages({});
+    setPagesLoaded(true);
   };
 
   const savePageSection = async (section: Partial<SitePageSection>): Promise<boolean> => {
     try {
+      let saved = false;
       const endpoints = ['/api/pages.php?action=save', 'https://ringvia360.com/api/pages.php?action=save'];
       for (const url of endpoints) {
         try {
@@ -636,13 +623,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (res.ok) {
             const data = await res.json();
             if (data.success) {
+              saved = true;
               break;
             }
           }
         } catch (_) {}
       }
 
-      // Update local state and cache
+      if (!saved) return false;
+
+      // Update the current view only after the server confirms persistence.
       if (section.page_key && section.section_key) {
         setSitePages(prev => {
           const page = prev[section.page_key!] || {
@@ -674,7 +664,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
             }
           };
-          localStorage.setItem('ringvia360_site_pages', JSON.stringify(updated));
           return updated;
         });
       }
@@ -691,9 +680,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deletePageSection = async (id: string): Promise<boolean> => {
     try {
+      let deleted = false;
       const endpoints = [
-        'https://ringvia360.com/api/pages.php',
         '/api/pages.php',
+        'https://ringvia360.com/api/pages.php',
       ];
       for (const url of endpoints) {
         try {
@@ -702,10 +692,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'delete', id })
           });
-          if (res.ok) break;
+          if (res.ok && (await res.json()).success) {
+            deleted = true;
+            break;
+          }
         } catch (_) {}
       }
-      // Re-fetch from DB to keep state in sync
+      if (!deleted) return false;
       await fetchPageContent();
       setToastMessage('Section deleted from database');
       return true;
@@ -716,15 +709,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const resetDefaultPageContent = async (): Promise<boolean> => {
     try {
+      let reset = false;
       const endpoints = ['/api/pages.php?action=reset_defaults', 'https://ringvia360.com/api/pages.php?action=reset_defaults'];
       for (const url of endpoints) {
         try {
           const res = await fetch(url, { method: 'POST' });
-          if (res.ok) break;
+          if (res.ok && (await res.json()).success) {
+            reset = true;
+            break;
+          }
         } catch (_) {}
       }
-      setSitePages(defaultSitePages);
-      localStorage.setItem('ringvia360_site_pages', JSON.stringify(defaultSitePages));
+      if (!reset) return false;
+      await fetchPageContent();
       setToastMessage('All pages reset to default database structure');
       return true;
     } catch (_) {
@@ -797,12 +794,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Sync all data from server database tables scoped by multi-tenant organization
   const fetchAllDataFromServer = async () => {
+    // Public pages intentionally use bundled demo data only. Never request tenant feeds
+    // until a user is authenticated.
+    if (!currentUser) {
+      setCalls(initialCalls);
+      return;
+    }
     try {
+      const scopedTenantId = currentUser.role === 'super_admin'
+        ? activeTenantId
+        : (currentUser.orgId || activeTenantId);
+      const authToken = localStorage.getItem('ringvia360_auth_token');
+      if (!authToken) return;
       const endpoints = [
-        `/api/calls.php?action=all_data&org_id=${encodeURIComponent(activeTenantId)}`,
-        `https://ringvia360.com/api/calls.php?action=all_data&org_id=${encodeURIComponent(activeTenantId)}`,
-        `/api/calls.php?org_id=${encodeURIComponent(activeTenantId)}`,
-        `https://ringvia360.com/api/calls.php?org_id=${encodeURIComponent(activeTenantId)}`
+        `/api/calls.php?action=all_data&org_id=${encodeURIComponent(scopedTenantId)}`,
+        `https://ringvia360.com/api/calls.php?action=all_data&org_id=${encodeURIComponent(scopedTenantId)}`,
+        `/api/calls.php?org_id=${encodeURIComponent(scopedTenantId)}`,
+        `https://ringvia360.com/api/calls.php?org_id=${encodeURIComponent(scopedTenantId)}`
       ];
       let json: any = null;
       for (const ep of endpoints) {
@@ -810,7 +818,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const res = await fetch(ep, {
             headers: {
               Accept: 'application/json',
-              'X-Tenant-Id': activeTenantId
+              'X-Tenant-Id': scopedTenantId,
+              Authorization: `Bearer ${authToken}`
             },
             cache: 'no-store'
           });
@@ -872,15 +881,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ]
           }));
 
+          const visibleCalls = currentUser.role === 'rep'
+            ? serverCalls.filter(call => call.repName.trim().toLowerCase() === currentUser.name.trim().toLowerCase())
+            : serverCalls;
           const prevIds = new Set(prevCalls.map(c => c.id));
-          const brandNew = serverCalls.filter(c => !prevIds.has(c.id));
+          const brandNew = visibleCalls.filter(c => !prevIds.has(c.id));
           if (brandNew.length > 0 && prevCalls.length > 0) {
             showToast(`📱 New call synced: ${brandNew[0].contactName} (${brandNew[0].direction}) with live recording!`);
           }
 
-          const serverIds = new Set(serverCalls.map(c => c.id));
-          const localOnly = prevCalls.filter(c => !serverIds.has(c.id));
-          return [...localOnly, ...serverCalls];
+          return visibleCalls;
         });
       }
 
@@ -1022,6 +1032,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveTenantId(newTenant);
 
       localStorage.setItem('ringvia360_user', JSON.stringify(u));
+      if (resData.token) localStorage.setItem('ringvia360_auth_token', resData.token);
       if (o) localStorage.setItem('ringvia360_org', JSON.stringify(o));
       else localStorage.removeItem('ringvia360_org');
       localStorage.setItem('ringvia360_active_tenant', newTenant);
@@ -1090,6 +1101,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveTenantId(o.id);
 
       localStorage.setItem('ringvia360_user', JSON.stringify(u));
+      if (resData.token) localStorage.setItem('ringvia360_auth_token', resData.token);
       localStorage.setItem('ringvia360_org', JSON.stringify(o));
       localStorage.setItem('ringvia360_active_tenant', o.id);
 
@@ -1109,6 +1121,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('ringvia360_user');
     localStorage.removeItem('ringvia360_org');
     localStorage.removeItem('ringvia360_active_tenant');
+    localStorage.removeItem('ringvia360_auth_token');
     showToast('Logged out successfully.');
   };
 
@@ -1172,7 +1185,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchPageContent();
     const interval = setInterval(fetchAllDataFromServer, 5000);
     return () => clearInterval(interval);
-  }, [activeTenantId]);
+  }, [activeTenantId, currentUser?.id, currentUser?.orgId, currentUser?.role]);
 
   const simulateNewCall = (callData: Partial<CallLog>) => {
     const newId = `call-${Date.now()}`;
@@ -1705,6 +1718,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearToast,
         sitePages,
         fetchPageContent,
+        pagesLoaded,
         savePageSection,
         deletePageSection,
         resetDefaultPageContent,
