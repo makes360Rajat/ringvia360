@@ -342,8 +342,45 @@ exec_sql($db, "
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ", 'TABLE: site_pages', $log, $errors);
 
+// Self-healing column migrations
+try {
+    $orgCols = array_column($db->query("SHOW COLUMNS FROM `organizations`")->fetchAll(), 'Field');
+    if (!in_array('slug', $orgCols)) {
+        $db->exec("ALTER TABLE `organizations` ADD COLUMN `slug` VARCHAR(128) DEFAULT NULL");
+        $db->exec("UPDATE `organizations` SET `slug` = COALESCE(`subdomain`, LOWER(REPLACE(REPLACE(`name`, ' ', '-'), '.', ''))) WHERE `slug` IS NULL");
+        $log[] = "✅ Added column `slug` to organizations";
+    }
+    if (!in_array('seats', $orgCols)) {
+        $db->exec("ALTER TABLE `organizations` ADD COLUMN `seats` INT DEFAULT 50");
+        $db->exec("UPDATE `organizations` SET `seats` = COALESCE(`max_reps`, 50)");
+        $log[] = "✅ Added column `seats` to organizations";
+    }
+    if (!in_array('monthly_price_inr', $orgCols)) {
+        $db->exec("ALTER TABLE `organizations` ADD COLUMN `monthly_price_inr` DECIMAL(10,2) DEFAULT 14999.00");
+        $db->exec("UPDATE `organizations` SET `monthly_price_inr` = COALESCE(`monthly_fee_inr`, 14999.00)");
+        $log[] = "✅ Added column `monthly_price_inr` to organizations";
+    }
+    if (!in_array('owner_email', $orgCols)) {
+        $db->exec("ALTER TABLE `organizations` ADD COLUMN `owner_email` VARCHAR(255) DEFAULT ''");
+        $db->exec("UPDATE `organizations` SET `owner_email` = COALESCE(`contact_email`, '')");
+        $log[] = "✅ Added column `owner_email` to organizations";
+    }
+} catch (Throwable $e) {
+    $errors[] = "Migrate organizations: " . $e->getMessage();
+}
+
+try {
+    $userCols = array_column($db->query("SHOW COLUMNS FROM `users`")->fetchAll(), 'Field');
+    if (!in_array('last_login', $userCols)) {
+        $db->exec("ALTER TABLE `users` ADD COLUMN `last_login` VARCHAR(64) DEFAULT 'Never'");
+        $log[] = "✅ Added column `last_login` to users";
+    }
+} catch (Throwable $e) {
+    $errors[] = "Migrate users: " . $e->getMessage();
+}
+
 $log[] = '';
-$log[] = '─── All tables created ───';
+$log[] = '─── All tables & columns verified ───';
 $log[] = '';
 
 // ─────────────────────────────────────────────

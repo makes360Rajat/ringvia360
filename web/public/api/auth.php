@@ -60,6 +60,57 @@ try {
                 INDEX (email)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ");
+
+        // Self-healing schema migrations for MySQL: ensure missing columns exist
+        try {
+            $orgCols = array_column($db->query("SHOW COLUMNS FROM organizations")->fetchAll(), 'Field');
+            if (!in_array('slug', $orgCols)) {
+                $db->exec("ALTER TABLE organizations ADD COLUMN slug VARCHAR(128) DEFAULT NULL");
+                $db->exec("UPDATE organizations SET slug = LOWER(REPLACE(REPLACE(name, ' ', '-'), '.', '')) WHERE slug IS NULL");
+            }
+            if (!in_array('seats', $orgCols)) {
+                $db->exec("ALTER TABLE organizations ADD COLUMN seats INT DEFAULT 50");
+            }
+            if (!in_array('monthly_price_inr', $orgCols)) {
+                $db->exec("ALTER TABLE organizations ADD COLUMN monthly_price_inr DECIMAL(10,2) DEFAULT 14999.00");
+            }
+            if (!in_array('owner_email', $orgCols)) {
+                $db->exec("ALTER TABLE organizations ADD COLUMN owner_email VARCHAR(255) DEFAULT ''");
+            }
+
+            $userCols = array_column($db->query("SHOW COLUMNS FROM users")->fetchAll(), 'Field');
+            if (!in_array('last_login', $userCols)) {
+                $db->exec("ALTER TABLE users ADD COLUMN last_login VARCHAR(64) DEFAULT 'Never'");
+            }
+            if (!in_array('org_id', $userCols)) {
+                $db->exec("ALTER TABLE users ADD COLUMN org_id VARCHAR(128) DEFAULT NULL");
+            }
+            if (!in_array('phone', $userCols)) {
+                $db->exec("ALTER TABLE users ADD COLUMN phone VARCHAR(64) DEFAULT ''");
+            }
+            if (!in_array('avatar', $userCols)) {
+                $db->exec("ALTER TABLE users ADD COLUMN avatar VARCHAR(512) DEFAULT ''");
+            }
+            if (!in_array('status', $userCols)) {
+                $db->exec("ALTER TABLE users ADD COLUMN status VARCHAR(32) DEFAULT 'active'");
+            }
+
+            $adminCols = array_column($db->query("SHOW COLUMNS FROM admin_users")->fetchAll(), 'Field');
+            if (!in_array('org_id', $adminCols)) {
+                $db->exec("ALTER TABLE admin_users ADD COLUMN org_id VARCHAR(128) DEFAULT 'org-tcs'");
+            }
+
+            $repCols = array_column($db->query("SHOW COLUMNS FROM sales_reps")->fetchAll(), 'Field');
+            if (!in_array('rank_order', $repCols)) {
+                $db->exec("ALTER TABLE sales_reps ADD COLUMN rank_order INT DEFAULT 1");
+            }
+            if (!in_array('daily_target', $repCols)) {
+                $db->exec("ALTER TABLE sales_reps ADD COLUMN daily_target INT DEFAULT 40");
+            }
+            if (!in_array('org_id', $repCols)) {
+                $db->exec("ALTER TABLE sales_reps ADD COLUMN org_id VARCHAR(128) DEFAULT 'org-tcs'");
+            }
+        } catch (Throwable $e) {}
     } else {
         $db->exec("
             CREATE TABLE IF NOT EXISTS organizations (
@@ -265,12 +316,7 @@ try {
         ");
         foreach ($demoUsers as $usr) {
             $uStmt->execute($usr);
-        // Ensure last_login column exists in users table
-        try {
-            $db->exec($isMysql 
-                ? "ALTER TABLE `users` ADD COLUMN `last_login` VARCHAR(64) DEFAULT 'Never'" 
-                : "ALTER TABLE `users` ADD COLUMN `last_login` TEXT DEFAULT 'Never'");
-        } catch (Throwable $e) {}
+        }
     }
 
     $rawInput = file_get_contents('php://input');
@@ -397,13 +443,23 @@ try {
         $slug = trim($slug, '-');
         $orgId = 'org-' . $slug . '-' . substr(bin2hex(random_bytes(3)), 0, 5);
 
-        $planStmt = $db->prepare("SELECT * FROM subscription_plans WHERE name = :name AND status = 'active' LIMIT 1");
-        $planStmt->execute([':name' => $plan]);
+        $plan = $body['plan'] ?? 'Pro Growth';
+        $planLower = strtolower(trim($plan));
+        $planStmt = $db->prepare("SELECT * FROM subscription_plans WHERE LOWER(name) = :name OR LOWER(id) = :id OR LOWER(name) LIKE :like LIMIT 1");
+        $planStmt->execute([
+            ':name' => $planLower,
+            ':id' => $planLower,
+            ':like' => '%' . $planLower . '%'
+        ]);
         $selectedPlan = $planStmt->fetch();
         if (!$selectedPlan) {
-            http_response_code(400);
-            echo json_encode(['success' => false, 'error' => 'Selected subscription plan is unavailable']);
-            exit();
+            $selectedPlan = $db->query("SELECT * FROM subscription_plans WHERE id = 'pro' LIMIT 1")->fetch()
+                ?: [
+                    'id' => 'pro',
+                    'name' => 'Pro Growth',
+                    'seat_limit' => 50,
+                    'monthly_price_inr' => 14999.00
+                ];
         }
 
         // 1. Provision new Organization with its purchased seat allocation.

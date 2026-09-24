@@ -1060,14 +1060,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          if (res.ok) {
-            const data = await res.json();
-            if (data && data.success) {
-              resData = data;
-              break;
-            }
+          const data = await res.json().catch(() => null);
+          if (data && data.success) {
+            resData = data;
+            break;
+          } else if (data && data.error) {
+            showToast(`Registration error: ${data.error}`);
+            throw new Error(data.error);
           }
-        } catch (_) {}
+        } catch (err: any) {
+          if (err.message && !err.message.includes('fetch')) {
+            throw err;
+          }
+        }
       }
 
       if (!resData) {
