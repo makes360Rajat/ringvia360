@@ -13,7 +13,8 @@ import {
   KeyRound,
   Crown,
   Briefcase,
-  AlertCircle
+  AlertCircle,
+  UserPlus
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -33,6 +34,7 @@ export default function Login() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Signup form state
+  const [signupRole, setSignupRole] = useState<'org_admin' | 'super_admin'>('org_admin');
   const [companyName, setCompanyName] = useState('');
   const [adminName, setAdminName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
@@ -70,15 +72,20 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       const success = await signup({
-        companyName,
+        companyName: signupRole === 'super_admin' ? 'RingVia360 Platform' : companyName,
         name: adminName,
         email: signupEmail,
         password: signupPassword,
         phone: signupPhone,
-        plan: selectedPlan
+        plan: signupRole === 'super_admin' ? 'enterprise' : selectedPlan,
+        role: signupRole
       });
       if (success) {
-        navigate('/admin');
+        if (signupRole === 'super_admin') {
+          navigate('/super-admin');
+        } else {
+          navigate('/admin');
+        }
       } else {
         setErrorMessage('Signup failed. An account with this email may already exist.');
       }
@@ -337,7 +344,7 @@ export default function Login() {
                 transition: 'all 0.2s ease'
               }}
             >
-              Create New Company Tenant
+              Sign Up (Admin / Super Admin)
             </button>
           </div>
 
@@ -432,35 +439,105 @@ export default function Login() {
             </form>
           ) : (
             <form onSubmit={handleSignupSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Account Type / Role Toggle */}
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
-                  Company / Organization Name
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.35rem' }}>
+                  Select Account Role / Privilege Level
                 </label>
-                <div style={{ position: 'relative' }}>
-                  <Building size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Reliance Retail Digital"
-                    value={companyName}
-                    onChange={e => setCompanyName(e.target.value)}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.6rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSignupRole('org_admin')}
                     style={{
-                      width: '100%',
-                      padding: '0.65rem 0.85rem 0.65rem 2.4rem',
+                      padding: '0.65rem 0.75rem',
                       borderRadius: '8px',
-                      border: '1px solid var(--border-glass)',
-                      background: 'var(--bg-surface-elevated)',
-                      color: 'var(--text-main)',
-                      fontSize: '0.85rem'
+                      border: signupRole === 'org_admin' ? '1px solid var(--primary)' : '1px solid var(--border-glass)',
+                      background: signupRole === 'org_admin' ? 'rgba(99, 102, 241, 0.15)' : 'var(--bg-surface-elevated)',
+                      color: signupRole === 'org_admin' ? '#fff' : 'var(--text-dim)',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.4rem',
+                      transition: 'all 0.2s ease'
                     }}
-                  />
+                  >
+                    <Building size={15} color="var(--primary)" />
+                    <span>Company Admin</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSignupRole('super_admin')}
+                    style={{
+                      padding: '0.65rem 0.75rem',
+                      borderRadius: '8px',
+                      border: signupRole === 'super_admin' ? '1px solid #f59e0b' : '1px solid var(--border-glass)',
+                      background: signupRole === 'super_admin' ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-surface-elevated)',
+                      color: signupRole === 'super_admin' ? '#f59e0b' : 'var(--text-dim)',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.4rem',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <Crown size={15} color="#f59e0b" />
+                    <span>Super Admin</span>
+                  </button>
                 </div>
               </div>
+
+              {signupRole === 'super_admin' ? (
+                <div style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '8px',
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                  color: '#f59e0b',
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <Crown size={16} />
+                  <span>Sovereign Platform Fleet — Grants oversight across all tenant organizations & license tiers.</span>
+                </div>
+              ) : (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
+                    Company / Organization Name
+                  </label>
+                  <div style={{ position: 'relative' }}>
+                    <Building size={16} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Reliance Retail Digital"
+                      value={companyName}
+                      onChange={e => setCompanyName(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.85rem 0.65rem 2.4rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-glass)',
+                        background: 'var(--bg-surface-elevated)',
+                        color: 'var(--text-main)',
+                        fontSize: '0.85rem'
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
-                    Admin Name
+                    {signupRole === 'super_admin' ? 'Super Admin Name' : 'Admin Name'}
                   </label>
                   <input
                     type="text"
@@ -504,12 +581,12 @@ export default function Login() {
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
-                  Admin Work Email
+                  {signupRole === 'super_admin' ? 'Super Admin Work Email' : 'Admin Work Email'}
                 </label>
                 <input
                   type="email"
                   required
-                  placeholder="admin@reliance.com"
+                  placeholder={signupRole === 'super_admin' ? 'director@ringvia360.com' : 'admin@company.com'}
                   value={signupEmail}
                   onChange={e => setSignupEmail(e.target.value)}
                   style={{
@@ -546,29 +623,31 @@ export default function Login() {
                 />
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
-                  Subscription Tier
-                </label>
-                <select
-                  value={selectedPlan}
-                  onChange={e => setSelectedPlan(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.65rem 0.85rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-glass)',
-                    background: 'var(--bg-surface-elevated)',
-                    color: 'var(--text-main)',
-                    fontSize: '0.85rem'
-                  }}
-                >
-                  <option value="Starter">Starter — 10 members • ₹4,999/mo</option>
-                  <option value="Growth">Growth — 20 members • ₹8,999/mo</option>
-                  <option value="Pro Growth">Pro Growth — 50 members • ₹14,999/mo (Recommended)</option>
-                  <option value="Enterprise Plus">Enterprise Plus — 120 members • ₹45,000/mo</option>
-                </select>
-              </div>
+              {signupRole === 'org_admin' && (
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '0.3rem' }}>
+                    Subscription Tier
+                  </label>
+                  <select
+                    value={selectedPlan}
+                    onChange={e => setSelectedPlan(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-glass)',
+                      background: 'var(--bg-surface-elevated)',
+                      color: 'var(--text-main)',
+                      fontSize: '0.85rem'
+                    }}
+                  >
+                    <option value="Starter">Starter — 10 members • ₹4,999/mo</option>
+                    <option value="Growth">Growth — 20 members • ₹8,999/mo</option>
+                    <option value="Pro Growth">Pro Growth — 50 members • ₹14,999/mo (Recommended)</option>
+                    <option value="Enterprise Plus">Enterprise Plus — 120 members • ₹45,000/mo</option>
+                  </select>
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -582,11 +661,16 @@ export default function Login() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '0.5rem'
+                  gap: '0.5rem',
+                  background: signupRole === 'super_admin' ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : undefined
                 }}
               >
-                <Sparkles size={18} />
-                <span>{isSubmitting ? 'Provisioning Tenant...' : 'Deploy Isolated Company Tenant'}</span>
+                {signupRole === 'super_admin' ? <Crown size={18} /> : <UserPlus size={18} />}
+                <span>
+                  {isSubmitting
+                    ? 'Provisioning Account...'
+                    : (signupRole === 'super_admin' ? 'Create Super Admin Account' : 'Deploy Isolated Company Tenant')}
+                </span>
               </button>
             </form>
           )}

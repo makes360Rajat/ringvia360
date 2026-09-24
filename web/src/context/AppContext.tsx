@@ -44,7 +44,7 @@ interface AppContextType {
   currentOrg: TenantOrganization | null;
   activeTenantId: string;
   login: (email: string, pass: string) => Promise<boolean>;
-  signup: (payload: { companyName: string; name: string; email: string; password: string; phone?: string; plan?: string }) => Promise<boolean>;
+  signup: (payload: { companyName: string; name: string; email: string; password: string; phone?: string; plan?: string; role?: string }) => Promise<boolean>;
   logout: () => void;
   switchTenant: (orgId: string) => Promise<void>;
   superAdminOverview: SuperAdminOverview | null;
@@ -1046,7 +1046,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const signup = async (payload: { companyName: string; name: string; email: string; password: string; phone?: string; plan?: string }): Promise<boolean> => {
+  const signup = async (payload: { companyName: string; name: string; email: string; password: string; phone?: string; plan?: string; role?: string }): Promise<boolean> => {
     try {
       const endpoints = [
         '/api/auth.php?action=signup',
@@ -1077,18 +1077,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       if (!resData) {
         // High-availability fallback
+        const isSuper = payload.role === 'super_admin';
         const slug = payload.companyName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
-        const orgId = 'org-' + Date.now();
+        const orgId = isSuper ? 'org-ringvia360' : ('org-' + Date.now());
         resData = {
           user: {
             id: 'user-' + Date.now(),
             name: payload.name,
             email: payload.email,
-            role: 'org_admin',
+            role: isSuper ? 'super_admin' : 'org_admin',
             phone: payload.phone || '+91 98200 12345',
             orgId: orgId
           },
-          organization: {
+          organization: isSuper ? {
+            id: 'org-ringvia360',
+            name: 'RingVia360 (Platform)',
+            slug: 'platform',
+            plan: 'enterprise',
+            seats: 9999,
+            status: 'active'
+          } : {
             id: orgId,
             name: payload.companyName,
             slug: slug,
