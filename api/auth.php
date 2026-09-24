@@ -232,17 +232,23 @@ try {
         ");
         foreach ($demoUsers as $usr) {
             $uStmt->execute($usr);
-        }
+        // Ensure last_login column exists in users table
+        try {
+            $db->exec($isMysql 
+                ? "ALTER TABLE `users` ADD COLUMN `last_login` VARCHAR(64) DEFAULT 'Never'" 
+                : "ALTER TABLE `users` ADD COLUMN `last_login` TEXT DEFAULT 'Never'");
+        } catch (Throwable $e) {}
     }
 
-    $action = $_GET['action'] ?? '';
+    $rawInput = file_get_contents('php://input');
+    $body = json_decode($rawInput, true) ?: [];
+    $action = $_GET['action'] ?? ($body['action'] ?? '');
     $method = $_SERVER['REQUEST_METHOD'];
 
     // =========================================================
     // ACTION: LOGIN
     // =========================================================
     if ($action === 'login' && $method === 'POST') {
-        $body = json_decode(file_get_contents('php://input'), true) ?: [];
         $email = trim(strtolower($body['email'] ?? ''));
         $password = (string) ($body['password'] ?? '');
 
@@ -283,11 +289,13 @@ try {
             $org = $orgStmt->fetch();
         }
 
-        // Update last login
-        $db->prepare("UPDATE users SET last_login = :ts WHERE id = :id")->execute([
-            ':ts' => date('Y-m-d H:i:s'),
-            ':id' => $user['id']
-        ]);
+        // Update last login (graceful)
+        try {
+            $db->prepare("UPDATE users SET last_login = :ts WHERE id = :id")->execute([
+                ':ts' => date('Y-m-d H:i:s'),
+                ':id' => $user['id']
+            ]);
+        } catch (Throwable $e) {}
 
         $tokenPayload = [
             'userId' => $user['id'],
