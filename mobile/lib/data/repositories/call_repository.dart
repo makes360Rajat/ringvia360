@@ -1,13 +1,22 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/call_record.dart';
 import '../models/lead_contact.dart';
 import '../services/cloud_sync_service.dart';
 
 class CallRepository {
   final CloudSyncService _cloudSyncService;
+  static const String _localStorageKey = 'ringvia360_saved_calls_v2';
+  final StreamController<List<CallRecord>> _callsStreamController =
+      StreamController<List<CallRecord>>.broadcast();
+
+  Stream<List<CallRecord>> get callsStream => _callsStreamController.stream;
 
   CallRepository({required CloudSyncService cloudSyncService})
-      : _cloudSyncService = cloudSyncService;
+      : _cloudSyncService = cloudSyncService {
+    _initLocalStorage();
+  }
 
   final List<CallRecord> _cachedCalls = [
     CallRecord(
@@ -154,7 +163,41 @@ class CallRepository {
     ),
   ];
 
+  Future<void> _initLocalStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final storedJson = prefs.getString(_localStorageKey);
+      if (storedJson != null && storedJson.isNotEmpty) {
+        final List<dynamic> decoded = jsonDecode(storedJson);
+        final List<CallRecord> storedCalls = [];
+        for (final item in decoded) {
+          try {
+            storedCalls.add(CallRecord.fromJson(Map<String, dynamic>.from(item)));
+          } catch (_) {}
+        }
+        if (storedCalls.isNotEmpty) {
+          final storedIds = storedCalls.map((c) => c.id).toSet();
+          final uniqueCached = _cachedCalls.where((c) => !storedIds.contains(c.id)).toList();
+          _cachedCalls.clear();
+          _cachedCalls.addAll([...storedCalls, ...uniqueCached]);
+          _cachedCalls.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+          _callsStreamController.add(List.unmodifiable(_cachedCalls));
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _saveToLocalStorage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final listMap = _cachedCalls.map((c) => c.toJson()).toList();
+      await prefs.setString(_localStorageKey, jsonEncode(listMap));
+    } catch (_) {}
+  }
+
   Future<List<CallRecord>> getCalls() async {
+    await _initLocalStorage();
+
     try {
       final cloudCalls = await _cloudSyncService.fetchCallsFromCloud();
       if (cloudCalls.isNotEmpty) {
@@ -163,6 +206,8 @@ class CallRepository {
         _cachedCalls.clear();
         _cachedCalls.addAll([...localOnly, ...cloudCalls]);
         _cachedCalls.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        await _saveToLocalStorage();
+        _callsStreamController.add(List.unmodifiable(_cachedCalls));
       }
     } catch (_) {}
     return List.unmodifiable(_cachedCalls);
@@ -174,9 +219,18 @@ class CallRepository {
           ? call.recordingPath
           : 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
     );
+
+    // 1. Immediately insert into local memory list
+    _cachedCalls.removeWhere((c) => c.id == callWithRecording.id);
     _cachedCalls.insert(0, callWithRecording);
 
-    // Auto sync to cloud
+    // 2. Persist to local database (SharedPreferences)
+    await _saveToLocalStorage();
+
+    // 3. Emit real-time stream event to update Feed View
+    _callsStreamController.add(List.unmodifiable(_cachedCalls));
+
+    // 4. Background push to cloud API
     await _syncCall(callWithRecording);
   }
 
@@ -189,6 +243,8 @@ class CallRepository {
           _cachedCalls[index] = _cachedCalls[index].copyWith(
             crmSyncStatus: CrmSyncStatus.synced,
           );
+          await _saveToLocalStorage();
+          _callsStreamController.add(List.unmodifiable(_cachedCalls));
         }
       }
     } catch (_) {}

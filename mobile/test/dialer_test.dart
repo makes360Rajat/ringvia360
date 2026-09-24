@@ -60,6 +60,7 @@ void main() {
 
   test('Call flow triggers active call and post-call wrap up', () async {
     expect(dialerViewModel.isInCall, isFalse);
+    final countBefore = (await callRepository.getCalls()).length;
 
     // Start call
     dialerViewModel.startCall();
@@ -71,7 +72,6 @@ void main() {
     expect(dialerViewModel.wrapUpCall, isNotNull);
 
     // Submit wrap-up notes
-    final initialCount = (await callRepository.getCalls()).length;
     await dialerViewModel.submitWrapUp(
       outcome: 'Demo Completed - Contract Requested',
       notes: 'Test call completed successfully',
@@ -82,7 +82,7 @@ void main() {
 
     expect(dialerViewModel.wrapUpCall, isNull);
     final updatedCalls = await callRepository.getCalls();
-    expect(updatedCalls.length, equals(initialCount + 1));
+    expect(updatedCalls.length, equals(countBefore + 1));
     expect(updatedCalls.any((c) => c.outcome == 'Demo Completed - Contract Requested'), isTrue);
   });
 

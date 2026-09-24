@@ -1,13 +1,19 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../data/models/call_record.dart';
 import '../../data/repositories/call_repository.dart';
 
 class CallFeedViewModel extends ChangeNotifier {
   final CallRepository _callRepository;
+  StreamSubscription<List<CallRecord>>? _callsSub;
 
   CallFeedViewModel({required CallRepository callRepository})
       : _callRepository = callRepository {
     loadCalls();
+    _callsSub = _callRepository.callsStream.listen((updatedCalls) {
+      _allCalls = updatedCalls;
+      notifyListeners();
+    });
   }
 
   List<CallRecord> _allCalls = [];
@@ -64,5 +70,11 @@ class CallFeedViewModel extends ChangeNotifier {
       _isPlaying = true;
     }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _callsSub?.cancel();
+    super.dispose();
   }
 }

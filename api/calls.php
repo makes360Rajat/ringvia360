@@ -147,7 +147,7 @@ try {
                 'crm_type' => 'RingVia360',
                 'sim_slot' => 'SIM 1 (Corporate)',
                 'is_encrypted' => 1,
-                'recording_url' => '',
+                'recording_url' => 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
                 'waveform' => json_encode([10, 10, 10, 10, 10, 10, 10, 10, 10, 10]),
                 'transcript' => json_encode([]),
                 'key_action_items' => json_encode([

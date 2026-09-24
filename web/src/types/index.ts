@@ -32,6 +32,7 @@ export interface CallLog {
   tags: string[];
   keyActionItems?: string[];
   isEncrypted: boolean;
+  simSlot?: string;
 }
 
 export interface WhatsAppLog {

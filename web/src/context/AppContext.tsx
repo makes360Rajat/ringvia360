@@ -536,13 +536,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sync calls from server database tables
   const fetchCallsFromServer = async () => {
     try {
-      const res = await fetch('https://ringvia360.com/api/calls.php', {
-        headers: { Accept: 'application/json' },
-        cache: 'no-store'
-      });
-      if (!res.ok) return;
-      const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      const endpoints = [
+        '/api/calls.php',
+        'https://ringvia360.com/api/calls.php'
+      ];
+      let json: any = null;
+      for (const ep of endpoints) {
+        try {
+          const res = await fetch(ep, {
+            headers: { Accept: 'application/json' },
+            cache: 'no-store'
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.success && Array.isArray(data.data) && data.data.length > 0) {
+              json = data;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+      if (!json || !Array.isArray(json.data) || json.data.length === 0) return;
         setCalls(prevCalls => {
           const serverCalls: CallLog[] = json.data.map((c: any) => ({
             id: String(c.id),
@@ -594,7 +608,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const localOnly = prevCalls.filter(c => !serverIds.has(c.id));
           return [...localOnly, ...serverCalls];
         });
-      }
     } catch (_) {}
   };
 

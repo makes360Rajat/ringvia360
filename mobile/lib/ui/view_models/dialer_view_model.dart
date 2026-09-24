@@ -326,8 +326,7 @@ class DialerViewModel extends ChangeNotifier {
     final recordingResult = _audioRecorderService.stopRecording(callId: callId, durationSeconds: duration);
     _currentCallId = null;
 
-    // Prompt Post-Call Wrap-up tracker for all calls
-    _wrapUpCall = CallRecord(
+    final initialCallRecord = CallRecord(
       id: callId,
       contactName: _activeContactName.isNotEmpty ? _activeContactName : number,
       phoneNumber: event.phoneNumber.isNotEmpty ? event.phoneNumber : number,
@@ -354,6 +353,12 @@ class DialerViewModel extends ChangeNotifier {
         'Provision trial access in CRM'
       ],
     );
+
+    // 1. Immediately persist to local DB & stream to feed when recording stops
+    _callRepository.addCall(initialCallRecord);
+
+    // 2. Prompt Post-Call Wrap-up tracker for user edits if desired
+    _wrapUpCall = initialCallRecord;
 
     notifyListeners();
   }

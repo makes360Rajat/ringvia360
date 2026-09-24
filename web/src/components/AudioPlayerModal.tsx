@@ -23,36 +23,57 @@ export const AudioPlayerModal: React.FC = () => {
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeSpeakerIndex, setActiveSpeakerIndex] = useState(0);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const oscillatorRef = useRef<OscillatorNode | null>(null);
-  const gainRef = useRef<GainNode | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    // Create audio element
+    const audio = new Audio();
+    audioRef.current = audio;
+
+    const onTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+
+    const onEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    const onError = () => {
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener('timeupdate', onTimeUpdate);
+    audio.addEventListener('ended', onEnded);
+    audio.addEventListener('error', onError);
+
+    return () => {
+      audio.removeEventListener('timeupdate', onTimeUpdate);
+      audio.removeEventListener('ended', onEnded);
+      audio.removeEventListener('error', onError);
+      audio.pause();
+      audio.src = '';
+    };
+  }, []);
 
   useEffect(() => {
     // Reset to beginning when call changes
     setCurrentTime(0);
     setIsPlaying(false);
-    stopAudioPlayback();
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      if (activeAudioCall) {
+        audioRef.current.src = activeAudioCall.recordingUrl || 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+      }
+    }
   }, [activeAudioCall?.id]);
 
   useEffect(() => {
-    let interval: any = null;
-    if (isPlaying && activeAudioCall) {
-      interval = setInterval(() => {
-        setCurrentTime(prev => {
-          const next = prev + 1;
-          if (next >= activeAudioCall.duration) {
-            setIsPlaying(false);
-            stopAudioPlayback();
-            return activeAudioCall.duration;
-          }
-          return next;
-        });
-      }, 1000 / playbackSpeed);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackSpeed;
     }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlaying, playbackSpeed, activeAudioCall?.duration]);
+  }, [playbackSpeed]);
 
   useEffect(() => {
     // Sync active speaker index with current timestamp
@@ -67,125 +88,47 @@ export const AudioPlayerModal: React.FC = () => {
     }
   }, [currentTime, activeAudioCall]);
 
-  const startAudioPlayback = () => {
-    if (!activeAudioCall) return;
-    try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        if (!audioCtxRef.current) {
-          audioCtxRef.current = new AudioCtx();
-        }
-        if (audioCtxRef.current.state === 'suspended') {
-          audioCtxRef.current.resume();
-        }
-        
-        // Gentle telephone ambient tone to simulate phone line
-        const osc = audioCtxRef.current.createOscillator();
-        const gain = audioCtxRef.current.createGain();
-        const filter = audioCtxRef.current.createBiquadFilter();
-        
-        filter.type = 'bandpass';
-        filter.frequency.value = 1000;
-        filter.Q.value = 1.2;
-        
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(320, audioCtxRef.current.currentTime);
-        gain.gain.setValueAtTime(0.015, audioCtxRef.current.currentTime);
-        
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(audioCtxRef.current.destination);
-        
-        osc.start();
-        oscillatorRef.current = osc;
-        gainRef.current = gain;
-      }
-    } catch (_) {}
+  const togglePlay = () => {
+    if (!audioRef.current || !activeAudioCall) return;
 
-    // Spoken dialogue playback via SpeechSynthesis
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const dialogue = activeAudioCall.transcript && activeAudioCall.transcript.length > 0
-        ? activeAudioCall.transcript.map(t => `${t.speaker} says: ${t.text}`).join('. ')
-        : `Recorded call conversation with ${activeAudioCall.contactName}. Details: ${activeAudioCall.notes}`;
-      
-      const utter = new SpeechSynthesisUtterance(dialogue);
-      utter.rate = playbackSpeed;
-      utter.onend = () => {
-        setIsPlaying(false);
-        stopAudioPlayback();
-      };
-      utter.onerror = () => {
-        stopAudioPlayback();
-      };
-      window.speechSynthesis.speak(utter);
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      if (!audioRef.current.src || audioRef.current.src === '' || audioRef.current.src === window.location.href) {
+        audioRef.current.src = activeAudioCall.recordingUrl || 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+      }
+      audioRef.current.playbackRate = playbackSpeed;
+      audioRef.current.play()
+        .then(() => setIsPlaying(true))
+        .catch(() => setIsPlaying(true));
     }
   };
 
   const stopAudioPlayback = () => {
-    if (oscillatorRef.current) {
-      try {
-        oscillatorRef.current.stop();
-        oscillatorRef.current.disconnect();
-      } catch (_) {}
-      oscillatorRef.current = null;
+    if (audioRef.current) {
+      audioRef.current.pause();
     }
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
+    setIsPlaying(false);
   };
 
-  const togglePlay = () => {
-    if (isPlaying) {
-      setIsPlaying(false);
-      stopAudioPlayback();
-    } else {
-      setIsPlaying(true);
-      startAudioPlayback();
+  const seekAudio = (targetTime: number) => {
+    const clamped = Math.max(0, Math.min(targetTime, activeAudioCall?.duration || 300));
+    setCurrentTime(clamped);
+    if (audioRef.current) {
+      audioRef.current.currentTime = clamped;
     }
   };
 
   const downloadWavRecording = () => {
     if (!activeAudioCall) return;
-    const sampleRate = 8000;
-    const durationSec = Math.max(10, Math.min(activeAudioCall.duration || 30, 120));
-    const numSamples = sampleRate * durationSec;
-    const buffer = new ArrayBuffer(44 + numSamples * 2);
-    const view = new DataView(buffer);
-
-    const writeString = (offset: number, str: string) => {
-      for (let i = 0; i < str.length; i++) {
-        view.setUint8(offset + i, str.charCodeAt(i));
-      }
-    };
-    writeString(0, 'RIFF');
-    view.setUint32(4, 36 + numSamples * 2, true);
-    writeString(8, 'WAVE');
-    writeString(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true); // PCM
-    view.setUint16(22, 1, true); // mono
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, sampleRate * 2, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    writeString(36, 'data');
-    view.setUint32(40, numSamples * 2, true);
-
-    for (let i = 0; i < numSamples; i++) {
-      const t = i / sampleRate;
-      const s = Math.sin(2 * Math.PI * 440 * t) * 0.25 * Math.sin(2 * Math.PI * 2 * t);
-      const sample = Math.max(-1, Math.min(1, s)) * 32767;
-      view.setInt16(44 + i * 2, sample, true);
-    }
-
-    const blob = new Blob([view], { type: 'audio/wav' });
-    const url = URL.createObjectURL(blob);
+    const url = activeAudioCall.recordingUrl || 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
     const a = document.createElement('a');
     a.href = url;
-    a.download = `recording-${activeAudioCall.id}-${activeAudioCall.contactName.replace(/\s+/g, '_')}.wav`;
+    a.download = `RingVia360_${activeAudioCall.contactName.replace(/\s+/g, '_')}_${activeAudioCall.id}.mp3`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   };
 
   if (!activeAudioCall) return null;
@@ -264,7 +207,7 @@ export const AudioPlayerModal: React.FC = () => {
             </button>
             <button
               onClick={() => {
-                stopAudioPlayback();
+                if (audioRef.current) audioRef.current.pause();
                 setActiveAudioCall(null);
               }}
               className="btn-ghost"
@@ -287,7 +230,7 @@ export const AudioPlayerModal: React.FC = () => {
               const rect = e.currentTarget.getBoundingClientRect();
               const clickX = e.clientX - rect.left;
               const ratio = Math.max(0, Math.min(1, clickX / rect.width));
-              setCurrentTime(Math.round(ratio * activeAudioCall.duration));
+              seekAudio(Math.round(ratio * (activeAudioCall.duration || 120)));
             }}
             style={{
               display: 'flex',
@@ -340,7 +283,7 @@ export const AudioPlayerModal: React.FC = () => {
               </button>
 
               <button
-                onClick={() => setCurrentTime(Math.max(0, currentTime - 10))}
+                onClick={() => seekAudio(currentTime - 10)}
                 className="btn-ghost"
                 style={{ padding: '0.45rem', borderRadius: '50%', cursor: 'pointer' }}
                 title="Rewind 10 seconds"
@@ -349,7 +292,7 @@ export const AudioPlayerModal: React.FC = () => {
               </button>
 
               <button
-                onClick={() => setCurrentTime(Math.min(activeAudioCall.duration, currentTime + 10))}
+                onClick={() => seekAudio(currentTime + 10)}
                 className="btn-ghost"
                 style={{ padding: '0.45rem', borderRadius: '50%', cursor: 'pointer' }}
                 title="Skip forward 10 seconds"
