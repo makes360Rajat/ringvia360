@@ -1181,6 +1181,11 @@ try {
             $params[':org_id'] = $tenantId;
         }
 
+        if (!empty($_GET['rep_id'])) {
+            $whereClauses[] = "rep_id = :rep_id";
+            $params[':rep_id'] = $_GET['rep_id'];
+        }
+
         if (!empty($_GET['direction']) && $_GET['direction'] !== 'all') {
             $whereClauses[] = "direction = :direction";
             $params[':direction'] = $_GET['direction'];

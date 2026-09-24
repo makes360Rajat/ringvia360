@@ -201,10 +201,8 @@ class CallRepository {
     try {
       final cloudCalls = await _cloudSyncService.fetchCallsFromCloud();
       if (cloudCalls.isNotEmpty) {
-        final cloudIds = cloudCalls.map((c) => c.id).toSet();
-        final localOnly = _cachedCalls.where((c) => !cloudIds.contains(c.id)).toList();
         _cachedCalls.clear();
-        _cachedCalls.addAll([...localOnly, ...cloudCalls]);
+        _cachedCalls.addAll(cloudCalls);
         _cachedCalls.sort((a, b) => b.timestamp.compareTo(a.timestamp));
         await _saveToLocalStorage();
         _callsStreamController.add(List.unmodifiable(_cachedCalls));

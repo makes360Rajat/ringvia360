@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/data/services/cloud_sync_service.dart';
 import 'package:mobile/data/services/telephony_service.dart';
@@ -6,6 +8,7 @@ import 'package:mobile/ui/view_models/dialer_view_model.dart';
 import 'package:mobile/data/models/call_record.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   group('Dialer & Telephony Call Lifecycle Tests', () {
     late CloudSyncService cloudSyncService;
     late TelephonyService telephonyService;
@@ -13,6 +16,21 @@ void main() {
     late DialerViewModel dialerViewModel;
 
   setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('com.llfbandit.record/messages'), (call) async {
+      if (call.method == 'hasPermission') return true;
+      if (call.method == 'create') return 'rec_1';
+      if (call.method == 'start') return null;
+      if (call.method == 'stop') return '/mock/audio.m4a';
+      if (call.method == 'dispose') return null;
+      return null;
+    });
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('plugins.flutter.io/path_provider'), (call) async {
+      return Directory.systemTemp.path;
+    });
+
     cloudSyncService = CloudSyncService();
     telephonyService = TelephonyService();
     callRepository = CallRepository(cloudSyncService: cloudSyncService);
@@ -67,7 +85,7 @@ void main() {
     expect(dialerViewModel.isInCall, isTrue);
 
     // End call
-    dialerViewModel.endCall();
+    await dialerViewModel.endCall();
     expect(dialerViewModel.isInCall, isFalse);
     expect(dialerViewModel.wrapUpCall, isNotNull);
 
@@ -102,7 +120,7 @@ void main() {
     expect(dialerViewModel.isInCall, isTrue);
 
     // End answered inbound call
-    dialerViewModel.endCall();
+    await dialerViewModel.endCall();
     expect(dialerViewModel.isInCall, isFalse);
     expect(dialerViewModel.wrapUpCall, isNotNull);
     expect(dialerViewModel.wrapUpCall!.direction, equals(CallDirection.inbound));

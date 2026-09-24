@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/call_record.dart';
+import '../../data/services/auth_pairing_service.dart';
 import '../view_models/call_feed_view_model.dart';
 
 class ActivityFeedView extends StatelessWidget {
@@ -18,11 +19,32 @@ class ActivityFeedView extends StatelessWidget {
   Widget build(BuildContext context) {
     final viewModel = context.watch<CallFeedViewModel>();
     final calls = viewModel.filteredCalls;
+    final auth = context.watch<AuthPairingService>();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Activity Feed'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Activity Feed', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+            Text(
+              '${auth.orgName} • ${auth.privatizeToMeOnly ? "Private: My Calls" : "Company Feed"}',
+              style: const TextStyle(fontSize: 11, color: AppColors.accentCyan, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
         actions: [
+          IconButton(
+            icon: Icon(
+              auth.privatizeToMeOnly ? Icons.lock : Icons.group,
+              color: auth.privatizeToMeOnly ? AppColors.accentCyan : AppColors.textMuted,
+            ),
+            tooltip: auth.privatizeToMeOnly ? 'Switch to Company Team Feed' : 'Privatize to My Calls Only',
+            onPressed: () async {
+              await auth.setPrivatizeToMeOnly(!auth.privatizeToMeOnly);
+              viewModel.loadCalls();
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.refresh, color: AppColors.primary),
             onPressed: viewModel.loadCalls,

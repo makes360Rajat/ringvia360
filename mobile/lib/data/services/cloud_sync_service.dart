@@ -22,10 +22,16 @@ class CloudSyncResult {
 class CloudSyncService {
   final String serverUrl;
   final String orgId;
+  final String repId;
+  final String repName;
+  final bool privatizeToMeOnly;
 
   CloudSyncService({
     this.serverUrl = 'https://ringvia360.com/api/calls.php',
     this.orgId = 'org-tcs',
+    this.repId = 'rep-1',
+    this.repName = 'Sneha Kapoor (RingVia360)',
+    this.privatizeToMeOnly = false,
   });
 
   Future<String?> uploadAudioFile(String localPath, String callId, {String? targetOrgId}) async {
@@ -89,9 +95,9 @@ class CloudSyncService {
         'duration': call.durationSeconds,
         'durationSeconds': call.durationSeconds,
         'timestamp': 'Just now',
-        'repName': 'Rajesh Kumar (RingVia360)',
+        'repName': repName,
         'repAvatar': 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-        'repId': 'rep-mobile',
+        'repId': repId,
         'outcome': call.outcome,
         'notes': call.notes,
         'sentiment': sentimentStr,
@@ -155,12 +161,17 @@ class CloudSyncService {
     );
   }
 
-  Future<List<CallRecord>> fetchCallsFromCloud({String? targetOrgId}) async {
+  Future<List<CallRecord>> fetchCallsFromCloud({String? targetOrgId, String? targetRepId}) async {
     final currentOrgId = targetOrgId ?? orgId;
+    final currentRepId = targetRepId ?? (privatizeToMeOnly ? repId : null);
     try {
       final sep = serverUrl.contains('?') ? '&' : '?';
+      var urlStr = '$serverUrl${sep}org_id=$currentOrgId';
+      if (currentRepId != null && currentRepId.isNotEmpty) {
+        urlStr += '&rep_id=$currentRepId';
+      }
       final response = await http.get(
-        Uri.parse('$serverUrl${sep}org_id=$currentOrgId'),
+        Uri.parse(urlStr),
         headers: {
           'Accept': 'application/json',
           'X-Tenant-Id': currentOrgId,

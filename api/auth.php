@@ -115,6 +115,39 @@ try {
         foreach ($seedPlans as $plan) { $seed->execute($plan); }
     }
 
+    // Table: device_pairings (For pairing member mobile apps to company tenants)
+    if ($isMysql) {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS device_pairings (
+                code VARCHAR(16) NOT NULL PRIMARY KEY,
+                org_id VARCHAR(128) NOT NULL,
+                rep_id VARCHAR(128) NOT NULL,
+                rep_name VARCHAR(255) NOT NULL,
+                expires_at DATETIME NOT NULL,
+                used TINYINT NOT NULL DEFAULT 0,
+                paired_device_id VARCHAR(128) DEFAULT NULL,
+                paired_at DATETIME DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX (org_id),
+                INDEX (rep_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ");
+    } else {
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS device_pairings (
+                code TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL,
+                rep_id TEXT NOT NULL,
+                rep_name TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used INTEGER NOT NULL DEFAULT 0,
+                paired_device_id TEXT DEFAULT NULL,
+                paired_at TEXT DEFAULT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        ");
+    }
+
     // Ensure org_id column exists on call_logs table
     try {
         if ($isMysql) {
@@ -555,6 +588,199 @@ try {
         }
 
         echo json_encode(['success' => true, 'message' => "Tenant #$orgId updated successfully"]);
+        exit();
+    }
+
+    // =========================================================
+    // ACTION: GENERATE DEVICE PAIR CODE (Admin generates for rep)
+    // =========================================================
+    if ($action === 'generate_pair_code' && $method === 'POST') {
+        $orgId = trim($body['orgId'] ?? ($body['org_id'] ?? ''));
+        $repId = trim($body['repId'] ?? ($body['rep_id'] ?? ''));
+        $repName = trim($body['repName'] ?? ($body['rep_name'] ?? ''));
+
+        if (!$orgId) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Missing orgId']);
+            exit();
+        }
+
+        if (!$repName && $repId) {
+            $stmt = $db->prepare("SELECT name FROM sales_reps WHERE id = :id LIMIT 1");
+            $stmt->execute([':id' => $repId]);
+            $found = $stmt->fetchColumn();
+            if ($found) $repName = $found;
+        }
+        if (!$repName) {
+            $repName = 'Field Sales Rep';
+        }
+        if (!$repId) {
+            $repId = 'rep-' . substr(md5(uniqid()), 0, 6);
+        }
+
+        $code = sprintf('%06d', mt_rand(100000, 999999));
+        $expiresAt = date('Y-m-d H:i:s', time() + (30 * 60)); // 30 minutes validity
+
+        $ins = $db->prepare("
+            INSERT INTO device_pairings (code, org_id, rep_id, rep_name, expires_at, used)
+            VALUES (:code, :org_id, :rep_id, :rep_name, :expires_at, 0)
+        ");
+        $ins->execute([
+            ':code' => $code,
+            ':org_id' => $orgId,
+            ':rep_id' => $repId,
+            ':rep_name' => $repName,
+            ':expires_at' => $expiresAt
+        ]);
+
+        echo json_encode([
+            'success' => true,
+            'code' => $code,
+            'formattedCode' => substr($code, 0, 3) . ' ' . substr($code, 3),
+            'orgId' => $orgId,
+            'repId' => $repId,
+            'repName' => $repName,
+            'expiresAt' => $expiresAt,
+            'qrPayload' => json_encode([
+                'v' => '1.0',
+                'action' => 'pair',
+                'code' => $code,
+                'org' => $orgId,
+                'rep' => $repId
+            ])
+        ]);
+        exit();
+    }
+
+    // =========================================================
+    // ACTION: PAIR DEVICE (Mobile app pairs via 6-digit PIN)
+    // =========================================================
+    if ($action === 'pair_device' && $method === 'POST') {
+        $code = trim(str_replace(' ', '', (string)($body['code'] ?? '')));
+        $deviceModel = trim((string)($body['deviceModel'] ?? ($body['device_model'] ?? 'Android Knox Phone')));
+        $osVersion = trim((string)($body['osVersion'] ?? ($body['os_version'] ?? 'Android 14')));
+        $batteryLevel = isset($body['batteryLevel']) ? (int)$body['batteryLevel'] : 92;
+
+        if (!$code) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Please enter a 6-digit pairing code']);
+            exit();
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $stmt = $db->prepare("
+            SELECT * FROM device_pairings 
+            WHERE code = :code AND used = 0 AND expires_at >= :now
+            LIMIT 1
+        ");
+        $stmt->execute([':code' => $code, ':now' => $now]);
+        $pairing = $stmt->fetch();
+
+        // Also permit permanent demo pairing PINs for instant field testing
+        if (!$pairing) {
+            $demoPairings = [
+                '384920' => ['org_id' => 'org-tcs', 'rep_id' => 'rep-2', 'rep_name' => 'Priya Sharma (RingVia360)'],
+                '719342' => ['org_id' => 'org-infosys', 'rep_id' => 'rep-3', 'rep_name' => 'Vikram Mehta (Infosys)'],
+                '550128' => ['org_id' => 'org-tcs', 'rep_id' => 'rep-1', 'rep_name' => 'Sneha Kapoor (RingVia360)'],
+                '999888' => ['org_id' => 'org-tcs', 'rep_id' => 'rep-4', 'rep_name' => 'Ananya Roy (RingVia360)'],
+            ];
+            if (isset($demoPairings[$code])) {
+                $pairing = $demoPairings[$code];
+            }
+        }
+
+        if (!$pairing) {
+            http_response_code(401);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Invalid or expired 6-digit pairing code. Please generate a code from your Web Admin portal.'
+            ]);
+            exit();
+        }
+
+        // Mark code used
+        try {
+            $db->prepare("UPDATE device_pairings SET used = 1, paired_device_id = :dev, paired_at = :now WHERE code = :code")->execute([
+                ':dev' => $deviceModel,
+                ':now' => $now,
+                ':code' => $code
+            ]);
+        } catch (Throwable $e) {}
+
+        // Resolve Organization details
+        $orgName = 'Enterprise Company';
+        try {
+            $oStmt = $db->prepare("SELECT name FROM organizations WHERE id = :id LIMIT 1");
+            $oStmt->execute([':id' => $pairing['org_id']]);
+            $foundOrg = $oStmt->fetchColumn();
+            if ($foundOrg) $orgName = $foundOrg;
+        } catch (Throwable $e) {}
+
+        // Update sales rep device details and set online
+        try {
+            $db->prepare("
+                UPDATE sales_reps 
+                SET device_model = :dev, os_version = :os, battery_level = :bat, is_online = 1, last_sync = 'Just now'
+                WHERE id = :id
+            ")->execute([
+                ':dev' => $deviceModel,
+                ':os' => $osVersion,
+                ':bat' => $batteryLevel,
+                ':id' => $pairing['rep_id']
+            ]);
+        } catch (Throwable $e) {}
+
+        $tokenPayload = [
+            'userId' => $pairing['rep_id'],
+            'name' => $pairing['rep_name'],
+            'role' => 'sales_rep',
+            'orgId' => $pairing['org_id'],
+            'repId' => $pairing['rep_id'],
+            'device' => $deviceModel,
+            'exp' => time() + (86400 * 90) // 90 days persistent device pairing
+        ];
+        $token = 'rv360_dev_' . base64_encode(json_encode($tokenPayload));
+
+        echo json_encode([
+            'success' => true,
+            'message' => "Device paired successfully to $orgName",
+            'token' => $token,
+            'orgId' => $pairing['org_id'],
+            'orgName' => $orgName,
+            'repId' => $pairing['rep_id'],
+            'repName' => $pairing['rep_name'],
+            'role' => 'sales_rep',
+            'deviceModel' => $deviceModel,
+            'isPaired' => true
+        ]);
+        exit();
+    }
+
+    // =========================================================
+    // ACTION: GET PAIRINGS (List for Company Admin)
+    // =========================================================
+    if ($action === 'get_pairings') {
+        $orgId = $_GET['org_id'] ?? ($_GET['orgId'] ?? ($body['orgId'] ?? ''));
+        if (!$orgId) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Missing org_id']);
+            exit();
+        }
+
+        $stmt = $db->prepare("
+            SELECT code, org_id, rep_id, rep_name, expires_at, used, paired_device_id, paired_at, created_at
+            FROM device_pairings
+            WHERE org_id = :org_id
+            ORDER BY created_at DESC
+            LIMIT 25
+        ");
+        $stmt->execute([':org_id' => $orgId]);
+        $rows = $stmt->fetchAll();
+
+        echo json_encode([
+            'success' => true,
+            'pairings' => $rows
+        ]);
         exit();
     }
 

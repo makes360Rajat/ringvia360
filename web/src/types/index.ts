@@ -126,6 +126,7 @@ export interface AuthUser {
   avatar?: string;
   phone?: string;
   orgId?: string | null;
+  orgName?: string;
 }
 
 export interface TenantOrganization {

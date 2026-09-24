@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'core/theme/app_theme.dart';
+import 'data/services/auth_pairing_service.dart';
 import 'data/services/cloud_sync_service.dart';
 import 'data/services/telephony_service.dart';
 import 'data/services/audio_recorder_service.dart';
@@ -21,9 +22,19 @@ class RingVia360App extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        // Authentication & Pairing Service
+        ChangeNotifierProvider<AuthPairingService>(
+          create: (_) => AuthPairingService(),
+        ),
+
         // Services
-        Provider<CloudSyncService>(
-          create: (_) => CloudSyncService(),
+        ProxyProvider<AuthPairingService, CloudSyncService>(
+          update: (_, auth, __) => CloudSyncService(
+            orgId: auth.orgId,
+            repId: auth.repId,
+            repName: auth.repName,
+            privatizeToMeOnly: auth.privatizeToMeOnly,
+          ),
         ),
         Provider<TelephonyService>(
           create: (_) => TelephonyService(),

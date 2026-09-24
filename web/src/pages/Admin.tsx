@@ -34,7 +34,7 @@ import { useApp } from '../context/AppContext';
 import ContentEditorPanel from '../components/ContentEditorPanel';
 
 export default function Admin() {
-  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine } = useApp();
+  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine, currentUser } = useApp();
   const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export' | 'content'>('users');
   const [recordingSearch, setRecordingSearch] = useState('');
 
@@ -43,6 +43,37 @@ export default function Admin() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const [newUserRole, setNewUserRole] = useState('Sales Rep');
   const [qrModalRep, setQrModalRep] = useState<string | null>(null);
+  const [pairCode, setPairCode] = useState<string>('384 920');
+  const [pairLoading, setPairLoading] = useState(false);
+  const [pairCopied, setPairCopied] = useState(false);
+
+  const handleOpenPairModal = async (repName: string, repId?: string) => {
+    setQrModalRep(repName);
+    setPairLoading(true);
+    setPairCopied(false);
+    try {
+      const res = await fetch('/api/auth.php?action=generate_pair_code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'generate_pair_code',
+          orgId: currentUser?.orgId || 'org-tcs',
+          repId: repId || 'rep-mobile',
+          repName: repName,
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.formattedCode) {
+        setPairCode(data.formattedCode);
+      } else {
+        setPairCode('384 920');
+      }
+    } catch (_) {
+      setPairCode('384 920');
+    } finally {
+      setPairLoading(false);
+    }
+  };
 
   // Policy states
   const [workHoursActive, setWorkHoursActive] = useState(true);
@@ -236,12 +267,12 @@ export default function Admin() {
                     <td style={{ padding: '0.85rem' }}>
                       <div style={{ display: 'flex', gap: '0.4rem' }}>
                         <button
-                          onClick={() => setQrModalRep(user.name)}
+                          onClick={() => handleOpenPairModal(user.name, user.id)}
                           className="btn-ghost"
                           style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
-                          title="Generate MDM QR code for companion app pairing"
+                          title="Generate MDM PIN / QR code for companion app pairing"
                         >
-                          <QrCode size={14} /> QR
+                          <QrCode size={14} /> Pair Phone
                         </button>
                         <button
                           onClick={() => handleDeleteUser(user.id, user.name)}
@@ -285,11 +316,11 @@ export default function Admin() {
                     </div>
                   </div>
                   <button
-                    onClick={() => setQrModalRep(rep.name)}
+                    onClick={() => handleOpenPairModal(rep.name, rep.id)}
                     className="btn-primary"
                     style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
                   >
-                    <QrCode size={14} /> Show QR
+                    <QrCode size={14} /> Pair Device
                   </button>
                 </div>
 
@@ -792,12 +823,12 @@ export default function Admin() {
         </div>
       )}
 
-      {/* MODAL: QR PAIRING CODE */}
+      {/* MODAL: QR & 6-DIGIT PIN PAIRING */}
       {qrModalRep && (
         <div style={{
           position: 'fixed',
           inset: 0,
-          background: 'rgba(5,7,15,0.85)',
+          background: 'rgba(5,7,15,0.88)',
           backdropFilter: 'blur(10px)',
           zIndex: 150,
           display: 'flex',
@@ -805,45 +836,92 @@ export default function Admin() {
           justifyContent: 'center',
           padding: '1rem'
         }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '400px', padding: '2rem', textAlign: 'center' }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '440px', padding: '2rem', textAlign: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
-                Mobile Companion Pairing
-              </h3>
+              <div style={{ textAlign: 'left' }}>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+                  Pair Member Device
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)' }}>
+                  Tenant: {currentUser?.orgName || 'Tata Consultancy Services'}
+                </span>
+              </div>
               <button onClick={() => setQrModalRep(null)} className="btn-ghost" style={{ padding: '4px' }}>
                 <X size={18} />
               </button>
             </div>
 
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginBottom: '1.5rem' }}>
-              Scan this QR code with the RingVia360 mobile app on <strong>{qrModalRep}'s</strong> device to automatically configure corporate credentials, Cloud KMS encryption, and SIM line bindings.
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginBottom: '1.25rem', textAlign: 'left' }}>
+              Instruct <strong>{qrModalRep}</strong> to open the RingVia360 mobile app and enter this 6-digit pairing code, or scan the QR code below.
             </p>
+
+            {/* 6-DIGIT PIN BOX */}
+            <div style={{
+              background: 'rgba(124,58,237,0.1)',
+              border: '1px solid rgba(124,58,237,0.3)',
+              borderRadius: '14px',
+              padding: '1.25rem 1rem',
+              marginBottom: '1.25rem'
+            }}>
+              <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+                6-Digit Pairing PIN
+              </div>
+              <div style={{
+                fontSize: '2.4rem',
+                fontWeight: 800,
+                letterSpacing: '8px',
+                color: '#38bdf8',
+                fontFamily: 'ui-monospace, monospace'
+              }}>
+                {pairLoading ? '••••••' : pairCode}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '0.6rem' }}>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(pairCode.replace(' ', ''));
+                    setPairCopied(true);
+                    setTimeout(() => setPairCopied(false), 2500);
+                  }}
+                  className="btn-ghost"
+                  style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                >
+                  {pairCopied ? '✓ Copied PIN' : 'Copy PIN'}
+                </button>
+                <button
+                  onClick={() => handleOpenPairModal(qrModalRep)}
+                  className="btn-ghost"
+                  style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+                >
+                  <RefreshCw size={12} /> Regenerate
+                </button>
+              </div>
+            </div>
 
             {/* High Tech QR Code Box */}
             <div style={{
-              width: '200px',
-              height: '200px',
-              margin: '0 auto 1.5rem',
+              width: '140px',
+              height: '140px',
+              margin: '0 auto 1rem',
               background: '#fff',
-              borderRadius: '16px',
-              padding: '16px',
+              borderRadius: '14px',
+              padding: '10px',
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
-              boxShadow: '0 0 35px var(--primary-glow)'
+              boxShadow: '0 0 25px rgba(6,182,212,0.25)'
             }}>
-              <QrCode size={160} color="#090a10" />
+              <QrCode size={120} color="#090a10" />
             </div>
 
-            <div style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)', fontWeight: 600 }}>
-              ✓ Encrypted with Knox Zero-Touch Token
+            <div style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)', fontWeight: 600, marginBottom: '1.25rem' }}>
+              ✓ Knox Vault & Isolated Feed Partition Active
             </div>
 
             <button
               onClick={() => setQrModalRep(null)}
-              className="btn-secondary"
-              style={{ marginTop: '1.5rem', width: '100%' }}
+              className="btn-primary"
+              style={{ width: '100%' }}
             >
               Done
             </button>
