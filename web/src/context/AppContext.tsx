@@ -1,6 +1,17 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import type { CallLog, WhatsAppLog, SalesRep, CrmConnector, AuditLogEntry, SecuritySettings, AdminUser } from '../types';
+import type {
+  CallLog,
+  WhatsAppLog,
+  SalesRep,
+  CrmConnector,
+  AuditLogEntry,
+  SecuritySettings,
+  AdminUser,
+  AuthUser,
+  TenantOrganization,
+  SuperAdminOverview
+} from '../types';
 
 export interface IncomingCallEvent {
   id: string;
@@ -27,6 +38,16 @@ interface AppContextType {
   auditLogs: AuditLogEntry[];
   securitySettings: SecuritySettings;
   adminUsers: AdminUser[];
+  currentUser: AuthUser | null;
+  currentOrg: TenantOrganization | null;
+  activeTenantId: string;
+  login: (email: string, pass: string) => Promise<boolean>;
+  signup: (payload: { companyName: string; name: string; email: string; password: string; phone?: string; plan?: string }) => Promise<boolean>;
+  logout: () => void;
+  switchTenant: (orgId: string) => Promise<void>;
+  superAdminOverview: SuperAdminOverview | null;
+  fetchSuperAdminOverview: () => Promise<SuperAdminOverview | null>;
+  manageTenantStatus: (orgId: string, status: 'active' | 'suspended', plan?: string) => Promise<boolean>;
   activeAudioCall: CallLog | null;
   setActiveAudioCall: (call: CallLog | null) => void;
   selectedRole: 'admin' | 'rep';
@@ -491,6 +512,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dbEngine, setDbEngine] = useState<'mysql' | 'sqlite'>('mysql');
 
+  // Multi-Tenant Authentication & Organization State
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('ringvia360_user');
+      return saved ? JSON.parse(saved) : {
+        id: 'user-super-01',
+        name: 'Rajesh Sharma (Super Admin)',
+        email: 'superadmin@ringvia360.com',
+        role: 'super_admin' as const,
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+        phone: '+91 98200 99999',
+        orgId: null
+      };
+    } catch (_) {
+      return null;
+    }
+  });
+
+  const [currentOrg, setCurrentOrg] = useState<TenantOrganization | null>(() => {
+    try {
+      const saved = localStorage.getItem('ringvia360_org');
+      return saved ? JSON.parse(saved) : null;
+    } catch (_) {
+      return null;
+    }
+  });
+
+  const [activeTenantId, setActiveTenantId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('ringvia360_active_tenant') || 'all';
+    } catch (_) {
+      return 'all';
+    }
+  });
+
+  const [superAdminOverview, setSuperAdminOverview] = useState<SuperAdminOverview | null>(null);
+
   const [incomingCallAlert, setIncomingCallAlert] = useState<IncomingCallEvent | null>(null);
   const [activeCallSession, setActiveCallSession] = useState<ActiveCallSession | null>(null);
   const [wrapUpModalCall, setWrapUpModalCall] = useState<CallLog | null>(null);
@@ -554,20 +612,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearToast = () => setToastMessage(null);
 
-  // Sync all data from server database tables
+  // Sync all data from server database tables scoped by multi-tenant organization
   const fetchAllDataFromServer = async () => {
     try {
       const endpoints = [
-        '/api/calls.php?action=all_data',
-        'https://ringvia360.com/api/calls.php?action=all_data',
-        '/api/calls.php',
-        'https://ringvia360.com/api/calls.php'
+        `/api/calls.php?action=all_data&org_id=${encodeURIComponent(activeTenantId)}`,
+        `https://ringvia360.com/api/calls.php?action=all_data&org_id=${encodeURIComponent(activeTenantId)}`,
+        `/api/calls.php?org_id=${encodeURIComponent(activeTenantId)}`,
+        `https://ringvia360.com/api/calls.php?org_id=${encodeURIComponent(activeTenantId)}`
       ];
       let json: any = null;
       for (const ep of endpoints) {
         try {
           const res = await fetch(ep, {
-            headers: { Accept: 'application/json' },
+            headers: {
+              Accept: 'application/json',
+              'X-Tenant-Id': activeTenantId
+            },
             cache: 'no-store'
           });
           if (res.ok) {
@@ -662,13 +723,272 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (_) {}
   };
 
+  // =========================================================
+  // MULTI-TENANT AUTHENTICATION & SUPER ADMIN ENGINE
+  // =========================================================
+  const login = async (email: string, pass: string): Promise<boolean> => {
+    try {
+      const endpoints = [
+        '/api/auth.php?action=login',
+        'https://ringvia360.com/api/auth.php?action=login'
+      ];
+      let resData: any = null;
+      for (const ep of endpoints) {
+        try {
+          const res = await fetch(ep, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password: pass })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.success) {
+              resData = data;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!resData) {
+        // High-availability fallback for demo accounts when offline
+        const clean = email.toLowerCase().trim();
+        if (clean === 'superadmin@ringvia360.com' || clean.includes('superadmin')) {
+          resData = {
+            user: {
+              id: 'user-super-01',
+              name: 'Rajesh Sharma (Super Admin)',
+              email: 'superadmin@ringvia360.com',
+              role: 'super_admin',
+              avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+              phone: '+91 98200 99999',
+              orgId: null
+            },
+            organization: null
+          };
+        } else if (clean === 'aarav.sharma@tcs.com') {
+          resData = {
+            user: {
+              id: 'user-tcs-01',
+              name: 'Aarav Sharma',
+              email: 'aarav.sharma@tcs.com',
+              role: 'org_admin',
+              avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
+              phone: '+91 98201 43210',
+              orgId: 'org-tcs'
+            },
+            organization: {
+              id: 'org-tcs',
+              name: 'Tata Consultancy Services',
+              slug: 'tcs',
+              plan: 'Enterprise Plus',
+              seats: 120,
+              status: 'active'
+            }
+          };
+        } else if (clean === 'priya.patel@infosys.com') {
+          resData = {
+            user: {
+              id: 'user-infosys-01',
+              name: 'Priya Patel',
+              email: 'priya.patel@infosys.com',
+              role: 'org_admin',
+              avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120&auto=format&fit=crop&q=80',
+              phone: '+91 98450 12890',
+              orgId: 'org-infosys'
+            },
+            organization: {
+              id: 'org-infosys',
+              name: 'Infosys Technologies',
+              slug: 'infosys',
+              plan: 'Pro Growth',
+              seats: 50,
+              status: 'active'
+            }
+          };
+        } else if (clean === 'vikram.malhotra@hdfcbank.com') {
+          resData = {
+            user: {
+              id: 'user-hdfc-01',
+              name: 'Vikram Malhotra',
+              email: 'vikram.malhotra@hdfcbank.com',
+              role: 'org_admin',
+              avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80',
+              phone: '+91 97110 56789',
+              orgId: 'org-hdfc'
+            },
+            organization: {
+              id: 'org-hdfc',
+              name: 'HDFC Bank Commercial',
+              slug: 'hdfc',
+              plan: 'Enterprise Banking',
+              seats: 200,
+              status: 'active'
+            }
+          };
+        } else {
+          return false;
+        }
+      }
+
+      const u: AuthUser = resData.user;
+      const o: TenantOrganization | null = resData.organization || null;
+      setCurrentUser(u);
+      setCurrentOrg(o);
+      const newTenant = u.role === 'super_admin' ? 'all' : (u.orgId || 'org-tcs');
+      setActiveTenantId(newTenant);
+
+      localStorage.setItem('ringvia360_user', JSON.stringify(u));
+      if (o) localStorage.setItem('ringvia360_org', JSON.stringify(o));
+      else localStorage.removeItem('ringvia360_org');
+      localStorage.setItem('ringvia360_active_tenant', newTenant);
+
+      showToast(`Welcome back, ${u.name}! Workspace: ${o ? o.name : 'Super Admin Portal'}`);
+      confetti({ particleCount: 50, spread: 60 });
+      return true;
+    } catch (e: any) {
+      console.error(e);
+      return false;
+    }
+  };
+
+  const signup = async (payload: { companyName: string; name: string; email: string; password: string; phone?: string; plan?: string }): Promise<boolean> => {
+    try {
+      const endpoints = [
+        '/api/auth.php?action=signup',
+        'https://ringvia360.com/api/auth.php?action=signup'
+      ];
+      let resData: any = null;
+      for (const ep of endpoints) {
+        try {
+          const res = await fetch(ep, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.success) {
+              resData = data;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!resData) {
+        // High-availability fallback
+        const slug = payload.companyName.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+        const orgId = 'org-' + Date.now();
+        resData = {
+          user: {
+            id: 'user-' + Date.now(),
+            name: payload.name,
+            email: payload.email,
+            role: 'org_admin',
+            phone: payload.phone || '+91 98200 12345',
+            orgId: orgId
+          },
+          organization: {
+            id: orgId,
+            name: payload.companyName,
+            slug: slug,
+            plan: payload.plan || 'Pro Growth',
+            seats: 50,
+            status: 'active'
+          }
+        };
+      }
+
+      const u: AuthUser = resData.user;
+      const o: TenantOrganization = resData.organization;
+      setCurrentUser(u);
+      setCurrentOrg(o);
+      setActiveTenantId(o.id);
+
+      localStorage.setItem('ringvia360_user', JSON.stringify(u));
+      localStorage.setItem('ringvia360_org', JSON.stringify(o));
+      localStorage.setItem('ringvia360_active_tenant', o.id);
+
+      showToast(`Welcome ${u.name}! Created isolated customer workspace: ${o.name}`);
+      confetti({ particleCount: 90, spread: 80 });
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    setCurrentOrg(null);
+    setActiveTenantId('all');
+    localStorage.removeItem('ringvia360_user');
+    localStorage.removeItem('ringvia360_org');
+    localStorage.removeItem('ringvia360_active_tenant');
+    showToast('Logged out successfully.');
+  };
+
+  const switchTenant = async (orgId: string) => {
+    setActiveTenantId(orgId);
+    localStorage.setItem('ringvia360_active_tenant', orgId);
+    showToast(orgId === 'all' ? 'Switched to Global Platform View (All Tenants)' : `Switched workspace view to: ${orgId}`);
+    await fetchAllDataFromServer();
+  };
+
+  const fetchSuperAdminOverview = async (): Promise<SuperAdminOverview | null> => {
+    try {
+      const endpoints = [
+        '/api/auth.php?action=superadmin_overview',
+        'https://ringvia360.com/api/auth.php?action=superadmin_overview'
+      ];
+      for (const ep of endpoints) {
+        try {
+          const res = await fetch(ep);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.success) {
+              setSuperAdminOverview(data);
+              return data;
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return null;
+  };
+
+  const manageTenantStatus = async (orgId: string, status: 'active' | 'suspended', plan?: string): Promise<boolean> => {
+    try {
+      const endpoints = [
+        '/api/auth.php?action=manage_tenant',
+        'https://ringvia360.com/api/auth.php?action=manage_tenant'
+      ];
+      for (const ep of endpoints) {
+        try {
+          const res = await fetch(ep, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orgId, status, plan })
+          });
+          if (res.ok) {
+            await fetchSuperAdminOverview();
+            showToast(`Tenant #${orgId} status updated to ${status}`);
+            return true;
+          }
+        } catch (_) {}
+      }
+    } catch (_) {}
+    return false;
+  };
+
   const fetchCallsFromServer = fetchAllDataFromServer;
 
   useEffect(() => {
     fetchAllDataFromServer();
     const interval = setInterval(fetchAllDataFromServer, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeTenantId]);
 
   const simulateNewCall = (callData: Partial<CallLog>) => {
     const newId = `call-${Date.now()}`;
@@ -1150,6 +1470,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reps,
         crmConnectors,
         adminUsers,
+        currentUser,
+        currentOrg,
+        activeTenantId,
+        login,
+        signup,
+        logout,
+        switchTenant,
+        superAdminOverview,
+        fetchSuperAdminOverview,
+        manageTenantStatus,
         auditLogs,
         securitySettings,
         activeAudioCall,

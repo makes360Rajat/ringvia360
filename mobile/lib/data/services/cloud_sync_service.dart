@@ -21,17 +21,24 @@ class CloudSyncResult {
 
 class CloudSyncService {
   final String serverUrl;
+  final String orgId;
 
-  CloudSyncService({this.serverUrl = 'https://ringvia360.com/api/calls.php'});
+  CloudSyncService({
+    this.serverUrl = 'https://ringvia360.com/api/calls.php',
+    this.orgId = 'org-tcs',
+  });
 
-  Future<String?> uploadAudioFile(String localPath, String callId) async {
+  Future<String?> uploadAudioFile(String localPath, String callId, {String? targetOrgId}) async {
     try {
       final file = File(localPath);
       if (!await file.exists()) return null;
 
+      final currentOrgId = targetOrgId ?? orgId;
       final uri = Uri.parse('$serverUrl?action=upload_audio');
       final request = http.MultipartRequest('POST', uri);
       request.fields['callId'] = callId;
+      request.fields['org_id'] = currentOrgId;
+      request.headers['X-Tenant-Id'] = currentOrgId;
       request.files.add(await http.MultipartFile.fromPath(
         'audio',
         localPath,
@@ -49,8 +56,9 @@ class CloudSyncService {
     return null;
   }
 
-  Future<CloudSyncResult> syncCallToCloud(CallRecord call) async {
+  Future<CloudSyncResult> syncCallToCloud(CallRecord call, {String? targetOrgId}) async {
     final mockCrmId = 'RV360-${DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase()}';
+    final currentOrgId = targetOrgId ?? orgId;
     try {
       final directionStr = call.direction == CallDirection.inbound
           ? 'inbound'
@@ -64,7 +72,7 @@ class CloudSyncService {
         if (call.recordingPath!.startsWith('http')) {
           recordingUrl = call.recordingPath!;
         } else {
-          final uploaded = await uploadAudioFile(call.recordingPath!, call.id);
+          final uploaded = await uploadAudioFile(call.recordingPath!, call.id, targetOrgId: currentOrgId);
           if (uploaded != null && uploaded.isNotEmpty) {
             recordingUrl = uploaded;
           }
@@ -73,6 +81,7 @@ class CloudSyncService {
 
       final body = jsonEncode({
         'id': call.id,
+        'org_id': currentOrgId,
         'contactName': call.contactName,
         'phoneNumber': call.phoneNumber,
         'company': call.company,
@@ -120,7 +129,10 @@ class CloudSyncService {
 
       final response = await http.post(
         Uri.parse(serverUrl),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-Id': currentOrgId,
+        },
         body: body,
       ).timeout(const Duration(seconds: 10));
 
@@ -145,11 +157,16 @@ class CloudSyncService {
     );
   }
 
-  Future<List<CallRecord>> fetchCallsFromCloud() async {
+  Future<List<CallRecord>> fetchCallsFromCloud({String? targetOrgId}) async {
+    final currentOrgId = targetOrgId ?? orgId;
     try {
+      final sep = serverUrl.contains('?') ? '&' : '?';
       final response = await http.get(
-        Uri.parse(serverUrl),
-        headers: {'Accept': 'application/json'},
+        Uri.parse('$serverUrl${sep}org_id=$currentOrgId'),
+        headers: {
+          'Accept': 'application/json',
+          'X-Tenant-Id': currentOrgId,
+        },
       ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
@@ -202,12 +219,17 @@ class CloudSyncService {
     return [];
   }
 
-  Future<List<LeadContact>> fetchLeadsFromCloud() async {
+  Future<List<LeadContact>> fetchLeadsFromCloud({String? targetOrgId}) async {
+    final currentOrgId = targetOrgId ?? orgId;
     try {
-      final url = serverUrl.contains('?') ? '$serverUrl&action=leads' : '$serverUrl?action=leads';
+      final sep = serverUrl.contains('?') ? '&' : '?';
+      final url = '$serverUrl${sep}action=leads&org_id=$currentOrgId';
       final response = await http.get(
         Uri.parse(url),
-        headers: {'Accept': 'application/json'},
+        headers: {
+          'Accept': 'application/json',
+          'X-Tenant-Id': currentOrgId,
+        },
       ).timeout(const Duration(seconds: 8));
 
       if (response.statusCode == 200) {

@@ -118,3 +118,40 @@ export interface AdminUser {
   lastActive: string;
 }
 
+export interface AuthUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'super_admin' | 'org_admin' | 'rep';
+  avatar?: string;
+  phone?: string;
+  orgId?: string | null;
+}
+
+export interface TenantOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  seats: number;
+  monthly_price_inr?: number;
+  status: 'active' | 'suspended';
+  owner_email?: string;
+  created_at?: string;
+  user_count?: number;
+  call_count?: number;
+}
+
+export interface SuperAdminOverview {
+  platformMetrics: {
+    totalTenants: number;
+    activeTenants: number;
+    totalUsers: number;
+    totalCallsLogged: number;
+    totalMonthlyRevenueInr: number;
+    totalSeatsAllocated: number;
+  };
+  tenants: TenantOrganization[];
+}
+
+

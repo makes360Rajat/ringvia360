@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
 import {
   PhoneCall,
   LayoutDashboard,
@@ -12,11 +12,17 @@ import {
   Sun,
   Moon,
   Zap,
-  Settings
+  Settings,
+  Crown,
+  Building,
+  LogOut,
+  LogIn,
+  User
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export const Navbar: React.FC = () => {
+  const navigate = useNavigate();
   const {
     theme,
     setTheme,
@@ -26,7 +32,12 @@ export const Navbar: React.FC = () => {
     setSelectedRole,
     setIsSimulatorOpen,
     triggerIncomingCall,
-    calls
+    calls,
+    currentUser,
+    currentOrg,
+    activeTenantId,
+    logout,
+    switchTenant
   } = useApp();
 
   const activeCallsCount = calls.filter(c => c.timestamp.includes('now') || c.timestamp.includes('min')).length;
@@ -188,7 +199,26 @@ export const Navbar: React.FC = () => {
           })}
         >
           <Settings size={16} />
-          <span>Admin</span>
+          <span>Customer Admin</span>
+        </NavLink>
+
+        <NavLink
+          to="/super-admin"
+          className={({ isActive }) => `btn-ghost ${isActive ? 'btn-primary' : ''}`}
+          style={({ isActive }) => ({
+            padding: '0.45rem 0.85rem',
+            borderRadius: 'var(--radius-md)',
+            color: isActive ? '#fff' : '#eab308',
+            background: isActive ? 'linear-gradient(135deg, #eab308 0%, #f97316 100%)' : 'rgba(234, 179, 8, 0.1)',
+            border: '1px solid rgba(234, 179, 8, 0.3)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            fontWeight: 700
+          })}
+        >
+          <Crown size={15} />
+          <span>Super Admin</span>
         </NavLink>
       </nav>
 
@@ -280,6 +310,94 @@ export const Navbar: React.FC = () => {
         >
           {theme === 'dark' ? <Sun size={18} color="#f59e0b" /> : <Moon size={18} color="#6366f1" />}
         </button>
+
+        {/* Workspace Partition Badge */}
+        <div
+          onClick={() => navigate('/super-admin')}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            padding: '0.35rem 0.65rem',
+            borderRadius: 'var(--radius-md)',
+            background: activeTenantId === 'all' ? 'rgba(234, 179, 8, 0.12)' : 'rgba(99, 102, 241, 0.12)',
+            border: activeTenantId === 'all' ? '1px solid rgba(234, 179, 8, 0.3)' : '1px solid rgba(99, 102, 241, 0.3)',
+            fontSize: '0.76rem',
+            fontWeight: 700,
+            color: activeTenantId === 'all' ? '#eab308' : 'var(--accent-primary)',
+            cursor: 'pointer'
+          }}
+          title="Current Workspace Scope - Click to inspect in Super Admin"
+        >
+          {activeTenantId === 'all' ? <Crown size={13} /> : <Building size={13} />}
+          <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {activeTenantId === 'all' ? 'All Tenants' : (currentOrg?.name || activeTenantId)}
+          </span>
+        </div>
+
+        {/* User Account / Profile & Sign In */}
+        {currentUser ? (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+            padding: '0.3rem 0.6rem',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: '0.78rem'
+          }}>
+            {currentUser.avatar ? (
+              <img
+                src={currentUser.avatar}
+                alt={currentUser.name}
+                style={{ width: '22px', height: '22px', borderRadius: '50%', objectFit: 'cover' }}
+              />
+            ) : (
+              <User size={15} />
+            )}
+            <span style={{ fontWeight: 600, maxWidth: '90px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentUser.name.split(' ')[0]}
+            </span>
+            <button
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '2px',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              title="Sign Out"
+            >
+              <LogOut size={13} />
+            </button>
+          </div>
+        ) : (
+          <NavLink
+            to="/login"
+            style={{
+              padding: '0.45rem 0.85rem',
+              borderRadius: 'var(--radius-md)',
+              background: 'linear-gradient(135deg, var(--primary) 0%, #38bdf8 100%)',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: '0.78rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              textDecoration: 'none'
+            }}
+          >
+            <LogIn size={14} />
+            <span>Sign In</span>
+          </NavLink>
+        )}
       </div>
     </header>
   );

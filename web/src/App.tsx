@@ -15,6 +15,8 @@ import Leaderboard from './pages/Leaderboard';
 import CrmSync from './pages/CrmSync';
 import Security from './pages/Security';
 import Admin from './pages/Admin';
+import Login from './pages/Login';
+import SuperAdmin from './pages/SuperAdmin';
 
 import './styles/design.css';
 import './App.css';
@@ -67,6 +69,9 @@ function MainLayout() {
           <Route path="/crm-sync" element={<CrmSync />} />
           <Route path="/security" element={<Security />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Login />} />
+          <Route path="/super-admin" element={<SuperAdmin />} />
         </Routes>
       </main>
 

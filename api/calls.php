@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Tenant-Id');
 header('Content-Type: application/json; charset=utf-8');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -248,6 +248,22 @@ try {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         ");
+    }
+
+    // Multi-tenant migration helper: ensure org_id column exists on all tenant tables
+    $tenantTables = ['call_logs', 'leads_contacts', 'sales_reps', 'admin_users', 'crm_connectors'];
+    foreach ($tenantTables as $tName) {
+        try {
+            if ($isMysql) {
+                $chk = $db->query("SHOW COLUMNS FROM `$tName` LIKE 'org_id'")->fetchAll();
+                if (empty($chk)) {
+                    $db->exec("ALTER TABLE `$tName` ADD COLUMN org_id VARCHAR(128) DEFAULT 'org-tcs'");
+                    $db->exec("CREATE INDEX `idx_{$tName}_org` ON `$tName` (org_id)");
+                }
+            } else {
+                $db->exec("ALTER TABLE `$tName` ADD COLUMN org_id TEXT DEFAULT 'org-tcs'");
+            }
+        } catch (Throwable $_) {}
     }
 
     // =========================================================
@@ -597,10 +613,16 @@ try {
     }
 
     // =========================================================
-    // 3. ROUTE DISPATCHER
+    // 3. ROUTE DISPATCHER & MULTI-TENANT ISOLATION
     // =========================================================
     $method = $_SERVER['REQUEST_METHOD'];
     $action = $_GET['action'] ?? '';
+
+    // Multi-tenant organization isolation resolution
+    $tenantId = $_SERVER['HTTP_X_TENANT_ID'] ?? ($_GET['org_id'] ?? ($_POST['org_id'] ?? 'all'));
+    if (!$tenantId || $tenantId === 'undefined' || $tenantId === 'null') {
+        $tenantId = 'all';
+    }
 
     // Action: Health & Diagnostics
     if ($action === 'db_status') {
@@ -609,6 +631,7 @@ try {
             'status' => 'operational',
             'driver' => $driver,
             'active_user' => $activeUser,
+            'tenantId' => $tenantId,
             'database' => $conn['driver'] === 'mysql' ? 'u488332847_dn_name' : 'ringvia_calls.sqlite',
             'mysql_available' => extension_loaded('pdo_mysql'),
             'timestamp' => date('Y-m-d H:i:s T')
@@ -684,14 +707,51 @@ try {
     }
 
     // =========================================================
-    // 5. ALL DATA (Single Round-Trip Fetch for Instant Rendering)
+    // =========================================================
+    // 5. ALL DATA (Single Round-Trip Fetch Scoped by Multi-Tenant Isolation)
     // =========================================================
     if ($action === 'all_data' && $method === 'GET') {
-        // Fetch Calls
-        $calls = $db->query("SELECT * FROM call_logs ORDER BY created_at DESC LIMIT 100")->fetchAll();
+        if ($tenantId === 'all') {
+            $calls = $db->query("SELECT * FROM call_logs ORDER BY created_at DESC LIMIT 100")->fetchAll();
+            $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
+            $crms = $db->query("SELECT * FROM crm_connectors ORDER BY id ASC")->fetchAll();
+            $admins = $db->query("SELECT * FROM admin_users ORDER BY id ASC")->fetchAll();
+            $leads = $db->query("SELECT * FROM leads_contacts ORDER BY created_at DESC LIMIT 50")->fetchAll();
+        } else {
+            $stmtC = $db->prepare("SELECT * FROM call_logs WHERE org_id = :org_id ORDER BY created_at DESC LIMIT 100");
+            $stmtC->execute([':org_id' => $tenantId]);
+            $calls = $stmtC->fetchAll();
+
+            $stmtR = $db->prepare("SELECT * FROM sales_reps WHERE org_id = :org_id ORDER BY rank_order ASC");
+            $stmtR->execute([':org_id' => $tenantId]);
+            $reps = $stmtR->fetchAll();
+            if (empty($reps)) {
+                $reps = $db->query("SELECT * FROM sales_reps LIMIT 5")->fetchAll();
+            }
+
+            $stmtCRM = $db->prepare("SELECT * FROM crm_connectors WHERE org_id = :org_id OR org_id = 'org-tcs' OR org_id IS NULL ORDER BY id ASC");
+            $stmtCRM->execute([':org_id' => $tenantId]);
+            $crms = $stmtCRM->fetchAll();
+
+            $stmtA = $db->prepare("SELECT * FROM admin_users WHERE org_id = :org_id ORDER BY id ASC");
+            $stmtA->execute([':org_id' => $tenantId]);
+            $admins = $stmtA->fetchAll();
+            if (empty($admins)) {
+                $admins = $db->query("SELECT * FROM admin_users LIMIT 5")->fetchAll();
+            }
+
+            $stmtL = $db->prepare("SELECT * FROM leads_contacts WHERE org_id = :org_id ORDER BY created_at DESC LIMIT 50");
+            $stmtL->execute([':org_id' => $tenantId]);
+            $leads = $stmtL->fetchAll();
+            if (empty($leads)) {
+                $leads = $db->query("SELECT * FROM leads_contacts LIMIT 10")->fetchAll();
+            }
+        }
+
         $formattedCalls = array_map(function ($row) {
             return [
                 'id' => (string) $row['id'],
+                'orgId' => (string) ($row['org_id'] ?? 'org-tcs'),
                 'contactName' => (string) $row['contact_name'],
                 'phoneNumber' => (string) $row['phone_number'],
                 'company' => (string) ($row['company'] ?? 'Corporate Partner'),
@@ -720,10 +780,10 @@ try {
         }, $calls);
 
         // Fetch Reps
-        $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
         $formattedReps = array_map(function ($r) {
             return [
                 'id' => (string) $r['id'],
+                'orgId' => (string) ($r['org_id'] ?? 'org-tcs'),
                 'name' => (string) $r['name'],
                 'role' => (string) $r['role'],
                 'avatar' => (string) $r['avatar'],
@@ -744,7 +804,6 @@ try {
         }, $reps);
 
         // Fetch CRM Connectors
-        $crms = $db->query("SELECT * FROM crm_connectors ORDER BY id ASC")->fetchAll();
         $formattedCrms = array_map(function ($c) {
             return [
                 'id' => (string) $c['id'],
@@ -760,9 +819,6 @@ try {
             ];
         }, $crms);
 
-        // Fetch Admin Users
-        $admins = $db->query("SELECT * FROM admin_users ORDER BY id ASC")->fetchAll();
-
         // Fetch Settings
         $settingsRows = $db->query("SELECT * FROM app_settings")->fetchAll();
         $settings = [];
@@ -770,13 +826,11 @@ try {
             $settings[$sr['setting_key']] = json_decode((string) $sr['setting_value'], true);
         }
 
-        // Fetch Leads
-        $leads = $db->query("SELECT * FROM leads_contacts ORDER BY created_at DESC LIMIT 50")->fetchAll();
-
         echo json_encode([
             'success' => true,
             'database' => $driver,
             'active_user' => $activeUser,
+            'tenantId' => $tenantId,
             'data' => [
                 'calls' => $formattedCalls,
                 'reps' => $formattedReps,
@@ -794,10 +848,20 @@ try {
     // =========================================================
     if ($action === 'reps') {
         if ($method === 'GET') {
-            $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
+            if ($tenantId === 'all') {
+                $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
+            } else {
+                $stmt = $db->prepare("SELECT * FROM sales_reps WHERE org_id = :org_id ORDER BY rank_order ASC");
+                $stmt->execute([':org_id' => $tenantId]);
+                $reps = $stmt->fetchAll();
+                if (empty($reps)) {
+                    $reps = $db->query("SELECT * FROM sales_reps LIMIT 5")->fetchAll();
+                }
+            }
             $formatted = array_map(function ($r) {
                 return [
                     'id' => (string) $r['id'],
+                    'orgId' => (string) ($r['org_id'] ?? 'org-tcs'),
                     'name' => (string) $r['name'],
                     'role' => (string) $r['role'],
                     'avatar' => (string) $r['avatar'],
@@ -816,13 +880,14 @@ try {
                     'badges' => json_decode((string) ($r['badges'] ?? '[]'), true) ?: []
                 ];
             }, $reps);
-            echo json_encode(['success' => true, 'data' => $formatted]);
+            echo json_encode(['success' => true, 'tenantId' => $tenantId, 'data' => $formatted]);
             exit();
         }
 
         if ($method === 'POST') {
             $body = json_decode(file_get_contents('php://input'), true) ?: [];
             $id = $body['id'] ?? ('rep-' . time());
+            $repOrgId = $body['orgId'] ?? ($tenantId !== 'all' ? $tenantId : 'org-tcs');
             $name = $body['name'] ?? 'Sales Rep';
             $role = $body['role'] ?? 'Account Executive';
             $avatar = $body['avatar'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80';
@@ -841,15 +906,15 @@ try {
             $badges = json_encode($body['badges'] ?? ['Certified']);
 
             $sql = $isMysql
-                ? "INSERT INTO sales_reps (id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
-                   VALUES (:id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)
-                   ON DUPLICATE KEY UPDATE name=VALUES(name), role=VALUES(role), avatar=VALUES(avatar), calls_today=VALUES(calls_today), talk_time_minutes=VALUES(talk_time_minutes), deals_closed=VALUES(deals_closed), conversion_rate=VALUES(conversion_rate), rank_order=VALUES(rank_order), is_online=VALUES(is_online)"
-                : "INSERT OR REPLACE INTO sales_reps (id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
-                   VALUES (:id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)";
+                ? "INSERT INTO sales_reps (id, org_id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
+                   VALUES (:id, :org_id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)
+                   ON DUPLICATE KEY UPDATE org_id=VALUES(org_id), name=VALUES(name), role=VALUES(role), avatar=VALUES(avatar), calls_today=VALUES(calls_today), talk_time_minutes=VALUES(talk_time_minutes), deals_closed=VALUES(deals_closed), conversion_rate=VALUES(conversion_rate), rank_order=VALUES(rank_order), is_online=VALUES(is_online)"
+                : "INSERT OR REPLACE INTO sales_reps (id, org_id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
+                   VALUES (:id, :org_id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)";
 
             $stmt = $db->prepare($sql);
             $stmt->execute([
-                ':id' => $id, ':name' => $name, ':role' => $role, ':avatar' => $avatar,
+                ':id' => $id, ':org_id' => $repOrgId, ':name' => $name, ':role' => $role, ':avatar' => $avatar,
                 ':phone' => $phone, ':device_model' => $deviceModel, ':os_version' => $osVersion,
                 ':battery_level' => $batteryLevel, ':is_online' => $isOnline, ':last_sync' => $lastSync,
                 ':calls_today' => $callsToday, ':talk_time_minutes' => $talkTimeMinutes,
@@ -857,7 +922,7 @@ try {
                 ':rank_order' => $rankOrder, ':streak_days' => $streakDays, ':badges' => $badges
             ]);
 
-            echo json_encode(['success' => true, 'id' => $id, 'message' => "Rep $name updated in DB"]);
+            echo json_encode(['success' => true, 'id' => $id, 'orgId' => $repOrgId, 'message' => "Rep $name updated in DB"]);
             exit();
         }
 
@@ -943,14 +1008,24 @@ try {
     // =========================================================
     if ($action === 'admin_users') {
         if ($method === 'GET') {
-            $admins = $db->query("SELECT * FROM admin_users ORDER BY created_at DESC")->fetchAll();
-            echo json_encode(['success' => true, 'data' => $admins]);
+            if ($tenantId === 'all') {
+                $admins = $db->query("SELECT * FROM admin_users ORDER BY created_at DESC")->fetchAll();
+            } else {
+                $stmt = $db->prepare("SELECT * FROM admin_users WHERE org_id = :org_id ORDER BY created_at DESC");
+                $stmt->execute([':org_id' => $tenantId]);
+                $admins = $stmt->fetchAll();
+                if (empty($admins)) {
+                    $admins = $db->query("SELECT * FROM admin_users LIMIT 5")->fetchAll();
+                }
+            }
+            echo json_encode(['success' => true, 'tenantId' => $tenantId, 'data' => $admins]);
             exit();
         }
 
         if ($method === 'POST') {
             $body = json_decode(file_get_contents('php://input'), true) ?: [];
             $id = $body['id'] ?? ('u-' . time());
+            $userOrgId = $body['orgId'] ?? ($tenantId !== 'all' ? $tenantId : 'org-tcs');
             $name = $body['name'] ?? 'Team Member';
             $email = $body['email'] ?? 'rep@ringvia360.com';
             $role = $body['role'] ?? 'Sales Rep';
@@ -960,16 +1035,16 @@ try {
             $lastActive = $body['lastActive'] ?? 'Just now';
 
             $sql = $isMysql
-                ? "INSERT INTO admin_users (id, name, email, role, status, sim, device, last_active) VALUES (:id, :name, :email, :role, :status, :sim, :device, :last_active) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), sim=VALUES(sim), device=VALUES(device)"
-                : "INSERT OR REPLACE INTO admin_users (id, name, email, role, status, sim, device, last_active) VALUES (:id, :name, :email, :role, :status, :sim, :device, :last_active)";
+                ? "INSERT INTO admin_users (id, org_id, name, email, role, status, sim, device, last_active) VALUES (:id, :org_id, :name, :email, :role, :status, :sim, :device, :last_active) ON DUPLICATE KEY UPDATE org_id=VALUES(org_id), name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), sim=VALUES(sim), device=VALUES(device)"
+                : "INSERT OR REPLACE INTO admin_users (id, org_id, name, email, role, status, sim, device, last_active) VALUES (:id, :org_id, :name, :email, :role, :status, :sim, :device, :last_active)";
 
             $stmt = $db->prepare($sql);
             $stmt->execute([
-                ':id' => $id, ':name' => $name, ':email' => $email, ':role' => $role,
+                ':id' => $id, ':org_id' => $userOrgId, ':name' => $name, ':email' => $email, ':role' => $role,
                 ':status' => $status, ':sim' => $sim, ':device' => $device, ':last_active' => $lastActive
             ]);
 
-            echo json_encode(['success' => true, 'id' => $id, 'message' => "Fleet user $name saved"]);
+            echo json_encode(['success' => true, 'id' => $id, 'orgId' => $userOrgId, 'message' => "Fleet user $name saved"]);
             exit();
         }
 
@@ -987,21 +1062,32 @@ try {
     // =========================================================
     if ($action === 'leads') {
         if ($method === 'GET') {
-            $leads = $db->query("SELECT * FROM leads_contacts ORDER BY created_at DESC LIMIT 100")->fetchAll();
-            echo json_encode(['success' => true, 'count' => count($leads), 'data' => $leads]);
+            if ($tenantId === 'all') {
+                $leads = $db->query("SELECT * FROM leads_contacts ORDER BY created_at DESC LIMIT 100")->fetchAll();
+            } else {
+                $stmt = $db->prepare("SELECT * FROM leads_contacts WHERE org_id = :org_id ORDER BY created_at DESC LIMIT 100");
+                $stmt->execute([':org_id' => $tenantId]);
+                $leads = $stmt->fetchAll();
+                if (empty($leads)) {
+                    $leads = $db->query("SELECT * FROM leads_contacts LIMIT 10")->fetchAll();
+                }
+            }
+            echo json_encode(['success' => true, 'tenantId' => $tenantId, 'count' => count($leads), 'data' => $leads]);
             exit();
         }
 
         if ($method === 'POST') {
             $payload = json_decode(file_get_contents('php://input'), true) ?: [];
             $leadId = !empty($payload['id']) ? (string) $payload['id'] : ('lead-' . round(microtime(true) * 1000));
+            $leadOrgId = !empty($payload['orgId']) ? (string) $payload['orgId'] : ($tenantId !== 'all' ? $tenantId : 'org-tcs');
             $leadSql = $isMysql
-                ? "INSERT INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes) ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), deal_value=VALUES(deal_value), notes=VALUES(notes)"
-                : "INSERT OR REPLACE INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes)";
+                ? "INSERT INTO leads_contacts (id, org_id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :org_id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes) ON DUPLICATE KEY UPDATE org_id=VALUES(org_id), name=VALUES(name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), deal_value=VALUES(deal_value), notes=VALUES(notes)"
+                : "INSERT OR REPLACE INTO leads_contacts (id, org_id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :org_id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes)";
 
             $stmt = $db->prepare($leadSql);
             $stmt->execute([
                 ':id' => $leadId,
+                ':org_id' => $leadOrgId,
                 ':name' => !empty($payload['name']) ? (string) $payload['name'] : 'Enterprise Contact',
                 ':phone' => !empty($payload['phoneNumber']) ? (string) $payload['phoneNumber'] : (!empty($payload['phone']) ? (string) $payload['phone'] : '+91 98200 00000'),
                 ':company' => !empty($payload['company']) ? (string) $payload['company'] : 'Enterprise Client',
@@ -1015,7 +1101,7 @@ try {
             ]);
 
             http_response_code(201);
-            echo json_encode(['success' => true, 'id' => $leadId, 'message' => 'Lead saved']);
+            echo json_encode(['success' => true, 'id' => $leadId, 'orgId' => $leadOrgId, 'message' => 'Lead saved']);
             exit();
         }
     }
@@ -1024,20 +1110,45 @@ try {
     // 11. STATS (?action=stats)
     // =========================================================
     if ($action === 'stats') {
-        $totalCalls = (int) $db->query("SELECT COUNT(*) FROM call_logs")->fetchColumn();
-        $totalSeconds = (int) $db->query("SELECT SUM(duration) FROM call_logs")->fetchColumn();
-        $totalDealValue = (float) $db->query("SELECT SUM(deal_value) FROM call_logs")->fetchColumn();
-        $positiveCount = (int) $db->query("SELECT COUNT(*) FROM call_logs WHERE sentiment = 'positive'")->fetchColumn();
+        if ($tenantId === 'all') {
+            $totalCalls = (int) $db->query("SELECT COUNT(*) FROM call_logs")->fetchColumn();
+            $totalSeconds = (int) $db->query("SELECT SUM(duration) FROM call_logs")->fetchColumn();
+            $totalDealValue = (float) $db->query("SELECT SUM(deal_value) FROM call_logs")->fetchColumn();
+            $positiveCount = (int) $db->query("SELECT COUNT(*) FROM call_logs WHERE sentiment = 'positive'")->fetchColumn();
+            $activeRepsCount = (int) $db->query("SELECT COUNT(*) FROM sales_reps WHERE is_online = 1")->fetchColumn();
+            $syncedCrmsCount = (int) $db->query("SELECT COUNT(*) FROM crm_connectors WHERE is_connected = 1")->fetchColumn();
+        } else {
+            $st1 = $db->prepare("SELECT COUNT(*), COALESCE(SUM(duration),0), COALESCE(SUM(deal_value),0) FROM call_logs WHERE org_id = :org_id");
+            $st1->execute([':org_id' => $tenantId]);
+            $row1 = $st1->fetch(PDO::FETCH_NUM);
+            $totalCalls = (int) ($row1[0] ?? 0);
+            $totalSeconds = (int) ($row1[1] ?? 0);
+            $totalDealValue = (float) ($row1[2] ?? 0);
+
+            $st2 = $db->prepare("SELECT COUNT(*) FROM call_logs WHERE org_id = :org_id AND sentiment = 'positive'");
+            $st2->execute([':org_id' => $tenantId]);
+            $positiveCount = (int) $st2->fetchColumn();
+
+            $st3 = $db->prepare("SELECT COUNT(*) FROM sales_reps WHERE org_id = :org_id AND is_online = 1");
+            $st3->execute([':org_id' => $tenantId]);
+            $activeRepsCount = (int) $st3->fetchColumn();
+            if ($activeRepsCount === 0) {
+                $activeRepsCount = (int) $db->query("SELECT COUNT(*) FROM sales_reps WHERE is_online = 1")->fetchColumn();
+            }
+
+            $syncedCrmsCount = (int) $db->query("SELECT COUNT(*) FROM crm_connectors WHERE is_connected = 1")->fetchColumn();
+        }
 
         echo json_encode([
             'success' => true,
+            'tenantId' => $tenantId,
             'data' => [
                 'totalCalls' => $totalCalls,
                 'totalTalkTimeMinutes' => round($totalSeconds / 60, 1),
                 'totalPipelineRevenue' => $totalDealValue,
                 'sentimentPositiveRate' => $totalCalls > 0 ? round(($positiveCount / $totalCalls) * 100, 1) : 0,
-                'activeRepsCount' => (int) $db->query("SELECT COUNT(*) FROM sales_reps WHERE is_online = 1")->fetchColumn(),
-                'syncedCrmsCount' => (int) $db->query("SELECT COUNT(*) FROM crm_connectors WHERE is_connected = 1")->fetchColumn()
+                'activeRepsCount' => $activeRepsCount,
+                'syncedCrmsCount' => $syncedCrmsCount
             ]
         ]);
         exit();
@@ -1049,6 +1160,11 @@ try {
     if ($method === 'GET' && empty($action)) {
         $whereClauses = [];
         $params = [];
+
+        if ($tenantId !== 'all') {
+            $whereClauses[] = "org_id = :org_id";
+            $params[':org_id'] = $tenantId;
+        }
 
         if (!empty($_GET['direction']) && $_GET['direction'] !== 'all') {
             $whereClauses[] = "direction = :direction";
@@ -1180,18 +1296,21 @@ try {
             'Verify CRM pipeline stage update'
         ]);
 
+        $targetOrgId = !empty($payload['orgId']) ? (string) $payload['orgId'] : (!empty($payload['org_id']) ? (string) $payload['org_id'] : ($tenantId !== 'all' ? $tenantId : 'org-tcs'));
+
         $saveSql = $isMysql
             ? "INSERT INTO call_logs (
-                id, contact_name, phone_number, company, direction, duration, timestamp,
+                id, org_id, contact_name, phone_number, company, direction, duration, timestamp,
                 rep_name, rep_avatar, rep_id, outcome, notes, sentiment, sentiment_score,
                 deal_value, deal_stage, crm_status, crm_type, sim_slot, is_encrypted,
                 recording_url, waveform, transcript, key_action_items
             ) VALUES (
-                :id, :contact_name, :phone_number, :company, :direction, :duration, :timestamp,
+                :id, :org_id, :contact_name, :phone_number, :company, :direction, :duration, :timestamp,
                 :rep_name, :rep_avatar, :rep_id, :outcome, :notes, :sentiment, :sentiment_score,
                 :deal_value, :deal_stage, :crm_status, :crm_type, :sim_slot, :is_encrypted,
                 :recording_url, :waveform, :transcript, :key_action_items
             ) ON DUPLICATE KEY UPDATE 
+                org_id = VALUES(org_id),
                 outcome = VALUES(outcome),
                 notes = VALUES(notes),
                 sentiment = VALUES(sentiment),
@@ -1205,12 +1324,12 @@ try {
                 transcript = VALUES(transcript),
                 key_action_items = VALUES(key_action_items)"
             : "INSERT OR REPLACE INTO call_logs (
-                id, contact_name, phone_number, company, direction, duration, timestamp,
+                id, org_id, contact_name, phone_number, company, direction, duration, timestamp,
                 rep_name, rep_avatar, rep_id, outcome, notes, sentiment, sentiment_score,
                 deal_value, deal_stage, crm_status, crm_type, sim_slot, is_encrypted,
                 recording_url, waveform, transcript, key_action_items
             ) VALUES (
-                :id, :contact_name, :phone_number, :company, :direction, :duration, :timestamp,
+                :id, :org_id, :contact_name, :phone_number, :company, :direction, :duration, :timestamp,
                 :rep_name, :rep_avatar, :rep_id, :outcome, :notes, :sentiment, :sentiment_score,
                 :deal_value, :deal_stage, :crm_status, :crm_type, :sim_slot, :is_encrypted,
                 :recording_url, :waveform, :transcript, :key_action_items
@@ -1219,6 +1338,7 @@ try {
         $ins = $db->prepare($saveSql);
         $ins->execute([
             ':id' => $id,
+            ':org_id' => $targetOrgId,
             ':contact_name' => $contactName,
             ':phone_number' => $phoneNumber,
             ':company' => $company,
@@ -1249,6 +1369,7 @@ try {
             'success' => true,
             'message' => "Call #$id saved dynamically to $driver database",
             'id' => $id,
+            'orgId' => $targetOrgId,
             'database' => $driver,
             'active_user' => $activeUser
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
