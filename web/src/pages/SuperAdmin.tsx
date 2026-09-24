@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { TenantOrganization } from '../types';
+import ContentEditorPanel from '../components/ContentEditorPanel';
 
 export default function SuperAdmin() {
   const navigate = useNavigate();
@@ -761,6 +762,24 @@ export default function SuperAdmin() {
           </div>
         </div>
       )}
+
+      {/* GLOBAL CONTENT MANAGEMENT — Super Admin Only */}
+      <div style={{ marginTop: '0.5rem' }}>
+        <div style={{ marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+            <Database size={18} color="var(--primary)" />
+            <h2 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+              Global Site Content Management
+            </h2>
+          </div>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>
+            Super admin controls — edit, add, or reset all page content stored in the <code style={{ color: 'var(--accent-cyan)' }}>site_pages</code> MySQL table. Changes apply globally across all pages.
+          </p>
+        </div>
+        <div className="glass-panel" style={{ padding: '1.25rem' }}>
+          <ContentEditorPanel />
+        </div>
+      </div>
     </div>
   );
 }

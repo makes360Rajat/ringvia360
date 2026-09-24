@@ -9,15 +9,46 @@ import {
   CheckCircle,
   ArrowRight,
   TrendingUp,
-  Cpu,
   Lock,
-  Headphones,
   Award
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
+const ICON_MAP: Record<string, React.ReactNode> = {
+  ShieldCheck: <ShieldCheck size={22} color="var(--accent-cyan)" />,
+  Lock: <Lock size={22} color="#fb7185" />,
+  Sparkles: <Sparkles size={22} color="var(--primary)" />,
+  MessageCircle: <Zap size={22} color="#25d366" />,
+  RefreshCw: <Share2 size={22} color="var(--accent-emerald)" />,
+  Award: <Award size={22} color="#f59e0b" />,
+};
+
 export default function Home() {
-  const { setIsSimulatorOpen, calls } = useApp();
+  const { setIsSimulatorOpen, getPageSection } = useApp();
+
+  // Fetch dynamic sections from DB (falls back to defaultSitePages in AppContext)
+  const hero = getPageSection('home', 'hero');
+  const stats = getPageSection('home', 'stats');
+  const featuresHighlight = getPageSection('home', 'features_highlight');
+
+  const heroData = hero?.data || {};
+  const statsData = stats?.data || {};
+  const featData = featuresHighlight?.data || {};
+
+  const statItems: Array<{ value: string; label: string; desc: string }> = statsData.items || [
+    { value: '99.8%', label: 'Automated Call Capture', desc: 'Zero manual rep logging required' },
+    { value: '₹48.5L+', label: 'Daily Deal Volume Tracked', desc: 'Integrated CRM pipeline attribution' },
+    { value: '45%', label: 'Productivity Increase', desc: 'Saved 1.5 hrs/rep/day in data entry' },
+    { value: '100%', label: 'Knox E2EE Isolation', desc: 'Complete hardware privacy protection' }
+  ];
+
+  const featureCards: Array<{ icon: string; title: string; desc: string }> = featData.features || [
+    { icon: 'ShieldCheck', title: 'Hardware Knox Dual-SIM Isolation', desc: 'Only business SIM activity is tracked. Personal SIM calls, SMS, and data remain 100% private.' },
+    { icon: 'Lock', title: 'End-to-End Encrypted Call Audio', desc: 'All call recordings and transcripts are encrypted with AES-256 before leaving the mobile device.' },
+    { icon: 'Sparkles', title: 'AI Sentiment & Waveform Pod', desc: 'Immediate post-call sentiment classification with interactive audio scrubbing.' },
+    { icon: 'MessageCircle', title: 'Automated WhatsApp Dispatch', desc: 'Instantly dispatches corporate WhatsApp message templates with meeting links upon call wrap-up.' },
+    { icon: 'RefreshCw', title: 'Bi-Directional CRM Sync', desc: 'Direct real-time webhooks sync to HubSpot, Zoho CRM, LeadSquared, and Freshsales.' }
+  ];
 
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1280px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '3.5rem' }}>
@@ -32,69 +63,73 @@ export default function Home() {
       }}>
         {/* Glowing Radial Backdrop */}
         <div style={{
-          position: 'absolute',
-          top: '-30%',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          width: '600px',
-          height: '350px',
+          position: 'absolute', top: '-30%', left: '50%', transform: 'translateX(-50%)',
+          width: '600px', height: '350px',
           background: 'radial-gradient(circle, var(--primary-glow) 0%, transparent 70%)',
-          filter: 'blur(50px)',
-          zIndex: 0,
-          pointerEvents: 'none'
+          filter: 'blur(50px)', zIndex: 0, pointerEvents: 'none'
         }} />
 
         <div style={{ position: 'relative', zIndex: 1, maxWidth: '840px', margin: '0 auto' }}>
+          {/* Badge */}
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }} className="glass-pill">
             <Sparkles size={14} color="var(--primary)" />
-            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>Next-Gen Salestrail Alternative</span>
-            <span style={{ color: 'var(--text-dim)' }}>•</span>
-            <span style={{ color: 'var(--accent-emerald)', fontSize: '0.8rem' }}>AI & E2EE Powered</span>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
+              {heroData.badge || '⚡ ENTERPRISE TELEPHONY AUTOMATION 2026'}
+            </span>
           </div>
 
           <h1 style={{
-            fontSize: 'clamp(2.4rem, 5vw, 3.8rem)',
-            fontWeight: 800,
-            lineHeight: 1.15,
-            letterSpacing: '-1.5px',
-            color: 'var(--text-main)',
-            marginBottom: '1.25rem'
+            fontSize: 'clamp(2.2rem, 5vw, 3.6rem)', fontWeight: 800,
+            lineHeight: 1.15, letterSpacing: '-1.5px', color: 'var(--text-main)', marginBottom: '1.25rem'
           }}>
-            Zero-Click Sales Activity Tracking, <br />
-            <span style={{
-              background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent-cyan) 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent'
-            }}>
-              Automated Calls, WhatsApp & CRM Sync
-            </span>
+            {hero?.title ? (
+              <span style={{
+                background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent-cyan) 100%)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+              }}>{hero.title}</span>
+            ) : (
+              <>
+                Zero-Click Sales Activity Tracking,{' '}
+                <span style={{
+                  background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent-cyan) 100%)',
+                  WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+                }}>
+                  Automated Calls, WhatsApp &amp; CRM Sync
+                </span>
+              </>
+            )}
           </h1>
 
-          <p style={{
-            fontSize: '1.15rem',
-            color: 'var(--text-muted)',
-            lineHeight: 1.6,
-            maxWidth: '680px',
-            margin: '0 auto 2.25rem'
-          }}>
-            Never ask sales reps to manually log another call or message. RingVia360 runs in the background of iOS and Android devices, encrypts audio, transcribes conversations with AI, and syncs directly to RingVia360 Cloud CRM, HubSpot, and custom webhooks.
+          <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: '680px', margin: '0 auto 2rem' }}>
+            {hero?.subtitle || 'Never ask sales reps to manually log another call or message. RingVia360 runs in the background of iOS and Android devices, encrypts audio, transcribes conversations with AI, and syncs directly to your CRM.'}
           </p>
+
+          {hero?.body && (
+            <p style={{ fontSize: '0.92rem', color: 'var(--text-dim)', lineHeight: 1.5, maxWidth: '600px', margin: '0 auto 1.5rem' }}>
+              {hero.body}
+            </p>
+          )}
+
+          {/* Trust Badge */}
+          {heroData.trust_badge && (
+            <div style={{ marginBottom: '1.5rem', fontSize: '0.82rem', color: 'var(--accent-emerald)', fontWeight: 600 }}>
+              ✓ {heroData.trust_badge}
+            </div>
+          )}
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
             <Link to="/dashboard" className="btn-primary" style={{ padding: '0.85rem 1.8rem', fontSize: '1rem' }}>
               <TrendingUp size={18} />
-              <span>Open Executive Dashboard</span>
+              <span>{heroData.cta_primary || 'Open Executive Dashboard'}</span>
             </Link>
-
             <button
               onClick={() => setIsSimulatorOpen(true)}
               className="btn-secondary"
               style={{ padding: '0.85rem 1.6rem', fontSize: '1rem' }}
             >
               <Smartphone size={18} color="var(--accent-cyan)" />
-              <span>Launch Mobile Dialer Simulator</span>
+              <span>{heroData.cta_secondary || 'Launch Mobile Dialer Simulator'}</span>
             </button>
-
             <Link to="/activities" className="btn-ghost" style={{ padding: '0.85rem 1.25rem' }}>
               <span>View Live Activity Stream</span>
               <ArrowRight size={16} />
@@ -102,48 +137,22 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Live Metrics Ticker Banner */}
+        {/* Stats Ticker */}
         <div style={{
-          marginTop: '3rem',
-          paddingTop: '2rem',
+          marginTop: '3rem', paddingTop: '2rem',
           borderTop: '1px solid var(--border-subtle)',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: '1.5rem',
-          textAlign: 'center'
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+          gap: '1.5rem', textAlign: 'center'
         }}>
-          <div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>
-              100%
+          {statItems.map((stat, i) => (
+            <div key={i}>
+              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: i === 0 ? 'var(--text-main)' : i === 1 ? 'var(--accent-emerald)' : i === 2 ? 'var(--accent-cyan)' : 'var(--primary)', fontFamily: 'var(--font-mono)' }}>
+                {stat.value}
+              </div>
+              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-muted)', marginTop: '2px' }}>{stat.label}</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', marginTop: '1px' }}>{stat.desc}</div>
             </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-              Zero Rep Manual Entry
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-emerald)', fontFamily: 'var(--font-mono)' }}>
-              &lt; 150ms
-            </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-              Bi-directional CRM Sync
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
-              AES-256
-            </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-              Hardware-backed E2EE
-            </div>
-          </div>
-          <div>
-            <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--primary)', fontFamily: 'var(--font-mono)' }}>
-              Dual-SIM
-            </div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-              Personal Call Isolation
-            </div>
-          </div>
+          ))}
         </div>
       </section>
 
@@ -151,154 +160,40 @@ export default function Home() {
       <section>
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <h2 style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--text-main)' }}>
-            Engineered Beyond Traditional Sales Loggers
+            {featuresHighlight?.title || 'Core Differentiators That Outperform Legacy Dialers'}
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '1rem', marginTop: '0.5rem' }}>
-            Built for enterprise security, rep adoption, and instant executive visibility.
+            {featuresHighlight?.subtitle || 'Enterprise compliance, automated CRM logging, and instant WhatsApp customer follow-up.'}
           </p>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
-          {/* Card 1 */}
-          <div className="glass-card" style={{ padding: '1.75rem' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'rgba(6, 182, 212, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <Smartphone size={22} color="var(--accent-cyan)" />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
+          {featureCards.map((feat, i) => (
+            <div key={i} className="glass-card" style={{ padding: '1.75rem' }}>
+              <div style={{
+                width: '44px', height: '44px', borderRadius: '12px',
+                background: 'var(--primary-subtle)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem'
+              }}>
+                {ICON_MAP[feat.icon] || <Sparkles size={22} color="var(--primary)" />}
+              </div>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
+                {feat.title}
+              </h3>
+              <p style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: 1.55 }}>
+                {feat.desc}
+              </p>
             </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
-              Native Background Telephony SDK
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Runs seamlessly on Android Knox and iOS CallKit. Detects inbound, outbound, and missed calls with zero battery drain and complete dual-SIM privacy separation.
-            </p>
-          </div>
-
-          {/* Card 2 */}
-          <div className="glass-card" style={{ padding: '1.75rem' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'rgba(37, 211, 102, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <Zap size={22} color="#25d366" />
-            </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
-              WhatsApp Business Intelligence
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Track text message volume, attachments, response times, and client sentiment without disrupting the rep’s chat experience or sharing personal conversations.
-            </p>
-          </div>
-
-          {/* Card 3 */}
-          <div className="glass-card" style={{ padding: '1.75rem' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'var(--primary-subtle)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <Sparkles size={22} color="var(--primary)" />
-            </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
-              AI Transcripts & Deal Sentiment
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Powered by Whisper & Gemini AI: turns recordings into instant transcripts, extracts action items, detects buyer hesitation, and updates deal health scores.
-            </p>
-          </div>
-
-          {/* Card 4 */}
-          <div className="glass-card" style={{ padding: '1.75rem' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'rgba(16, 185, 129, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <Share2 size={22} color="var(--accent-emerald)" />
-            </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
-              Universal CRM Sync Pipeline
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Plug-and-play connectors for RingVia360 CRM, HubSpot, Zoho, and real-time Webhooks with guaranteed delivery, automated retry queues, and flexible field mapping.
-            </p>
-          </div>
-
-          {/* Card 5 */}
-          <div className="glass-card" style={{ padding: '1.75rem' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'rgba(244, 63, 94, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <Lock size={22} color="#fb7185" />
-            </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
-              Bank-Grade E2EE & Compliance
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              End-to-end encrypted audio storage, Cloud KMS master keys, two-party consent beep automation, and GDPR right-to-erasure workflows out of the box.
-            </p>
-          </div>
-
-          {/* Card 6 */}
-          <div className="glass-card" style={{ padding: '1.75rem' }}>
-            <div style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '12px',
-              background: 'rgba(245, 158, 11, 0.15)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: '1rem'
-            }}>
-              <Award size={22} color="#f59e0b" />
-            </div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-main)' }}>
-              Gamified Rep Leaderboard
-            </h3>
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Inspire healthy competition with activity streak counters, conversion velocity trophies, and live device telemetry for sales directors.
-            </p>
-          </div>
+          ))}
         </div>
       </section>
 
-      {/* Salestrail vs RingVia360 Feature Matrix */}
+      {/* Competitive Comparison Table */}
       <section className="glass-panel" style={{ padding: '2.5rem 2rem' }}>
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <span className="glass-pill" style={{ color: 'var(--accent-cyan)' }}>Competitive Audit</span>
-          <h2 style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: '0.5rem' }}>
-            Why Enterprise Teams Choose RingVia360 over Salestrail
+          <h2 style={{ fontSize: '1.8rem', fontWeight: 800, marginTop: '0.5rem', color: 'var(--text-main)' }}>
+            Why Enterprise Teams Choose RingVia360
           </h2>
         </div>
 
@@ -307,32 +202,28 @@ export default function Home() {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border-glass)' }}>
                 <th style={{ padding: '1rem', color: 'var(--text-dim)', fontSize: '0.85rem' }}>FEATURE CAPABILITY</th>
-                <th style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>SALESTRAIL</th>
+                <th style={{ padding: '1rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>LEGACY DIALERS</th>
                 <th style={{ padding: '1rem', color: 'var(--primary)', fontSize: '0.85rem', fontWeight: 700 }}>RINGVIA360 ADVANCED</th>
               </tr>
             </thead>
             <tbody>
               {[
-                { feature: 'Automatic Call & WhatsApp Logging', salestrail: 'Basic mobile logger', ringvia: 'Zero-latency native background event engine' },
-                { feature: 'Speech-to-Text Transcription', salestrail: 'Third-party add-on', ringvia: 'Native Whisper AI diarization included' },
-                { feature: 'AI Sentiment & Deal Health Scoring', salestrail: 'Not available', ringvia: 'Automated deal risk & sentiment detection' },
-                { feature: 'Dual-SIM Personal Privacy Isolation', salestrail: 'Partial Android only', ringvia: 'Hardware-enforced SIM policy (iOS & Android)' },
-                { feature: 'End-to-End Encryption (E2EE)', salestrail: 'Server-side standard', ringvia: 'Client-side AES-256-GCM + Cloud KMS vault' },
-                { feature: 'Two-Party Consent Enforcement', salestrail: 'Manual rep note', ringvia: 'Automatic audio beep & consent compliance' },
-                { feature: 'CRM Custom Field Mapping', salestrail: 'Fixed templates', ringvia: 'Bi-directional visual schema mapper' },
-                { feature: 'Interactive Rep Mobile Simulator', salestrail: 'None', ringvia: 'Embedded in-browser test phone simulator' }
+                { feature: 'Automatic Call & WhatsApp Logging', legacy: 'Basic mobile logger', rv: 'Zero-latency native background event engine' },
+                { feature: 'Speech-to-Text Transcription', legacy: 'Third-party add-on', rv: 'Native Whisper AI diarization included' },
+                { feature: 'AI Sentiment & Deal Health Scoring', legacy: 'Not available', rv: 'Automated deal risk & sentiment detection' },
+                { feature: 'Dual-SIM Personal Privacy Isolation', legacy: 'Partial Android only', rv: 'Hardware-enforced SIM policy (iOS & Android)' },
+                { feature: 'End-to-End Encryption (E2EE)', legacy: 'Server-side standard', rv: 'Client-side AES-256-GCM + Cloud KMS vault' },
+                { feature: 'Two-Party Consent Enforcement', legacy: 'Manual rep note', rv: 'Automatic audio beep & consent compliance' },
+                { feature: 'CRM Custom Field Mapping', legacy: 'Fixed templates', rv: 'Bi-directional visual schema mapper' },
+                { feature: 'Interactive Rep Mobile Simulator', legacy: 'None', rv: 'Embedded in-browser test phone simulator' }
               ].map((row, idx) => (
                 <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <td style={{ padding: '1rem', fontWeight: 600, color: 'var(--text-main)', fontSize: '0.9rem' }}>
-                    {row.feature}
-                  </td>
-                  <td style={{ padding: '1rem', color: 'var(--text-dim)', fontSize: '0.85rem' }}>
-                    {row.salestrail}
-                  </td>
-                  <td style={{ padding: '1rem', color: 'var(--accent-emerald)', fontWeight: 600, fontSize: '0.88rem' }}>
+                  <td style={{ padding: '0.9rem 1rem', fontWeight: 600, color: 'var(--text-main)', fontSize: '0.88rem' }}>{row.feature}</td>
+                  <td style={{ padding: '0.9rem 1rem', color: 'var(--text-dim)', fontSize: '0.84rem' }}>{row.legacy}</td>
+                  <td style={{ padding: '0.9rem 1rem', color: 'var(--accent-emerald)', fontWeight: 600, fontSize: '0.86rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      <CheckCircle size={16} />
-                      <span>{row.ringvia}</span>
+                      <CheckCircle size={15} />
+                      <span>{row.rv}</span>
                     </div>
                   </td>
                 </tr>

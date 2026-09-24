@@ -18,7 +18,7 @@ import {
 import { useApp } from '../context/AppContext';
 
 export default function Dashboard() {
-  const { calls, reps, setActiveAudioCall, setIsSimulatorOpen, simulateNewCall } = useApp();
+  const { calls, reps, setActiveAudioCall, setIsSimulatorOpen, simulateNewCall, getPageSection } = useApp();
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today');
 
   const totalCalls = calls.length + 1485;
@@ -33,14 +33,14 @@ export default function Dashboard() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Executive Sales Intelligence
+              {getPageSection('dashboard', 'hero')?.title || 'Executive Sales Intelligence'}
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
               <span className="live-dot" /> Live Telemetry
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            Real-time call logs, WhatsApp outreach, and CRM pipeline progression across 34 reps.
+            {getPageSection('dashboard', 'hero')?.subtitle || 'Real-time call logs, WhatsApp outreach, and CRM pipeline progression across 34 reps.'}
           </p>
         </div>
 

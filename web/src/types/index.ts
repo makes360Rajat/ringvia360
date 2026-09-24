@@ -154,4 +154,26 @@ export interface SuperAdminOverview {
   tenants: TenantOrganization[];
 }
 
+export interface SitePageSection {
+  id: string;
+  page_key: string;
+  page_title: string;
+  section_key: string;
+  title: string;
+  subtitle: string;
+  body: string;
+  media_url?: string;
+  data?: any;
+  order: number;
+  is_active: boolean;
+  updated_at?: string;
+}
+
+export type PageContentMap = Record<string, {
+  page_key: string;
+  page_title: string;
+  sections: Record<string, SitePageSection>;
+}>;
+
+
 

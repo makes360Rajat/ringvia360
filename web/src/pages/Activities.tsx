@@ -40,7 +40,8 @@ export default function Activities() {
     setIsSimulatorOpen,
     deleteCallLog,
     refreshCalls,
-    dbEngine
+    dbEngine,
+    getPageSection
   } = useApp();
 
   const [filterType, setFilterType] = useState<'all' | 'inbound' | 'outbound' | 'missed' | 'whatsapp'>('all');
@@ -201,14 +202,14 @@ export default function Activities() {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Live Feed & Audio Podcast Recordings
+              {getPageSection('activities', 'hero')?.title || 'Live Feed & Audio Podcast Recordings'}
             </h1>
             <span className="glass-pill" style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
               <Radio size={12} color="var(--primary)" /> {calls.length} Active Records
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            Real-time call telemetry, dual-SIM recordings, E2EE audio podcast streaming, and Whisper AI transcriptions.
+            {getPageSection('activities', 'hero')?.subtitle || 'Real-time call telemetry, dual-SIM recordings, E2EE audio podcast streaming, and Whisper AI transcriptions.'}
           </p>
         </div>
 

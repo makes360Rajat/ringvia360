@@ -31,10 +31,11 @@ import {
   Sparkles
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import ContentEditorPanel from '../components/ContentEditorPanel';
 
 export default function Admin() {
   const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine } = useApp();
-  const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export' | 'content'>('users');
   const [recordingSearch, setRecordingSearch] = useState('');
 
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -147,6 +148,7 @@ export default function Admin() {
           { id: 'crm-rules', label: 'CRM Sync Automation', icon: Database },
           { id: 'privacy', label: 'Privacy & Work Schedule', icon: Clock },
           { id: 'export', label: 'Audit & Data Exports', icon: FileSpreadsheet },
+          { id: 'content', label: 'Content Management', icon: Layers },
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -846,6 +848,21 @@ export default function Admin() {
               Done
             </button>
           </div>
+        </div>
+      )}
+
+      {/* TAB 7: CONTENT MANAGEMENT */}
+      {activeTab === 'content' && (
+        <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+              Dynamic Site Content Management
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+              Edit all page content (headings, subtitles, pricing plans, features, stats) stored in the <code style={{ color: 'var(--accent-cyan)' }}>site_pages</code> MySQL table. Changes are reflected instantly across web and mobile.
+            </p>
+          </div>
+          <ContentEditorPanel />
         </div>
       )}
     </div>

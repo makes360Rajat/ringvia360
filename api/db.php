@@ -7,8 +7,8 @@ declare(strict_types=1);
  */
 
 function getDatabaseConnection(): array {
-    $mysqlHost = 'localhost';
     $mysqlDb = 'u488332847_dn_name';
+    $hosts = ['localhost', 'auth-db1260.hstgr.io', '127.0.0.1'];
     // Primary username provided: u488332847_ringvia360 (fallback to u488332847_payvia360 if needed)
     $usernames = ['u488332847_ringvia360', 'u488332847_payvia360'];
     $mysqlPass = 'K6b?qnk2L/';
@@ -16,25 +16,29 @@ function getDatabaseConnection(): array {
     $db = null;
     $driver = 'sqlite';
     $activeUser = null;
+    $activeHost = null;
     $errors = [];
 
-    // 1. Try MySQL Production Connection with configured users
+    // 1. Try MySQL Production Connection with configured hosts & users
     if (extension_loaded('pdo_mysql')) {
-        foreach ($usernames as $user) {
-            try {
-                $dsn = "mysql:host={$mysqlHost};dbname={$mysqlDb};charset=utf8mb4";
-                $pdo = new PDO($dsn, $user, $mysqlPass, [
-                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                    PDO::ATTR_EMULATE_PREPARES => false,
-                    PDO::ATTR_TIMEOUT => 3
-                ]);
-                $db = $pdo;
-                $driver = 'mysql';
-                $activeUser = $user;
-                break;
-            } catch (Throwable $e) {
-                $errors[$user] = $e->getMessage();
+        foreach ($hosts as $host) {
+            foreach ($usernames as $user) {
+                try {
+                    $dsn = "mysql:host={$host};dbname={$mysqlDb};charset=utf8mb4";
+                    $pdo = new PDO($dsn, $user, $mysqlPass, [
+                        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                        PDO::ATTR_EMULATE_PREPARES => false,
+                        PDO::ATTR_TIMEOUT => 3
+                    ]);
+                    $db = $pdo;
+                    $driver = 'mysql';
+                    $activeUser = $user;
+                    $activeHost = $host;
+                    break 2;
+                } catch (Throwable $e) {
+                    $errors["{$user}@{$host}"] = $e->getMessage();
+                }
             }
         }
     }
@@ -57,6 +61,7 @@ function getDatabaseConnection(): array {
         'pdo' => $db,
         'driver' => $driver,
         'user' => $activeUser,
+        'host' => $activeHost,
         'errors' => $errors
     ];
 }

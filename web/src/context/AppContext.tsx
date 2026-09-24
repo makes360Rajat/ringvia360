@@ -10,7 +10,9 @@ import type {
   AdminUser,
   AuthUser,
   TenantOrganization,
-  SuperAdminOverview
+  SuperAdminOverview,
+  SitePageSection,
+  PageContentMap
 } from '../types';
 
 export interface IncomingCallEvent {
@@ -85,7 +87,233 @@ interface AppContextType {
   toggleCrmConnector: (id: string) => Promise<void>;
   toastMessage: string | null;
   clearToast: () => void;
+  sitePages: PageContentMap;
+  fetchPageContent: (pageKey?: string) => Promise<void>;
+  savePageSection: (section: Partial<SitePageSection>) => Promise<boolean>;
+  deletePageSection: (id: string) => Promise<boolean>;
+  resetDefaultPageContent: () => Promise<boolean>;
+  getPageSection: (pageKey: string, sectionKey: string) => SitePageSection | undefined;
 }
+
+const defaultSitePages: PageContentMap = {
+  home: {
+    page_key: 'home',
+    page_title: 'Home',
+    sections: {
+      hero: {
+        id: 'sec-home-hero',
+        page_key: 'home',
+        page_title: 'Home',
+        section_key: 'hero',
+        title: 'Automate Call Tracking & Audio Intelligence for Enterprise Sales',
+        subtitle: 'RingVia360 securely captures SIM & VoIP calls, generates real-time audio transcripts & waveforms, and syncs directly into your CRM with zero battery drain.',
+        body: 'Built for high-velocity Indian & global sales teams. Native Samsung Knox dual-SIM hardware partition separates personal calls from corporate CRM activity.',
+        media_url: 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
+        data: {
+          badge: '⚡ ENTERPRISE TELEPHONY AUTOMATION 2026',
+          cta_primary: 'Start 14-Day Free Trial',
+          cta_secondary: 'Book Architecture Demo',
+          trust_badge: 'Trusted by 450+ High-Growth Enterprises Across India'
+        },
+        order: 1,
+        is_active: true
+      },
+      stats: {
+        id: 'sec-home-stats',
+        page_key: 'home',
+        page_title: 'Home',
+        section_key: 'stats',
+        title: 'Platform Benchmark & Performance Numbers',
+        subtitle: 'Real-time telemetry from enterprise production instances',
+        body: 'Our carrier-grade cloud network processes hundreds of thousands of outbound calls daily with zero data loss.',
+        data: {
+          items: [
+            { value: '99.8%', label: 'Automated Call Capture', desc: 'Zero manual rep logging required' },
+            { value: '₹48.5L+', label: 'Daily Deal Volume Tracked', desc: 'Integrated CRM pipeline attribution' },
+            { value: '45%', label: 'Productivity Increase', desc: 'Saved 1.5 hrs/rep/day in data entry' },
+            { value: '100%', label: 'Knox E2EE Isolation', desc: 'Complete hardware privacy protection' }
+          ]
+        },
+        order: 2,
+        is_active: true
+      },
+      features_highlight: {
+        id: 'sec-home-features',
+        page_key: 'home',
+        page_title: 'Home',
+        section_key: 'features_highlight',
+        title: 'Core Differentiators That Outperform Legacy Dialers',
+        subtitle: 'Enterprise compliance, automated CRM logging, and instant WhatsApp customer follow-up.',
+        body: 'Eliminate manual CRM entry and stop losing deals to forgotten follow-ups.',
+        data: {
+          features: [
+            { icon: 'ShieldCheck', title: 'Hardware Knox Dual-SIM Isolation', desc: 'Only business SIM activity is tracked. Personal SIM calls, SMS, and data remain 100% private to the employee.' },
+            { icon: 'Lock', title: 'End-to-End Encrypted Call Audio', desc: 'All call recordings and transcripts are encrypted with AES-256 before leaving the mobile device.' },
+            { icon: 'Sparkles', title: 'AI Sentiment & Waveform Pod', desc: 'Immediate post-call sentiment classification (Positive / Neutral / Negative) with interactive audio scrubbing.' },
+            { icon: 'MessageCircle', title: 'Automated WhatsApp Dispatch', desc: 'Instantly dispatches corporate WhatsApp message templates with meeting links upon call wrap-up.' },
+            { icon: 'RefreshCw', title: 'Bi-Directional CRM Sync', desc: 'Direct real-time webhooks sync to Salesforce, HubSpot, Zoho CRM, LeadSquared, and Freshsales.' }
+          ]
+        },
+        order: 3,
+        is_active: true
+      }
+    }
+  },
+  features: {
+    page_key: 'features',
+    page_title: 'Features',
+    sections: {
+      hero: {
+        id: 'sec-features-hero',
+        page_key: 'features',
+        page_title: 'Features',
+        section_key: 'hero',
+        title: 'Enterprise Telephony Engineered for Modern Sales Teams',
+        subtitle: 'Deep mobile telemetry, carrier-grade audio capture, and autonomous CRM automation for seamless closing.',
+        body: 'RingVia360 combines high-availability mobile companion apps with web admin supervision.',
+        data: {
+          badge: 'PLATFORM CAPABILITIES',
+          filter_categories: ['All Capabilities', 'Compliance & Privacy', 'CRM Automation', 'Speech Intelligence']
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  },
+  pricing: {
+    page_key: 'pricing',
+    page_title: 'Pricing',
+    sections: {
+      hero: {
+        id: 'sec-pricing-hero',
+        page_key: 'pricing',
+        page_title: 'Pricing',
+        section_key: 'hero',
+        title: 'Corporate Pricing Tailored for Indian & Global Scale',
+        subtitle: 'Transparent INR corporate pricing with isolated tenant workspaces, unlimited storage, and 99.9% uptime SLA.',
+        body: 'Every subscription includes private database isolation, Knox hardware telemetry, and dedicated support.',
+        data: {
+          badge: 'SIMPLE TRANSPARENT PLANS IN INR',
+          billing_period: 'monthly',
+          plans: [
+            { id: 'starter', name: 'Starter Team', price_inr: '₹4,999', period: '/ month', max_reps: 'Up to 5 Reps', features: ['Automated SIM Call Capture', 'Encrypted Audio Recording', 'RingVia360 Cloud CRM', 'Post-Call Notes & Audio Pod', 'Email Support'], popular: false },
+            { id: 'pro', name: 'Growth & Scale', price_inr: '₹14,999', period: '/ month', max_reps: 'Up to 25 Reps', features: ['Everything in Starter', 'Knox Dual-SIM Separation', 'Salesforce & HubSpot Auto-Sync', 'AI Sentiment & Waveform Pod', 'Priority Phone Support'], popular: true },
+            { id: 'enterprise', name: 'Enterprise Business', price_inr: '₹45,000', period: '/ month', max_reps: 'Up to 100 Reps', features: ['Everything in Growth', 'Custom CRM Field Mappings', 'Dedicated Multi-Tenant Isolation', 'Custom WhatsApp Bot Templates', '24/7 Dedicated Account Manager'], popular: false },
+            { id: 'custom', name: 'Banking & Telecom', price_inr: '₹85,000', period: '/ month', max_reps: 'Unlimited Reps', features: ['Custom On-Prem / VPC Hosting', 'SOC-2 & ISO 27001 Compliance', 'Custom Knox MDM Integration', 'Unlimited Call Audio Vault', 'Tailored SLA Guarantee'], popular: false }
+          ]
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  },
+  activities: {
+    page_key: 'activities',
+    page_title: 'Activities',
+    sections: {
+      hero: {
+        id: 'sec-activities-hero',
+        page_key: 'activities',
+        page_title: 'Activities',
+        section_key: 'hero',
+        title: 'Real-Time Sales Activity & Call Stream',
+        subtitle: 'Live inbound and outbound call feeds with waveform audio player, rep attribution, and CRM delivery verification.',
+        body: 'Monitor rep conversations as they happen across all active field agents.',
+        data: {
+          live_banner: 'LIVE FEED CONNECTED • 41 ACTIVE CALLS SYNCHRONIZED TODAY',
+          quick_filters: ['All Calls', 'Inbound', 'Outbound', 'Missed', 'High Value (>₹50k)']
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  },
+  analytics: {
+    page_key: 'analytics',
+    page_title: 'Analytics',
+    sections: {
+      hero: {
+        id: 'sec-analytics-hero',
+        page_key: 'analytics',
+        page_title: 'Analytics',
+        section_key: 'hero',
+        title: 'Telephony Performance & Pipeline Intelligence',
+        subtitle: 'Transform field calling volume into quantifiable revenue outcomes and rep coaching opportunities.',
+        body: 'Interactive drill-downs into call duration distributions, conversion velocity, and sentiment scores.',
+        data: {
+          target_talk_time_min: 180,
+          positive_sentiment_goal: '85%',
+          active_reps_online: 12
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  },
+  crm_sync: {
+    page_key: 'crm_sync',
+    page_title: 'CRM Sync',
+    sections: {
+      hero: {
+        id: 'sec-crm-hero',
+        page_key: 'crm_sync',
+        page_title: 'CRM Sync',
+        section_key: 'hero',
+        title: 'Zero-Touch Bi-Directional CRM Integrations',
+        subtitle: 'Eliminate manual logging forever. Every call, note, audio recording, and sentiment tag is automatically pushed to your CRM.',
+        body: 'Supports automatic contact creation, deal stage progression, and custom field synchronization.',
+        data: {
+          supported_crms: ['Salesforce', 'HubSpot', 'Zoho CRM', 'LeadSquared', 'Freshsales', 'Custom Webhooks'],
+          sync_frequency: 'Real-time (sub-second webhook push)'
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  },
+  dashboard: {
+    page_key: 'dashboard',
+    page_title: 'Dashboard',
+    sections: {
+      hero: {
+        id: 'sec-dashboard-hero',
+        page_key: 'dashboard',
+        page_title: 'Dashboard',
+        section_key: 'hero',
+        title: 'Executive Sales Intelligence',
+        subtitle: 'Real-time call logs, WhatsApp outreach, and CRM pipeline progression across your sales team.',
+        body: 'Monitor every rep, every call, and every deal — all in one unified command center.',
+        data: {
+          live_badge: 'LIVE TELEMETRY',
+          time_ranges: ['today', 'week', 'month']
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  },
+  leaderboard: {
+    page_key: 'leaderboard',
+    page_title: 'Leaderboard',
+    sections: {
+      hero: {
+        id: 'sec-leaderboard-hero',
+        page_key: 'leaderboard',
+        page_title: 'Leaderboard',
+        section_key: 'hero',
+        title: 'Sales Performance Leaderboard',
+        subtitle: 'Gamified rep rankings based on calls made, deals closed, and talk-time targets achieved.',
+        body: 'Drive friendly competition and celebrate top performers across your field sales team.',
+        data: {
+          badges: ['🏆 Top Performer', '⚡ Speed Demon', '🔥 On Fire', '💎 Deal Closer'],
+          streak_goal_days: 14
+        },
+        order: 1,
+        is_active: true
+      }
+    }
+  }
+};
 
 const initialCalls: CallLog[] = [
   {
@@ -549,6 +777,188 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [superAdminOverview, setSuperAdminOverview] = useState<SuperAdminOverview | null>(null);
 
+  // Dynamic Site Pages State (stored and fetched from site_pages table)
+  const [sitePages, setSitePages] = useState<PageContentMap>(() => {
+    try {
+      const saved = localStorage.getItem('ringvia360_site_pages');
+      return saved ? JSON.parse(saved) : defaultSitePages;
+    } catch (_) {
+      return defaultSitePages;
+    }
+  });
+
+  const getPageSection = (pageKey: string, sectionKey: string): SitePageSection | undefined => {
+    return sitePages[pageKey]?.sections[sectionKey] || defaultSitePages[pageKey]?.sections[sectionKey];
+  };
+
+  const fetchPageContent = async (pageKey?: string): Promise<void> => {
+    try {
+      const endpoints = pageKey
+        ? [`/api/pages.php?page=${encodeURIComponent(pageKey)}`, `https://ringvia360.com/api/pages.php?page=${encodeURIComponent(pageKey)}`]
+        : ['/api/pages.php?action=all', 'https://ringvia360.com/api/pages.php?action=all'];
+
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, { headers: { Accept: 'application/json' } });
+          if (res.ok) {
+            const json = await res.json();
+            if (json.success && json.data) {
+              if (pageKey) {
+                setSitePages(prev => {
+                  const updated = {
+                    ...prev,
+                    [pageKey]: {
+                      page_key: pageKey,
+                      page_title: json.page_title || pageKey,
+                      sections: json.sections || {}
+                    }
+                  };
+                  localStorage.setItem('ringvia360_site_pages', JSON.stringify(updated));
+                  return updated;
+                });
+              } else {
+                setSitePages(prev => {
+                  const merged = { ...defaultSitePages, ...prev, ...json.data };
+                  localStorage.setItem('ringvia360_site_pages', JSON.stringify(merged));
+                  return merged;
+                });
+              }
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      console.warn('Could not fetch dynamic pages content from server:', e);
+    }
+  };
+
+  const savePageSection = async (section: Partial<SitePageSection>): Promise<boolean> => {
+    try {
+      const endpoints = ['/api/pages.php?action=save', 'https://ringvia360.com/api/pages.php?action=save'];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: section.id,
+              page_key: section.page_key,
+              page_title: section.page_title,
+              section_key: section.section_key,
+              content_title: section.title,
+              content_subtitle: section.subtitle,
+              body_text: section.body,
+              media_url: section.media_url,
+              json_data: section.data,
+              display_order: section.order,
+              is_active: section.is_active !== false ? 1 : 0
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.success) {
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Update local state and cache
+      if (section.page_key && section.section_key) {
+        setSitePages(prev => {
+          const page = prev[section.page_key!] || {
+            page_key: section.page_key!,
+            page_title: section.page_title || section.page_key!,
+            sections: {}
+          };
+          const updatedSection: SitePageSection = {
+            id: section.id || `sec-${section.page_key}-${section.section_key}`,
+            page_key: section.page_key!,
+            page_title: section.page_title || page.page_title,
+            section_key: section.section_key!,
+            title: section.title || '',
+            subtitle: section.subtitle || '',
+            body: section.body || '',
+            media_url: section.media_url,
+            data: section.data,
+            order: section.order ?? 0,
+            is_active: section.is_active !== false,
+            updated_at: new Date().toISOString()
+          };
+          const updated = {
+            ...prev,
+            [section.page_key!]: {
+              ...page,
+              sections: {
+                ...page.sections,
+                [section.section_key!]: updatedSection
+              }
+            }
+          };
+          localStorage.setItem('ringvia360_site_pages', JSON.stringify(updated));
+          return updated;
+        });
+      }
+
+      setToastMessage('Page content updated successfully in database table!');
+      return true;
+    } catch (e) {
+      console.error('Failed to save page section:', e);
+      return false;
+    }
+  };
+
+  const deletePageSection = async (id: string): Promise<boolean> => {
+    try {
+      const endpoints = [`/api/pages.php?action=delete&id=${encodeURIComponent(id)}`, `https://ringvia360.com/api/pages.php?action=delete&id=${encodeURIComponent(id)}`];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, { method: 'DELETE' });
+          if (res.ok) break;
+        } catch (_) {}
+      }
+      setSitePages(prev => {
+        const next = { ...prev };
+        for (const pk in next) {
+          const p = next[pk];
+          for (const sk in p.sections) {
+            if (p.sections[sk].id === id) {
+              const newSecs = { ...p.sections };
+              delete newSecs[sk];
+              next[pk] = { ...p, sections: newSecs };
+              break;
+            }
+          }
+        }
+        localStorage.setItem('ringvia360_site_pages', JSON.stringify(next));
+        return next;
+      });
+      setToastMessage('Page section removed from database');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const resetDefaultPageContent = async (): Promise<boolean> => {
+    try {
+      const endpoints = ['/api/pages.php?action=reset_defaults', 'https://ringvia360.com/api/pages.php?action=reset_defaults'];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, { method: 'POST' });
+          if (res.ok) break;
+        } catch (_) {}
+      }
+      setSitePages(defaultSitePages);
+      localStorage.setItem('ringvia360_site_pages', JSON.stringify(defaultSitePages));
+      setToastMessage('All pages reset to default database structure');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
   const [incomingCallAlert, setIncomingCallAlert] = useState<IncomingCallEvent | null>(null);
   const [activeCallSession, setActiveCallSession] = useState<ActiveCallSession | null>(null);
   const [wrapUpModalCall, setWrapUpModalCall] = useState<CallLog | null>(null);
@@ -986,6 +1396,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     fetchAllDataFromServer();
+    fetchPageContent();
     const interval = setInterval(fetchAllDataFromServer, 5000);
     return () => clearInterval(interval);
   }, [activeTenantId]);
@@ -1518,7 +1929,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteRep,
         toggleCrmConnector,
         toastMessage,
-        clearToast
+        clearToast,
+        sitePages,
+        fetchPageContent,
+        savePageSection,
+        deletePageSection,
+        resetDefaultPageContent,
+        getPageSection
       }}
     >
       {children}
