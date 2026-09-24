@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../models/call_record.dart';
 import '../models/lead_contact.dart';
@@ -23,6 +24,31 @@ class CloudSyncService {
 
   CloudSyncService({this.serverUrl = 'https://ringvia360.com/api/calls.php'});
 
+  Future<String?> uploadAudioFile(String localPath, String callId) async {
+    try {
+      final file = File(localPath);
+      if (!await file.exists()) return null;
+
+      final uri = Uri.parse('$serverUrl?action=upload_audio');
+      final request = http.MultipartRequest('POST', uri);
+      request.fields['callId'] = callId;
+      request.files.add(await http.MultipartFile.fromPath(
+        'audio',
+        localPath,
+      ));
+
+      final streamed = await request.send().timeout(const Duration(seconds: 15));
+      final response = await http.Response.fromStream(streamed);
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['recordingUrl'] != null) {
+          return data['recordingUrl'].toString();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<CloudSyncResult> syncCallToCloud(CallRecord call) async {
     final mockCrmId = 'RV360-${DateTime.now().millisecondsSinceEpoch.toRadixString(16).toUpperCase()}';
     try {
@@ -33,11 +59,17 @@ class CloudSyncService {
           ? 'positive'
           : (call.sentiment == SentimentScore.negative ? 'negative' : 'neutral');
 
-      final recordingUrl = (call.recordingPath != null && call.recordingPath!.isNotEmpty)
-          ? (call.recordingPath!.startsWith('http')
-              ? call.recordingPath!
-              : 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3')
-          : 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+      String recordingUrl = 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+      if (call.recordingPath != null && call.recordingPath!.isNotEmpty) {
+        if (call.recordingPath!.startsWith('http')) {
+          recordingUrl = call.recordingPath!;
+        } else {
+          final uploaded = await uploadAudioFile(call.recordingPath!, call.id);
+          if (uploaded != null && uploaded.isNotEmpty) {
+            recordingUrl = uploaded;
+          }
+        }
+      }
 
       final body = jsonEncode({
         'id': call.id,

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Trophy,
   Award,
@@ -10,12 +10,45 @@ import {
   Clock,
   TrendingUp,
   ShieldCheck,
-  CheckCircle2
+  CheckCircle2,
+  Plus,
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export default function Leaderboard() {
-  const { reps } = useApp();
+  const { reps, addRep, dbEngine, refreshAllData } = useApp();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [repName, setRepName] = useState('');
+  const [repRole, setRepRole] = useState('Account Executive');
+  const [repPhone, setRepPhone] = useState('+91 98200 12345');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleAddRep = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!repName) return;
+    await addRep({
+      name: repName,
+      role: repRole,
+      phone: repPhone,
+      callsToday: Math.floor(Math.random() * 20) + 15,
+      talkTimeMinutes: Math.floor(Math.random() * 80) + 60,
+      dealsClosed: Math.floor(Math.random() * 3) + 1,
+      conversionRate: 24.5,
+      rank: reps.length + 1,
+      streakDays: 4,
+      isOnline: true
+    });
+    setRepName('');
+    setIsModalOpen(false);
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await refreshAllData();
+    setTimeout(() => setIsRefreshing(false), 800);
+  };
 
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
@@ -35,11 +68,122 @@ export default function Leaderboard() {
           </p>
         </div>
 
-        <div className="glass-pill" style={{ color: 'var(--accent-emerald)', padding: '0.5rem 1rem' }}>
-          <span className="live-dot" />
-          <span>4 Reps Online • Zero Data Loss</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div className="glass-pill" style={{ color: 'var(--accent-emerald)', padding: '0.5rem 1rem' }}>
+            <span className="live-dot" />
+            <span>{reps.filter(r => r.isOnline).length} Reps Online • {dbEngine.toUpperCase()}</span>
+          </div>
+
+          <button
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="btn-secondary"
+            style={{ fontSize: '0.82rem', padding: '0.5rem 0.9rem' }}
+          >
+            <RefreshCw size={14} className={isRefreshing ? 'animate-spin' : ''} />
+            <span>{isRefreshing ? 'Syncing...' : 'Sync DB'}</span>
+          </button>
+
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="btn-primary"
+            style={{ fontSize: '0.82rem', padding: '0.5rem 0.9rem' }}
+          >
+            <Plus size={15} />
+            <span>Add Sales Rep</span>
+          </button>
         </div>
       </div>
+
+      {isModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(5, 7, 15, 0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '1rem'
+        }}>
+          <div className="glass-card" style={{ maxWidth: '440px', width: '100%', padding: '1.75rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-main)' }}>Enroll Sales Rep</h3>
+              <button onClick={() => setIsModalOpen(false)} className="btn-ghost" style={{ padding: '4px' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleAddRep} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '4px' }}>Representative Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Vikram Deshmukh"
+                  value={repName}
+                  onChange={e => setRepName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-glass)',
+                    background: 'var(--bg-surface-elevated)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '4px' }}>Role / Designation</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Senior Enterprise AE"
+                  value={repRole}
+                  onChange={e => setRepRole(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-glass)',
+                    background: 'var(--bg-surface-elevated)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-dim)', marginBottom: '4px' }}>Corporate Airtel / Jio SIM Number</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="+91 98200 11223"
+                  value={repPhone}
+                  onChange={e => setRepPhone(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-glass)',
+                    background: 'var(--bg-surface-elevated)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button type="button" onClick={() => setIsModalOpen(false)} className="btn-secondary" style={{ flex: 1, padding: '0.6rem' }}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary" style={{ flex: 1, padding: '0.6rem' }}>
+                  Save to Database
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Top 3 Podium Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>

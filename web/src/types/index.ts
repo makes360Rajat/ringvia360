@@ -106,3 +106,15 @@ export interface SecuritySettings {
   whitelistedIps: string[];
   deviceAttestationEnforced: boolean;
 }
+
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  sim: string;
+  device: string;
+  lastActive: string;
+}
+

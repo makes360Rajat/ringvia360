@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * RingVia360 Unified Dynamic REST API & Sync Engine
+ * Handles Call Logs, Audio Recordings, Sales Reps, CRM Pipelines, Policies, and Fleet Users
+ */
+
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
@@ -18,10 +23,20 @@ try {
     /** @var PDO $db */
     $db = $conn['pdo'];
     $driver = $conn['driver'];
+    $activeUser = $conn['user'] ?? 'system';
     $isMysql = ($driver === 'mysql');
 
-    // 1. Create Tables
+    // Ensure uploads directory exists
+    $uploadDir = __DIR__ . '/uploads';
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0755, true);
+    }
+
+    // =========================================================
+    // 1. DYNAMIC TABLE INITIALIZATION
+    // =========================================================
     if ($isMysql) {
+        // Call Logs Table
         $db->exec("
             CREATE TABLE IF NOT EXISTS call_logs (
                 id VARCHAR(128) NOT NULL PRIMARY KEY,
@@ -53,6 +68,7 @@ try {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ");
 
+        // Leads & Contacts Table
         $db->exec("
             CREATE TABLE IF NOT EXISTS leads_contacts (
                 id VARCHAR(128) NOT NULL PRIMARY KEY,
@@ -69,7 +85,73 @@ try {
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ");
+
+        // Sales Reps & Leaderboard Table
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS sales_reps (
+                id VARCHAR(128) NOT NULL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                role VARCHAR(128) NOT NULL,
+                avatar VARCHAR(512),
+                phone VARCHAR(64),
+                device_model VARCHAR(128),
+                os_version VARCHAR(128),
+                battery_level INT DEFAULT 90,
+                is_online TINYINT(1) DEFAULT 1,
+                last_sync VARCHAR(64) DEFAULT 'Just now',
+                calls_today INT DEFAULT 0,
+                talk_time_minutes INT DEFAULT 0,
+                deals_closed INT DEFAULT 0,
+                conversion_rate DECIMAL(5,2) DEFAULT 20.00,
+                rank_order INT DEFAULT 1,
+                streak_days INT DEFAULT 5,
+                badges TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ");
+
+        // CRM Connectors Table
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS crm_connectors (
+                id VARCHAR(128) NOT NULL PRIMARY KEY,
+                name VARCHAR(128) NOT NULL,
+                description TEXT,
+                icon VARCHAR(32) DEFAULT '⚡',
+                is_connected TINYINT(1) DEFAULT 1,
+                last_sync_time VARCHAR(64) DEFAULT 'Real-time',
+                synced_records_count INT DEFAULT 0,
+                pending_sync_count INT DEFAULT 0,
+                auto_sync TINYINT(1) DEFAULT 1,
+                sync_frequency VARCHAR(64) DEFAULT 'Instant',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ");
+
+        // App Security & Policies Settings
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key VARCHAR(128) NOT NULL PRIMARY KEY,
+                setting_value LONGTEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ");
+
+        // Admin Fleet Users Table
+        $db->exec("
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id VARCHAR(128) NOT NULL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                role VARCHAR(128) DEFAULT 'Sales Rep',
+                status VARCHAR(64) DEFAULT 'Active',
+                sim VARCHAR(64) DEFAULT 'SIM 1 Bound',
+                device VARCHAR(128) DEFAULT 'Android Knox 3.9',
+                last_active VARCHAR(64) DEFAULT 'Just now',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ");
     } else {
+        // SQLite equivalents
         $db->exec("
             CREATE TABLE IF NOT EXISTS call_logs (
                 id TEXT PRIMARY KEY,
@@ -98,9 +180,7 @@ try {
                 key_action_items TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        ");
 
-        $db->exec("
             CREATE TABLE IF NOT EXISTS leads_contacts (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -115,15 +195,69 @@ try {
                 notes TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS sales_reps (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                avatar TEXT,
+                phone TEXT,
+                device_model TEXT,
+                os_version TEXT,
+                battery_level INTEGER DEFAULT 90,
+                is_online INTEGER DEFAULT 1,
+                last_sync TEXT DEFAULT 'Just now',
+                calls_today INTEGER DEFAULT 0,
+                talk_time_minutes INTEGER DEFAULT 0,
+                deals_closed INTEGER DEFAULT 0,
+                conversion_rate REAL DEFAULT 20.00,
+                rank_order INTEGER DEFAULT 1,
+                streak_days INTEGER DEFAULT 5,
+                badges TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS crm_connectors (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                icon TEXT DEFAULT '⚡',
+                is_connected INTEGER DEFAULT 1,
+                last_sync_time TEXT DEFAULT 'Real-time',
+                synced_records_count INTEGER DEFAULT 0,
+                pending_sync_count INTEGER DEFAULT 0,
+                auto_sync INTEGER DEFAULT 1,
+                sync_frequency TEXT DEFAULT 'Instant'
+            );
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                email TEXT NOT NULL,
+                role TEXT DEFAULT 'Sales Rep',
+                status TEXT DEFAULT 'Active',
+                sim TEXT DEFAULT 'SIM 1 Bound',
+                device TEXT DEFAULT 'Android Knox 3.9',
+                last_active TEXT DEFAULT 'Just now',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
         ");
     }
 
-    // 2. Seed Call Logs if Table is Empty
-    $countStmt = $db->query("SELECT COUNT(*) AS total FROM call_logs");
-    $total = (int) $countStmt->fetchColumn();
-
-    if ($total === 0) {
-        $initialData = [
+    // =========================================================
+    // 2. SEED INITIAL DATA IF EMPTY
+    // =========================================================
+    
+    // Seed Call Logs
+    $callCount = (int) $db->query("SELECT COUNT(*) FROM call_logs")->fetchColumn();
+    if ($callCount === 0) {
+        $initialCalls = [
             [
                 'id' => 'call-101',
                 'contact_name' => 'Aarav Sharma',
@@ -131,12 +265,12 @@ try {
                 'company' => 'Tata Consultancy Services',
                 'direction' => 'outbound',
                 'duration' => 384,
-                'timestamp' => '8m ago',
+                'timestamp' => '2 mins ago',
                 'rep_name' => 'Rajesh Kumar (RingVia360)',
-                'rep_avatar' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+                'rep_avatar' => 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
                 'rep_id' => 'rep-1',
                 'outcome' => 'Demo Completed - Contract Requested',
-                'notes' => 'Decision maker confirmed budget for 50 licenses. Requested RingVia360 custom field mapping.',
+                'notes' => 'Decision maker confirmed budget for 50 licenses. Requested RingVia360 custom field mapping for lead source and call tags.',
                 'sentiment' => 'positive',
                 'sentiment_score' => 94,
                 'deal_value' => 48000,
@@ -148,15 +282,12 @@ try {
                 'recording_url' => 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
                 'waveform' => json_encode([30, 45, 65, 80, 70, 85, 90, 75, 60, 50, 65, 80, 95, 75, 60, 45, 40, 55, 70, 60]),
                 'transcript' => json_encode([
-                    ['speaker' => 'Rajesh Kumar', 'text' => 'Namaste Aarav, thanks for joining. Did you test our SIM isolation and live audio podcast sync?', 'timestamp' => '00:03'],
-                    ['speaker' => 'Aarav Sharma', 'text' => 'Yes Rajesh, our team tested the Knox dual-SIM isolation on 10 devices. Corporate calls were logged flawlessly into RingVia360.', 'timestamp' => '00:45'],
-                    ['speaker' => 'Rajesh Kumar', 'text' => 'Fantastic! We can have your custom RingVia360 fields and live feed reporting active by Monday.', 'timestamp' => '02:10'],
-                    ['speaker' => 'Aarav Sharma', 'text' => 'Perfect. Please send over the enterprise agreement for 50 seats.', 'timestamp' => '05:30']
+                    ['speaker' => 'Rajesh Kumar', 'text' => 'Namaste Aarav, thanks for joining. Following up on the enterprise sales tracking proposal.', 'timestamp' => '00:04'],
+                    ['speaker' => 'Aarav Sharma', 'text' => 'Namaste Rajesh! Yes, our leadership team looked over the automatic call recording specs. We love the zero-click RingVia360 sync.', 'timestamp' => '00:15'],
+                    ['speaker' => 'Rajesh Kumar', 'text' => 'The dual-SIM logging and end-to-end encryption ensure ISO & SOC2 compliance seamlessly.', 'timestamp' => '00:32'],
+                    ['speaker' => 'Aarav Sharma', 'text' => 'Can we start a 50-seat pilot by next Monday?', 'timestamp' => '01:10']
                 ]),
-                'key_action_items' => json_encode([
-                    'Send Docusign MSA for 50 licenses',
-                    'Schedule kickoff call with IT Director'
-                ])
+                'key_action_items' => json_encode(['Send Docusign MSA for 50 licenses', 'Schedule kickoff call with technical lead'])
             ],
             [
                 'id' => 'call-102',
@@ -165,10 +296,10 @@ try {
                 'company' => 'Infosys Technologies',
                 'direction' => 'inbound',
                 'duration' => 512,
-                'timestamp' => '35m ago',
-                'rep_name' => 'Rajesh Kumar (RingVia360)',
-                'rep_avatar' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-                'rep_id' => 'rep-1',
+                'timestamp' => '18 mins ago',
+                'rep_name' => 'Sneha Kapoor',
+                'rep_avatar' => 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120&auto=format&fit=crop&q=80',
+                'rep_id' => 'rep-2',
                 'outcome' => 'Technical Validation Passed',
                 'notes' => 'Client tested inbound call capture on Samsung Knox devices with zero battery impact and full E2EE audio recording.',
                 'sentiment' => 'positive',
@@ -182,13 +313,10 @@ try {
                 'recording_url' => 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
                 'waveform' => json_encode([40, 55, 75, 90, 85, 95, 80, 70, 60, 75, 85, 90, 65, 50, 45, 60, 75, 85, 70, 55]),
                 'transcript' => json_encode([
-                    ['speaker' => 'Priya Patel', 'text' => 'Hello Rajesh, we just completed the 24-hour battery consumption benchmark on our sales team.', 'timestamp' => '00:08'],
-                    ['speaker' => 'Rajesh Kumar', 'text' => 'Great to hear, Priya! How did RingVia360 perform against Salestrail?', 'timestamp' => '00:25'],
-                    ['speaker' => 'Priya Patel', 'text' => 'Zero noticeable battery drain even with full E2EE call recording enabled.', 'timestamp' => '01:15']
+                    ['speaker' => 'Sneha Kapoor', 'text' => 'RingVia360 enterprise desk, Sneha speaking. How can I assist you today, Priya?', 'timestamp' => '00:03'],
+                    ['speaker' => 'Priya Patel', 'text' => 'Hi Sneha, we verified that inbound calls on Android 14 are logged even in background.', 'timestamp' => '00:18']
                 ]),
-                'key_action_items' => json_encode([
-                    'Email Knox MDM deployment guide'
-                ])
+                'key_action_items' => json_encode(['Email Knox MDM deployment guide'])
             ],
             [
                 'id' => 'call-103',
@@ -197,31 +325,58 @@ try {
                 'company' => 'Wipro Enterprises',
                 'direction' => 'missed',
                 'duration' => 0,
-                'timestamp' => '1h ago',
-                'rep_name' => 'Rajesh Kumar (RingVia360)',
-                'rep_avatar' => 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-                'rep_id' => 'rep-1',
-                'outcome' => 'Missed Call - Auto Follow-up Dispatched',
-                'notes' => 'Auto-responder dispatched instant WhatsApp template with meeting link.',
+                'timestamp' => '1 hour ago',
+                'rep_name' => 'Amit Verma',
+                'rep_avatar' => 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80',
+                'rep_id' => 'rep-3',
+                'outcome' => 'Auto-SMS Dispatched via RingVia360',
+                'notes' => 'Missed call during client meeting. Auto-responder sent WhatsApp link with calendar invite.',
                 'sentiment' => 'neutral',
-                'sentiment_score' => 50,
-                'deal_value' => 15000,
+                'sentiment_score' => 60,
+                'deal_value' => 35000,
                 'deal_stage' => 'Discovery',
                 'crm_status' => 'synced',
                 'crm_type' => 'RingVia360',
                 'sim_slot' => 'SIM 1 (Airtel Enterprise)',
                 'is_encrypted' => 1,
                 'recording_url' => 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
-                'waveform' => json_encode([10, 10, 10, 10, 10, 10, 10, 10, 10, 10]),
+                'waveform' => json_encode([10, 15, 10, 5, 5, 5, 10, 5, 5, 10, 5, 5, 5, 10, 5, 5, 5, 10, 5, 5]),
                 'transcript' => json_encode([]),
-                'key_action_items' => json_encode([
-                    'Check if client booked calendar slot'
-                ])
+                'key_action_items' => json_encode(['Trigger callback within 2 hours'])
+            ],
+            [
+                'id' => 'call-104',
+                'contact_name' => 'Ananya Deshmukh',
+                'phone_number' => '+91 98330 98765',
+                'company' => 'HCL Technologies',
+                'direction' => 'outbound',
+                'duration' => 420,
+                'timestamp' => '2 hours ago',
+                'rep_name' => 'Rajesh Kumar (RingVia360)',
+                'rep_avatar' => 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
+                'rep_id' => 'rep-1',
+                'outcome' => 'Contract Signed & Closed Won',
+                'notes' => '120-seat annual deployment approved across pan-India sales pods.',
+                'sentiment' => 'positive',
+                'sentiment_score' => 96,
+                'deal_value' => 115000,
+                'deal_stage' => 'Closed Won',
+                'crm_status' => 'synced',
+                'crm_type' => 'RingVia360',
+                'sim_slot' => 'SIM 1 (Airtel Enterprise)',
+                'is_encrypted' => 1,
+                'recording_url' => 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
+                'waveform' => json_encode([35, 50, 70, 85, 90, 80, 75, 85, 95, 90, 80, 70, 75, 85, 90, 75, 65, 55, 45, 60]),
+                'transcript' => json_encode([
+                    ['speaker' => 'Rajesh Kumar', 'text' => 'Congratulations Ananya on finalizing the RingVia360 deployment!', 'timestamp' => '00:05'],
+                    ['speaker' => 'Ananya Deshmukh', 'text' => 'Thank you Rajesh! Our operations team is rolling out the companion app to 120 reps today.', 'timestamp' => '00:30']
+                ]),
+                'key_action_items' => json_encode(['Deploy RingVia360 Knox fleet configuration'])
             ]
         ];
 
-        $insSql = $isMysql
-            ? "INSERT INTO call_logs (
+        $ins = $db->prepare("
+            INSERT INTO call_logs (
                 id, contact_name, phone_number, company, direction, duration, timestamp,
                 rep_name, rep_avatar, rep_id, outcome, notes, sentiment, sentiment_score,
                 deal_value, deal_stage, crm_status, crm_type, sim_slot, is_encrypted,
@@ -231,112 +386,667 @@ try {
                 :rep_name, :rep_avatar, :rep_id, :outcome, :notes, :sentiment, :sentiment_score,
                 :deal_value, :deal_stage, :crm_status, :crm_type, :sim_slot, :is_encrypted,
                 :recording_url, :waveform, :transcript, :key_action_items
-            ) ON DUPLICATE KEY UPDATE outcome = VALUES(outcome), notes = VALUES(notes)"
-            : "INSERT OR REPLACE INTO call_logs (
-                id, contact_name, phone_number, company, direction, duration, timestamp,
-                rep_name, rep_avatar, rep_id, outcome, notes, sentiment, sentiment_score,
-                deal_value, deal_stage, crm_status, crm_type, sim_slot, is_encrypted,
-                recording_url, waveform, transcript, key_action_items
-            ) VALUES (
-                :id, :contact_name, :phone_number, :company, :direction, :duration, :timestamp,
-                :rep_name, :rep_avatar, :rep_id, :outcome, :notes, :sentiment, :sentiment_score,
-                :deal_value, :deal_stage, :crm_status, :crm_type, :sim_slot, :is_encrypted,
-                :recording_url, :waveform, :transcript, :key_action_items
-            )";
-
-        $insStmt = $db->prepare($insSql);
-        foreach ($initialData as $row) {
-            $insStmt->execute($row);
+            )
+        ");
+        foreach ($initialCalls as $call) {
+            $ins->execute($call);
         }
     }
 
-    // 3. Seed Leads if Empty
-    $leadsCountStmt = $db->query("SELECT COUNT(*) AS total FROM leads_contacts");
-    if ((int) $leadsCountStmt->fetchColumn() === 0) {
-        $initialLeads = [
-            ['id' => 'lead-1', 'name' => 'Aarav Sharma', 'phone' => '+91 98201 43210', 'company' => 'Tata Consultancy Services', 'title' => 'VP of IT Operations', 'email' => 'aarav.sharma@tcs.example.com', 'status' => 'Enterprise Pilot', 'deal_value' => 48000, 'last_contacted' => '8m ago', 'crm_account_id' => 'RV360-ACC-101', 'notes' => '50-seat pilot agreed for RingVia360 mobile dialer.'],
-            ['id' => 'lead-2', 'name' => 'Priya Patel', 'phone' => '+91 98450 12890', 'company' => 'Infosys Technologies', 'title' => 'Director of Sales Operations', 'email' => 'priya.patel@infosys.example.com', 'status' => 'Technical Validation', 'deal_value' => 72000, 'last_contacted' => '35m ago', 'crm_account_id' => 'RV360-ACC-102', 'notes' => 'Knox MDM and dual-SIM compliance verified.'],
-            ['id' => 'lead-3', 'name' => 'Vikram Malhotra', 'phone' => '+91 97110 56789', 'company' => 'Wipro Enterprises', 'title' => 'Chief Revenue Officer', 'email' => 'vikram.m@wipro.example.com', 'status' => 'Proposal Sent', 'deal_value' => 25000, 'last_contacted' => '1h ago', 'crm_account_id' => 'RV360-ACC-103', 'notes' => 'Follow up on automated WhatsApp logging demo.']
+    // Seed Sales Reps
+    $repCount = (int) $db->query("SELECT COUNT(*) FROM sales_reps")->fetchColumn();
+    if ($repCount === 0) {
+        $initialReps = [
+            [
+                'id' => 'rep-1',
+                'name' => 'Rajesh Kumar',
+                'role' => 'Senior Enterprise AE',
+                'avatar' => 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
+                'phone' => '+91 98201 11223',
+                'device_model' => 'Samsung Galaxy S24 Ultra',
+                'os_version' => 'Android 14 (Knox v3.9)',
+                'battery_level' => 91,
+                'is_online' => 1,
+                'last_sync' => 'Just now',
+                'calls_today' => 38,
+                'talk_time_minutes' => 184,
+                'deals_closed' => 4,
+                'conversion_rate' => 28.50,
+                'rank_order' => 1,
+                'streak_days' => 14,
+                'badges' => json_encode(['Top Performer', 'E2EE Certified', 'Speed Demon'])
+            ],
+            [
+                'id' => 'rep-2',
+                'name' => 'Sneha Kapoor',
+                'role' => 'Key Account Executive',
+                'avatar' => 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120&auto=format&fit=crop&q=80',
+                'phone' => '+91 98201 33445',
+                'device_model' => 'iPhone 15 Pro Max',
+                'os_version' => 'iOS 18.1 (CallKit Enforced)',
+                'battery_level' => 78,
+                'is_online' => 1,
+                'last_sync' => '2m ago',
+                'calls_today' => 29,
+                'talk_time_minutes' => 142,
+                'deals_closed' => 3,
+                'conversion_rate' => 24.10,
+                'rank_order' => 2,
+                'streak_days' => 9,
+                'badges' => json_encode(['Closing Specialist', 'Global Reach'])
+            ],
+            [
+                'id' => 'rep-3',
+                'name' => 'Amit Verma',
+                'role' => 'Inbound Sales Rep',
+                'avatar' => 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80',
+                'phone' => '+91 98201 55667',
+                'device_model' => 'Google Pixel 9 Pro',
+                'os_version' => 'Android 15',
+                'battery_level' => 64,
+                'is_online' => 1,
+                'last_sync' => '4m ago',
+                'calls_today' => 42,
+                'talk_time_minutes' => 126,
+                'deals_closed' => 2,
+                'conversion_rate' => 19.80,
+                'rank_order' => 3,
+                'streak_days' => 6,
+                'badges' => json_encode(['High Volume', 'Rapid Responder'])
+            ],
+            [
+                'id' => 'rep-4',
+                'name' => 'Priya Sharma',
+                'role' => 'SMB Sales Consultant',
+                'avatar' => 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80',
+                'phone' => '+91 98201 77889',
+                'device_model' => 'Samsung Galaxy Z Fold 6',
+                'os_version' => 'Android 14',
+                'battery_level' => 82,
+                'is_online' => 0,
+                'last_sync' => '18m ago',
+                'calls_today' => 24,
+                'talk_time_minutes' => 98,
+                'deals_closed' => 2,
+                'conversion_rate' => 22.00,
+                'rank_order' => 4,
+                'streak_days' => 5,
+                'badges' => json_encode(['Customer Champion'])
+            ]
         ];
-        $leadSql = $isMysql
-            ? "INSERT INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes) ON DUPLICATE KEY UPDATE name=VALUES(name)"
-            : "INSERT OR REPLACE INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes)";
-        $leadStmt = $db->prepare($leadSql);
-        foreach ($initialLeads as $lead) {
-            $leadStmt->execute($lead);
+
+        $repIns = $db->prepare("
+            INSERT INTO sales_reps (id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
+            VALUES (:id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)
+        ");
+        foreach ($initialReps as $rep) {
+            $repIns->execute($rep);
         }
     }
 
+    // Seed CRM Connectors
+    $crmCount = (int) $db->query("SELECT COUNT(*) FROM crm_connectors")->fetchColumn();
+    if ($crmCount === 0) {
+        $initialCrms = [
+            [
+                'id' => 'crm-rv360',
+                'name' => 'RingVia360 CRM',
+                'description' => 'Native unified enterprise sync of Call Logs, Transcripts, Dual-SIM Audio & WhatsApp to RingVia360 CRM',
+                'icon' => '⚡',
+                'is_connected' => 1,
+                'last_sync_time' => 'Real-time (Active)',
+                'synced_records_count' => 24820,
+                'pending_sync_count' => 0,
+                'auto_sync' => 1,
+                'sync_frequency' => 'Instant Zero-Click'
+            ],
+            [
+                'id' => 'crm-hubspot',
+                'name' => 'HubSpot CRM',
+                'description' => 'Two-way synchronization of call engagements, recordings, contact stages, and pipeline deals',
+                'icon' => '🟠',
+                'is_connected' => 1,
+                'last_sync_time' => '1m ago',
+                'synced_records_count' => 18450,
+                'pending_sync_count' => 0,
+                'auto_sync' => 1,
+                'sync_frequency' => 'Instant Webhook'
+            ],
+            [
+                'id' => 'crm-zoho',
+                'name' => 'Zoho CRM',
+                'description' => 'Direct API mapping to Zoho Leads, Deals, and Activities with Indian telephony compliance tags',
+                'icon' => '🔴',
+                'is_connected' => 1,
+                'last_sync_time' => '3m ago',
+                'synced_records_count' => 12100,
+                'pending_sync_count' => 0,
+                'auto_sync' => 1,
+                'sync_frequency' => 'Real-time'
+            ],
+            [
+                'id' => 'crm-webhook',
+                'name' => 'Custom Webhook API',
+                'description' => 'HMAC-SHA256 signed JSON payloads dispatched immediately upon call completion',
+                'icon' => '🔌',
+                'is_connected' => 1,
+                'last_sync_time' => 'Just now',
+                'synced_records_count' => 39200,
+                'pending_sync_count' => 0,
+                'auto_sync' => 1,
+                'sync_frequency' => 'Instant Event Stream'
+            ]
+        ];
+
+        $crmIns = $db->prepare("
+            INSERT INTO crm_connectors (id, name, description, icon, is_connected, last_sync_time, synced_records_count, pending_sync_count, auto_sync, sync_frequency)
+            VALUES (:id, :name, :description, :icon, :is_connected, :last_sync_time, :synced_records_count, :pending_sync_count, :auto_sync, :sync_frequency)
+        ");
+        foreach ($initialCrms as $crm) {
+            $crmIns->execute($crm);
+        }
+    }
+
+    // Seed Admin Users
+    $adminCount = (int) $db->query("SELECT COUNT(*) FROM admin_users")->fetchColumn();
+    if ($adminCount === 0) {
+        $initialAdmins = [
+            ['id' => 'u-1', 'name' => 'Rajesh Kumar', 'email' => 'rajesh.kumar@ringvia360.com', 'role' => 'Sales Director', 'status' => 'Active', 'sim' => 'SIM 1 Bound', 'device' => 'Galaxy S24 Ultra (Knox)', 'last_active' => 'Just now'],
+            ['id' => 'u-2', 'name' => 'Sneha Kapoor', 'email' => 'sneha.kapoor@ringvia360.com', 'role' => 'Account Executive', 'status' => 'Active', 'sim' => 'SIM 1 Bound', 'device' => 'iPhone 15 Pro Max', 'last_active' => '2m ago'],
+            ['id' => 'u-3', 'name' => 'Amit Verma', 'email' => 'amit.verma@ringvia360.com', 'role' => 'Inbound Specialist', 'status' => 'Active', 'sim' => 'SIM 1 Bound', 'device' => 'Pixel 9 Pro', 'last_active' => '5m ago'],
+            ['id' => 'u-4', 'name' => 'Priya Sharma', 'email' => 'priya.sharma@ringvia360.com', 'role' => 'Team Lead', 'status' => 'Active', 'sim' => 'SIM 1 Bound', 'device' => 'Galaxy Z Fold 6', 'last_active' => '15m ago'],
+            ['id' => 'u-5', 'name' => 'Vikram Deshmukh', 'email' => 'vikram.deshmukh@ringvia360.com', 'role' => 'Compliance Officer', 'status' => 'Active', 'sim' => 'Unbound', 'device' => 'MacBook Pro / Web', 'last_active' => '1h ago']
+        ];
+        $admIns = $db->prepare("INSERT INTO admin_users (id, name, email, role, status, sim, device, last_active) VALUES (:id, :name, :email, :role, :status, :sim, :device, :last_active)");
+        foreach ($initialAdmins as $adm) {
+            $admIns->execute($adm);
+        }
+    }
+
+    // Seed Settings
+    $settCount = (int) $db->query("SELECT COUNT(*) FROM app_settings")->fetchColumn();
+    if ($settCount === 0) {
+        $defaultSettings = [
+            'security' => json_encode([
+                'dualSimIsolation' => true,
+                'corporateSimSlot' => 'SIM 1',
+                'autoRecordCorporate' => true,
+                'ignorePersonalSim' => true,
+                'workHoursOnly' => true,
+                'workHoursStart' => '09:00',
+                'workHoursEnd' => '19:00',
+                'workDays' => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+                'e2eeEnabled' => true,
+                'kmsKeyAlias' => 'ringvia360-prod-aes256',
+                'retentionDays' => 365,
+                'allowRepDelete' => false,
+                'consentAnnouncement' => true,
+                'audioQuality' => '320kbps_hd'
+            ]),
+            'organization' => json_encode([
+                'orgName' => 'RingVia360 Enterprise India',
+                'orgDomain' => 'ringvia360.com',
+                'primaryCurrency' => 'INR',
+                'timezone' => 'Asia/Kolkata'
+            ])
+        ];
+        $settIns = $db->prepare("INSERT INTO app_settings (setting_key, setting_value) VALUES (:k, :v)");
+        foreach ($defaultSettings as $k => $v) {
+            $settIns->execute([':k' => $k, ':v' => $v]);
+        }
+    }
+
+    // =========================================================
+    // 3. ROUTE DISPATCHER
+    // =========================================================
     $method = $_SERVER['REQUEST_METHOD'];
     $action = $_GET['action'] ?? '';
 
+    // Action: Health & Diagnostics
+    if ($action === 'db_status') {
+        echo json_encode([
+            'success' => true,
+            'status' => 'operational',
+            'driver' => $driver,
+            'active_user' => $activeUser,
+            'database' => $conn['driver'] === 'mysql' ? 'u488332847_dn_name' : 'ringvia_calls.sqlite',
+            'mysql_available' => extension_loaded('pdo_mysql'),
+            'timestamp' => date('Y-m-d H:i:s T')
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit();
+    }
+
     // =========================================================
-    // GET REQUESTS
+    // 4. AUDIO RECORDING UPLOAD (Multipart file or Base64)
     // =========================================================
-    if ($method === 'GET') {
-        // Health / DB Status Check
-        if ($action === 'db_status') {
-            echo json_encode([
-                'success' => true,
-                'driver' => $driver,
-                'database' => $isMysql ? 'u488332847_dn_name (MySQL)' : 'ringvia_calls.sqlite (SQLite)',
-                'mysql_error' => $conn['mysql_error'] ?? null,
-                'timestamp' => date('Y-m-d H:i:s')
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    if ($action === 'upload_audio') {
+        $savedFilename = null;
+        $callId = $_POST['callId'] ?? ($_GET['callId'] ?? null);
+
+        // Case A: Multipart File Upload
+        if (!empty($_FILES['audio']['tmp_name']) && is_uploaded_file($_FILES['audio']['tmp_name'])) {
+            $ext = pathinfo($_FILES['audio']['name'], PATHINFO_EXTENSION) ?: 'mp3';
+            $safeExt = in_array(strtolower($ext), ['mp3', 'm4a', 'wav', 'aac', 'ogg']) ? strtolower($ext) : 'mp3';
+            $filename = 'rec_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $safeExt;
+            $dest = $uploadDir . '/' . $filename;
+            if (move_uploaded_file($_FILES['audio']['tmp_name'], $dest)) {
+                $savedFilename = $filename;
+            }
+        }
+
+        // Case B: Base64 JSON Payload
+        if (!$savedFilename) {
+            $raw = file_get_contents('php://input');
+            $body = json_decode($raw, true);
+            if (!empty($body['audioData'])) {
+                $base64 = $body['audioData'];
+                if (str_contains($base64, ',')) {
+                    $base64 = explode(',', $base64)[1];
+                }
+                $decoded = base64_decode($base64);
+                if ($decoded !== false) {
+                    $ext = !empty($body['format']) ? strtolower($body['format']) : 'mp3';
+                    $filename = 'rec_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+                    file_put_contents($uploadDir . '/' . $filename, $decoded);
+                    $savedFilename = $filename;
+                    if (empty($callId) && !empty($body['callId'])) {
+                        $callId = $body['callId'];
+                    }
+                }
+            }
+        }
+
+        if (!$savedFilename) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'No valid audio file or base64 stream provided']);
             exit();
         }
 
-        // Live Leads & Contacts
-        if ($action === 'leads') {
-            $query = "SELECT * FROM leads_contacts ORDER BY created_at DESC";
-            $leads = $db->query($query)->fetchAll();
-            $formattedLeads = array_map(function ($l) {
+        // Determine scheme & host
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'ringvia360.com';
+        $audioUrl = "{$scheme}://{$host}/api/uploads/{$savedFilename}";
+
+        // If callId provided, automatically update recording_url in call_logs table
+        if (!empty($callId)) {
+            $upd = $db->prepare("UPDATE call_logs SET recording_url = :url WHERE id = :id");
+            $upd->execute([':url' => $audioUrl, ':id' => $callId]);
+        }
+
+        echo json_encode([
+            'success' => true,
+            'message' => 'Audio recording uploaded and indexed successfully',
+            'recordingUrl' => $audioUrl,
+            'filename' => $savedFilename,
+            'callId' => $callId
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit();
+    }
+
+    // =========================================================
+    // 5. ALL DATA (Single Round-Trip Fetch for Instant Rendering)
+    // =========================================================
+    if ($action === 'all_data' && $method === 'GET') {
+        // Fetch Calls
+        $calls = $db->query("SELECT * FROM call_logs ORDER BY created_at DESC LIMIT 100")->fetchAll();
+        $formattedCalls = array_map(function ($row) {
+            return [
+                'id' => (string) $row['id'],
+                'contactName' => (string) $row['contact_name'],
+                'phoneNumber' => (string) $row['phone_number'],
+                'company' => (string) ($row['company'] ?? 'Corporate Partner'),
+                'direction' => (string) $row['direction'],
+                'duration' => (int) $row['duration'],
+                'timestamp' => (string) $row['timestamp'],
+                'repName' => (string) ($row['rep_name'] ?? 'Rajesh Kumar (RingVia360)'),
+                'repAvatar' => (string) ($row['rep_avatar'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80'),
+                'repId' => (string) ($row['rep_id'] ?? 'rep-1'),
+                'outcome' => (string) ($row['outcome'] ?? 'Call Completed'),
+                'notes' => (string) ($row['notes'] ?? ''),
+                'sentiment' => (string) ($row['sentiment'] ?? 'positive'),
+                'sentimentScore' => (int) ($row['sentiment_score'] ?? 85),
+                'dealValue' => (float) ($row['deal_value'] ?? 0),
+                'dealStage' => (string) ($row['deal_stage'] ?? 'Proposal'),
+                'crmStatus' => (string) ($row['crm_status'] ?? 'synced'),
+                'crmType' => (string) ($row['crm_type'] ?? 'RingVia360'),
+                'simSlot' => (string) ($row['sim_slot'] ?? 'SIM 1 (Airtel Enterprise)'),
+                'isEncrypted' => (bool) $row['is_encrypted'],
+                'recordingUrl' => (string) ($row['recording_url'] ?? 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3'),
+                'waveform' => json_decode((string) ($row['waveform'] ?? '[]'), true) ?: [30, 45, 60, 80, 50, 70, 90, 60, 40, 65, 80, 95, 75, 55, 65, 85, 90, 60, 40, 55],
+                'transcript' => json_decode((string) ($row['transcript'] ?? '[]'), true) ?: [],
+                'keyActionItems' => json_decode((string) ($row['key_action_items'] ?? '[]'), true) ?: [],
+                'createdAt' => (string) $row['created_at']
+            ];
+        }, $calls);
+
+        // Fetch Reps
+        $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
+        $formattedReps = array_map(function ($r) {
+            return [
+                'id' => (string) $r['id'],
+                'name' => (string) $r['name'],
+                'role' => (string) $r['role'],
+                'avatar' => (string) $r['avatar'],
+                'phone' => (string) ($r['phone'] ?? '+91 98200 00000'),
+                'deviceModel' => (string) ($r['device_model'] ?? 'Samsung Galaxy S24 Ultra'),
+                'osVersion' => (string) ($r['os_version'] ?? 'Android 14'),
+                'batteryLevel' => (int) $r['battery_level'],
+                'isOnline' => (bool) $r['is_online'],
+                'lastSync' => (string) $r['last_sync'],
+                'callsToday' => (int) $r['calls_today'],
+                'talkTimeMinutes' => (int) $r['talk_time_minutes'],
+                'dealsClosed' => (int) $r['deals_closed'],
+                'conversionRate' => (float) $r['conversion_rate'],
+                'rank' => (int) $r['rank_order'],
+                'streakDays' => (int) $r['streak_days'],
+                'badges' => json_decode((string) ($r['badges'] ?? '[]'), true) ?: ['Active']
+            ];
+        }, $reps);
+
+        // Fetch CRM Connectors
+        $crms = $db->query("SELECT * FROM crm_connectors ORDER BY id ASC")->fetchAll();
+        $formattedCrms = array_map(function ($c) {
+            return [
+                'id' => (string) $c['id'],
+                'name' => (string) $c['name'],
+                'description' => (string) $c['description'],
+                'icon' => (string) $c['icon'],
+                'isConnected' => (bool) $c['is_connected'],
+                'lastSyncTime' => (string) $c['last_sync_time'],
+                'syncedRecordsCount' => (int) $c['synced_records_count'],
+                'pendingSyncCount' => (int) $c['pending_sync_count'],
+                'autoSync' => (bool) $c['auto_sync'],
+                'syncFrequency' => (string) $c['sync_frequency']
+            ];
+        }, $crms);
+
+        // Fetch Admin Users
+        $admins = $db->query("SELECT * FROM admin_users ORDER BY id ASC")->fetchAll();
+
+        // Fetch Settings
+        $settingsRows = $db->query("SELECT * FROM app_settings")->fetchAll();
+        $settings = [];
+        foreach ($settingsRows as $sr) {
+            $settings[$sr['setting_key']] = json_decode((string) $sr['setting_value'], true);
+        }
+
+        // Fetch Leads
+        $leads = $db->query("SELECT * FROM leads_contacts ORDER BY created_at DESC LIMIT 50")->fetchAll();
+
+        echo json_encode([
+            'success' => true,
+            'database' => $driver,
+            'active_user' => $activeUser,
+            'data' => [
+                'calls' => $formattedCalls,
+                'reps' => $formattedReps,
+                'crmConnectors' => $formattedCrms,
+                'adminUsers' => $admins,
+                'settings' => $settings,
+                'leads' => $leads
+            ]
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit();
+    }
+
+    // =========================================================
+    // 6. SALES REPS CRUD (?action=reps)
+    // =========================================================
+    if ($action === 'reps') {
+        if ($method === 'GET') {
+            $reps = $db->query("SELECT * FROM sales_reps ORDER BY rank_order ASC")->fetchAll();
+            $formatted = array_map(function ($r) {
                 return [
-                    'id' => (string) $l['id'],
-                    'name' => (string) $l['name'],
-                    'phoneNumber' => (string) $l['phone'],
-                    'company' => (string) ($l['company'] ?? ''),
-                    'title' => (string) ($l['title'] ?? ''),
-                    'email' => (string) ($l['email'] ?? ''),
-                    'status' => (string) ($l['status'] ?? 'Active Lead'),
-                    'openDealValue' => (float) ($l['deal_value'] ?? 0),
-                    'lastContacted' => (string) ($l['last_contacted'] ?? 'Recent'),
-                    'crmAccountId' => (string) ($l['crm_account_id'] ?? 'RV360-ACC-01'),
-                    'notes' => (string) ($l['notes'] ?? '')
+                    'id' => (string) $r['id'],
+                    'name' => (string) $r['name'],
+                    'role' => (string) $r['role'],
+                    'avatar' => (string) $r['avatar'],
+                    'phone' => (string) ($r['phone'] ?? ''),
+                    'deviceModel' => (string) ($r['device_model'] ?? ''),
+                    'osVersion' => (string) ($r['os_version'] ?? ''),
+                    'batteryLevel' => (int) $r['battery_level'],
+                    'isOnline' => (bool) $r['is_online'],
+                    'lastSync' => (string) $r['last_sync'],
+                    'callsToday' => (int) $r['calls_today'],
+                    'talkTimeMinutes' => (int) $r['talk_time_minutes'],
+                    'dealsClosed' => (int) $r['deals_closed'],
+                    'conversionRate' => (float) $r['conversion_rate'],
+                    'rank' => (int) $r['rank_order'],
+                    'streakDays' => (int) $r['streak_days'],
+                    'badges' => json_decode((string) ($r['badges'] ?? '[]'), true) ?: []
                 ];
-            }, $leads);
-
-            echo json_encode([
-                'success' => true,
-                'count' => count($formattedLeads),
-                'data' => $formattedLeads
-            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+            }, $reps);
+            echo json_encode(['success' => true, 'data' => $formatted]);
             exit();
         }
 
-        // Live Dashboard & Rep Stats
-        if ($action === 'stats') {
-            $callsCount = (int) $db->query("SELECT COUNT(*) FROM call_logs")->fetchColumn();
-            $totalDuration = (int) $db->query("SELECT COALESCE(SUM(duration), 0) FROM call_logs")->fetchColumn();
-            $totalDealValue = (float) $db->query("SELECT COALESCE(SUM(deal_value), 0) FROM call_logs WHERE deal_stage = 'Closed Won' OR deal_stage = 'Proposal'")->fetchColumn();
-            $syncedCount = (int) $db->query("SELECT COUNT(*) FROM call_logs WHERE crm_status = 'synced'")->fetchColumn();
-            $positiveCount = (int) $db->query("SELECT COUNT(*) FROM call_logs WHERE sentiment = 'positive'")->fetchColumn();
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true) ?: [];
+            $id = $body['id'] ?? ('rep-' . time());
+            $name = $body['name'] ?? 'Sales Rep';
+            $role = $body['role'] ?? 'Account Executive';
+            $avatar = $body['avatar'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80';
+            $phone = $body['phone'] ?? '+91 98200 12345';
+            $deviceModel = $body['deviceModel'] ?? 'Android Knox Device';
+            $osVersion = $body['osVersion'] ?? 'Android 14';
+            $batteryLevel = isset($body['batteryLevel']) ? (int) $body['batteryLevel'] : 90;
+            $isOnline = isset($body['isOnline']) ? ($body['isOnline'] ? 1 : 0) : 1;
+            $lastSync = $body['lastSync'] ?? 'Just now';
+            $callsToday = isset($body['callsToday']) ? (int) $body['callsToday'] : 0;
+            $talkTimeMinutes = isset($body['talkTimeMinutes']) ? (int) $body['talkTimeMinutes'] : 0;
+            $dealsClosed = isset($body['dealsClosed']) ? (int) $body['dealsClosed'] : 0;
+            $conversionRate = isset($body['conversionRate']) ? (float) $body['conversionRate'] : 20.0;
+            $rankOrder = isset($body['rank']) ? (int) $body['rank'] : 5;
+            $streakDays = isset($body['streakDays']) ? (int) $body['streakDays'] : 1;
+            $badges = json_encode($body['badges'] ?? ['Certified']);
 
-            echo json_encode([
-                'success' => true,
-                'stats' => [
-                    'totalCalls' => $callsCount,
-                    'totalDurationMinutes' => round($totalDuration / 60, 1),
-                    'totalDealValue' => $totalDealValue,
-                    'syncedCrmCount' => $syncedCount,
-                    'positiveSentimentPercent' => $callsCount > 0 ? round(($positiveCount / $callsCount) * 100) : 85,
-                    'dbEngine' => $driver
-                ]
-            ], JSON_PRETTY_PRINT);
+            $sql = $isMysql
+                ? "INSERT INTO sales_reps (id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
+                   VALUES (:id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)
+                   ON DUPLICATE KEY UPDATE name=VALUES(name), role=VALUES(role), avatar=VALUES(avatar), calls_today=VALUES(calls_today), talk_time_minutes=VALUES(talk_time_minutes), deals_closed=VALUES(deals_closed), conversion_rate=VALUES(conversion_rate), rank_order=VALUES(rank_order), is_online=VALUES(is_online)"
+                : "INSERT OR REPLACE INTO sales_reps (id, name, role, avatar, phone, device_model, os_version, battery_level, is_online, last_sync, calls_today, talk_time_minutes, deals_closed, conversion_rate, rank_order, streak_days, badges)
+                   VALUES (:id, :name, :role, :avatar, :phone, :device_model, :os_version, :battery_level, :is_online, :last_sync, :calls_today, :talk_time_minutes, :deals_closed, :conversion_rate, :rank_order, :streak_days, :badges)";
+
+            $stmt = $db->prepare($sql);
+            $stmt->execute([
+                ':id' => $id, ':name' => $name, ':role' => $role, ':avatar' => $avatar,
+                ':phone' => $phone, ':device_model' => $deviceModel, ':os_version' => $osVersion,
+                ':battery_level' => $batteryLevel, ':is_online' => $isOnline, ':last_sync' => $lastSync,
+                ':calls_today' => $callsToday, ':talk_time_minutes' => $talkTimeMinutes,
+                ':deals_closed' => $dealsClosed, ':conversion_rate' => $conversionRate,
+                ':rank_order' => $rankOrder, ':streak_days' => $streakDays, ':badges' => $badges
+            ]);
+
+            echo json_encode(['success' => true, 'id' => $id, 'message' => "Rep $name updated in DB"]);
             exit();
         }
 
-        // Fetch Call Logs (with optional search, direction, sentiment filters)
+        if ($method === 'DELETE') {
+            $id = $_GET['id'] ?? '';
+            $del = $db->prepare("DELETE FROM sales_reps WHERE id = :id");
+            $del->execute([':id' => $id]);
+            echo json_encode(['success' => true, 'message' => "Rep #$id deleted"]);
+            exit();
+        }
+    }
+
+    // =========================================================
+    // 7. CRM CONNECTORS (?action=crm_connectors)
+    // =========================================================
+    if ($action === 'crm_connectors') {
+        if ($method === 'GET') {
+            $crms = $db->query("SELECT * FROM crm_connectors ORDER BY id ASC")->fetchAll();
+            $formatted = array_map(function ($c) {
+                return [
+                    'id' => (string) $c['id'],
+                    'name' => (string) $c['name'],
+                    'description' => (string) $c['description'],
+                    'icon' => (string) $c['icon'],
+                    'isConnected' => (bool) $c['is_connected'],
+                    'lastSyncTime' => (string) $c['last_sync_time'],
+                    'syncedRecordsCount' => (int) $c['synced_records_count'],
+                    'pendingSyncCount' => (int) $c['pending_sync_count'],
+                    'autoSync' => (bool) $c['auto_sync'],
+                    'syncFrequency' => (string) $c['sync_frequency']
+                ];
+            }, $crms);
+            echo json_encode(['success' => true, 'data' => $formatted]);
+            exit();
+        }
+
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true) ?: [];
+            $id = $body['id'] ?? '';
+            if ($id) {
+                $isConnected = isset($body['isConnected']) ? ($body['isConnected'] ? 1 : 0) : 1;
+                $upd = $db->prepare("UPDATE crm_connectors SET is_connected = :conn, last_sync_time = 'Just now' WHERE id = :id");
+                $upd->execute([':conn' => $isConnected, ':id' => $id]);
+            }
+            echo json_encode(['success' => true, 'message' => "CRM Connector #$id updated"]);
+            exit();
+        }
+    }
+
+    // =========================================================
+    // 8. APP SETTINGS & POLICIES (?action=settings)
+    // =========================================================
+    if ($action === 'settings') {
+        if ($method === 'GET') {
+            $settingsRows = $db->query("SELECT * FROM app_settings")->fetchAll();
+            $settings = [];
+            foreach ($settingsRows as $sr) {
+                $settings[$sr['setting_key']] = json_decode((string) $sr['setting_value'], true);
+            }
+            echo json_encode(['success' => true, 'data' => $settings]);
+            exit();
+        }
+
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true) ?: [];
+            $key = $body['key'] ?? 'security';
+            $val = json_encode($body['value'] ?? $body);
+
+            $sql = $isMysql
+                ? "INSERT INTO app_settings (setting_key, setting_value) VALUES (:k, :v) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
+                : "INSERT OR REPLACE INTO app_settings (setting_key, setting_value) VALUES (:k, :v)";
+
+            $stmt = $db->prepare($sql);
+            $stmt->execute([':k' => $key, ':v' => $val]);
+
+            echo json_encode(['success' => true, 'message' => "Setting $key updated in DB"]);
+            exit();
+        }
+    }
+
+    // =========================================================
+    // 9. ADMIN FLEET USERS (?action=admin_users)
+    // =========================================================
+    if ($action === 'admin_users') {
+        if ($method === 'GET') {
+            $admins = $db->query("SELECT * FROM admin_users ORDER BY created_at DESC")->fetchAll();
+            echo json_encode(['success' => true, 'data' => $admins]);
+            exit();
+        }
+
+        if ($method === 'POST') {
+            $body = json_decode(file_get_contents('php://input'), true) ?: [];
+            $id = $body['id'] ?? ('u-' . time());
+            $name = $body['name'] ?? 'Team Member';
+            $email = $body['email'] ?? 'rep@ringvia360.com';
+            $role = $body['role'] ?? 'Sales Rep';
+            $status = $body['status'] ?? 'Active';
+            $sim = $body['sim'] ?? 'SIM 1 Bound';
+            $device = $body['device'] ?? 'Samsung Galaxy S24 (Knox)';
+            $lastActive = $body['lastActive'] ?? 'Just now';
+
+            $sql = $isMysql
+                ? "INSERT INTO admin_users (id, name, email, role, status, sim, device, last_active) VALUES (:id, :name, :email, :role, :status, :sim, :device, :last_active) ON DUPLICATE KEY UPDATE name=VALUES(name), email=VALUES(email), role=VALUES(role), status=VALUES(status), sim=VALUES(sim), device=VALUES(device)"
+                : "INSERT OR REPLACE INTO admin_users (id, name, email, role, status, sim, device, last_active) VALUES (:id, :name, :email, :role, :status, :sim, :device, :last_active)";
+
+            $stmt = $db->prepare($sql);
+            $stmt->execute([
+                ':id' => $id, ':name' => $name, ':email' => $email, ':role' => $role,
+                ':status' => $status, ':sim' => $sim, ':device' => $device, ':last_active' => $lastActive
+            ]);
+
+            echo json_encode(['success' => true, 'id' => $id, 'message' => "Fleet user $name saved"]);
+            exit();
+        }
+
+        if ($method === 'DELETE') {
+            $id = $_GET['id'] ?? '';
+            $del = $db->prepare("DELETE FROM admin_users WHERE id = :id");
+            $del->execute([':id' => $id]);
+            echo json_encode(['success' => true, 'message' => "User #$id removed"]);
+            exit();
+        }
+    }
+
+    // =========================================================
+    // 10. LEADS & CONTACTS (?action=leads)
+    // =========================================================
+    if ($action === 'leads') {
+        if ($method === 'GET') {
+            $leads = $db->query("SELECT * FROM leads_contacts ORDER BY created_at DESC LIMIT 100")->fetchAll();
+            echo json_encode(['success' => true, 'count' => count($leads), 'data' => $leads]);
+            exit();
+        }
+
+        if ($method === 'POST') {
+            $payload = json_decode(file_get_contents('php://input'), true) ?: [];
+            $leadId = !empty($payload['id']) ? (string) $payload['id'] : ('lead-' . round(microtime(true) * 1000));
+            $leadSql = $isMysql
+                ? "INSERT INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes) ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), deal_value=VALUES(deal_value), notes=VALUES(notes)"
+                : "INSERT OR REPLACE INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes)";
+
+            $stmt = $db->prepare($leadSql);
+            $stmt->execute([
+                ':id' => $leadId,
+                ':name' => !empty($payload['name']) ? (string) $payload['name'] : 'Enterprise Contact',
+                ':phone' => !empty($payload['phoneNumber']) ? (string) $payload['phoneNumber'] : (!empty($payload['phone']) ? (string) $payload['phone'] : '+91 98200 00000'),
+                ':company' => !empty($payload['company']) ? (string) $payload['company'] : 'Enterprise Client',
+                ':title' => !empty($payload['title']) ? (string) $payload['title'] : 'Decision Maker',
+                ':email' => !empty($payload['email']) ? (string) $payload['email'] : '',
+                ':status' => !empty($payload['status']) ? (string) $payload['status'] : 'Active Lead',
+                ':deal_value' => isset($payload['dealValue']) ? (float) $payload['dealValue'] : 0,
+                ':last_contacted' => !empty($payload['lastContacted']) ? (string) $payload['lastContacted'] : 'Just now',
+                ':crm_account_id' => !empty($payload['crmAccountId']) ? (string) $payload['crmAccountId'] : 'RV360-ACC',
+                ':notes' => !empty($payload['notes']) ? (string) $payload['notes'] : ''
+            ]);
+
+            http_response_code(201);
+            echo json_encode(['success' => true, 'id' => $leadId, 'message' => 'Lead saved']);
+            exit();
+        }
+    }
+
+    // =========================================================
+    // 11. STATS (?action=stats)
+    // =========================================================
+    if ($action === 'stats') {
+        $totalCalls = (int) $db->query("SELECT COUNT(*) FROM call_logs")->fetchColumn();
+        $totalSeconds = (int) $db->query("SELECT SUM(duration) FROM call_logs")->fetchColumn();
+        $totalDealValue = (float) $db->query("SELECT SUM(deal_value) FROM call_logs")->fetchColumn();
+        $positiveCount = (int) $db->query("SELECT COUNT(*) FROM call_logs WHERE sentiment = 'positive'")->fetchColumn();
+
+        echo json_encode([
+            'success' => true,
+            'data' => [
+                'totalCalls' => $totalCalls,
+                'totalTalkTimeMinutes' => round($totalSeconds / 60, 1),
+                'totalPipelineRevenue' => $totalDealValue,
+                'sentimentPositiveRate' => $totalCalls > 0 ? round(($positiveCount / $totalCalls) * 100, 1) : 0,
+                'activeRepsCount' => (int) $db->query("SELECT COUNT(*) FROM sales_reps WHERE is_online = 1")->fetchColumn(),
+                'syncedCrmsCount' => (int) $db->query("SELECT COUNT(*) FROM crm_connectors WHERE is_connected = 1")->fetchColumn()
+            ]
+        ]);
+        exit();
+    }
+
+    // =========================================================
+    // 12. CALL LOGS GET (List with filters)
+    // =========================================================
+    if ($method === 'GET' && empty($action)) {
         $whereClauses = [];
         $params = [];
 
@@ -381,7 +1091,7 @@ try {
                 'duration' => (int) $row['duration'],
                 'timestamp' => (string) $row['timestamp'],
                 'repName' => (string) ($row['rep_name'] ?? 'Rajesh Kumar (RingVia360)'),
-                'repAvatar' => (string) ($row['rep_avatar'] ?? 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80'),
+                'repAvatar' => (string) ($row['rep_avatar'] ?? 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80'),
                 'repId' => (string) ($row['rep_id'] ?? 'rep-1'),
                 'outcome' => (string) ($row['outcome'] ?? 'Call Completed'),
                 'notes' => (string) ($row['notes'] ?? ''),
@@ -405,15 +1115,16 @@ try {
             'success' => true,
             'count' => count($formatted),
             'database' => $driver,
+            'active_user' => $activeUser,
             'data' => $formatted
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         exit();
     }
 
     // =========================================================
-    // POST / PUT REQUESTS (Save, Update, Sync)
+    // 13. CALL LOGS POST / PUT (Save & Upsert)
     // =========================================================
-    if ($method === 'POST' || $method === 'PUT') {
+    if (($method === 'POST' || $method === 'PUT') && empty($action)) {
         $raw = file_get_contents('php://input');
         $payload = json_decode($raw, true);
 
@@ -423,8 +1134,8 @@ try {
             exit();
         }
 
-        // Action: CRM Sync
-        if ($action === 'crm_sync' || (!empty($payload['action']) && $payload['action'] === 'crm_sync')) {
+        // Action: CRM Sync flag
+        if (!empty($payload['action']) && $payload['action'] === 'crm_sync') {
             $callId = !empty($payload['id']) ? (string) $payload['id'] : '';
             if ($callId) {
                 $upd = $db->prepare("UPDATE call_logs SET crm_status = 'synced', crm_type = :crm_type WHERE id = :id");
@@ -437,34 +1148,6 @@ try {
             exit();
         }
 
-        // Action: Upsert Lead
-        if ($action === 'leads' || (!empty($payload['action']) && $payload['action'] === 'leads')) {
-            $leadId = !empty($payload['id']) ? (string) $payload['id'] : ('lead-' . round(microtime(true) * 1000));
-            $leadSql = $isMysql
-                ? "INSERT INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes) ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), company=VALUES(company), status=VALUES(status), deal_value=VALUES(deal_value), notes=VALUES(notes)"
-                : "INSERT OR REPLACE INTO leads_contacts (id, name, phone, company, title, email, status, deal_value, last_contacted, crm_account_id, notes) VALUES (:id, :name, :phone, :company, :title, :email, :status, :deal_value, :last_contacted, :crm_account_id, :notes)";
-            
-            $stmt = $db->prepare($leadSql);
-            $stmt->execute([
-                ':id' => $leadId,
-                ':name' => !empty($payload['name']) ? (string) $payload['name'] : 'Lead Contact',
-                ':phone' => !empty($payload['phoneNumber']) ? (string) $payload['phoneNumber'] : (!empty($payload['phone']) ? (string) $payload['phone'] : '+91 98200 00000'),
-                ':company' => !empty($payload['company']) ? (string) $payload['company'] : 'Enterprise',
-                ':title' => !empty($payload['title']) ? (string) $payload['title'] : 'Executive',
-                ':email' => !empty($payload['email']) ? (string) $payload['email'] : '',
-                ':status' => !empty($payload['status']) ? (string) $payload['status'] : 'Active Lead',
-                ':deal_value' => isset($payload['openDealValue']) ? (float) $payload['openDealValue'] : (isset($payload['dealValue']) ? (float) $payload['dealValue'] : 0),
-                ':last_contacted' => !empty($payload['lastContacted']) ? (string) $payload['lastContacted'] : 'Just now',
-                ':crm_account_id' => !empty($payload['crmAccountId']) ? (string) $payload['crmAccountId'] : 'RV360-ACC',
-                ':notes' => !empty($payload['notes']) ? (string) $payload['notes'] : ''
-            ]);
-
-            http_response_code(201);
-            echo json_encode(['success' => true, 'id' => $leadId, 'message' => 'Lead successfully saved']);
-            exit();
-        }
-
-        // Action: Upsert Call Log
         $id = !empty($payload['id']) ? (string) $payload['id'] : ('call-' . round(microtime(true) * 1000));
         $contactName = !empty($payload['contactName']) ? (string) $payload['contactName'] : 'Client Contact';
         $phoneNumber = !empty($payload['phoneNumber']) ? (string) $payload['phoneNumber'] : '+91 98201 43210';
@@ -473,7 +1156,7 @@ try {
         $duration = isset($payload['duration']) ? (int) $payload['duration'] : (isset($payload['durationSeconds']) ? (int) $payload['durationSeconds'] : 45);
         $timestamp = !empty($payload['timestamp']) ? (string) $payload['timestamp'] : 'Just now';
         $repName = !empty($payload['repName']) ? (string) $payload['repName'] : 'Rajesh Kumar (RingVia360)';
-        $repAvatar = !empty($payload['repAvatar']) ? (string) $payload['repAvatar'] : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80';
+        $repAvatar = !empty($payload['repAvatar']) ? (string) $payload['repAvatar'] : 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80';
         $repId = !empty($payload['repId']) ? (string) $payload['repId'] : 'rep-1';
         $outcome = !empty($payload['outcome']) ? (string) $payload['outcome'] : 'Call Completed & Synced';
         $notes = !empty($payload['notes']) ? (string) $payload['notes'] : 'Call logged via RingVia360 companion app.';
@@ -566,15 +1249,16 @@ try {
             'success' => true,
             'message' => "Call #$id saved dynamically to $driver database",
             'id' => $id,
-            'database' => $driver
+            'database' => $driver,
+            'active_user' => $activeUser
         ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         exit();
     }
 
     // =========================================================
-    // DELETE REQUEST (Remove Call)
+    // 14. CALL LOGS DELETE
     // =========================================================
-    if ($method === 'DELETE') {
+    if ($method === 'DELETE' && empty($action)) {
         $id = $_GET['id'] ?? '';
         if (!$id) {
             http_response_code(400);

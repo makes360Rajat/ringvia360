@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import type { CallLog, WhatsAppLog, SalesRep, CrmConnector, AuditLogEntry, SecuritySettings } from '../types';
+import type { CallLog, WhatsAppLog, SalesRep, CrmConnector, AuditLogEntry, SecuritySettings, AdminUser } from '../types';
 
 export interface IncomingCallEvent {
   id: string;
@@ -26,6 +26,7 @@ interface AppContextType {
   crmConnectors: CrmConnector[];
   auditLogs: AuditLogEntry[];
   securitySettings: SecuritySettings;
+  adminUsers: AdminUser[];
   activeAudioCall: CallLog | null;
   setActiveAudioCall: (call: CallLog | null) => void;
   selectedRole: 'admin' | 'rep';
@@ -52,8 +53,15 @@ interface AppContextType {
   triggerCrmSync: (id: string) => void;
   deleteCallLog: (id: string) => Promise<void>;
   refreshCalls: () => Promise<void>;
+  refreshAllData: () => Promise<void>;
   dbEngine: 'mysql' | 'sqlite';
-  updateSecuritySettings: (settings: Partial<SecuritySettings>) => void;
+  updateSecuritySettings: (settings: Partial<SecuritySettings>) => Promise<void>;
+  addAdminUser: (user: Omit<AdminUser, 'id'>) => Promise<void>;
+  deleteAdminUser: (id: string) => Promise<void>;
+  addRep: (rep: Partial<SalesRep>) => Promise<void>;
+  updateRep: (rep: Partial<SalesRep>) => Promise<void>;
+  deleteRep: (id: string) => Promise<void>;
+  toggleCrmConnector: (id: string) => Promise<void>;
   toastMessage: string | null;
   clearToast: () => void;
 }
@@ -457,13 +465,22 @@ const initialSecurity: SecuritySettings = {
   deviceAttestationEnforced: true
 };
 
+const initialAdminUsers: AdminUser[] = [
+  { id: 'u-1', name: 'Rajesh Kumar', email: 'rajesh.kumar@ringvia360.com', role: 'Sales Director', status: 'Active', sim: 'SIM 1 Bound', device: 'Galaxy S24 Ultra (Knox)', lastActive: 'Just now' },
+  { id: 'u-2', name: 'Sneha Kapoor', email: 'sneha.kapoor@ringvia360.com', role: 'Account Executive', status: 'Active', sim: 'SIM 1 Bound', device: 'iPhone 15 Pro Max', lastActive: '2m ago' },
+  { id: 'u-3', name: 'Amit Verma', email: 'amit.verma@ringvia360.com', role: 'Inbound Specialist', status: 'Active', sim: 'SIM 1 Bound', device: 'Pixel 9 Pro', lastActive: '5m ago' },
+  { id: 'u-4', name: 'Priya Sharma', email: 'priya.sharma@ringvia360.com', role: 'Team Lead', status: 'Active', sim: 'SIM 1 Bound', device: 'Galaxy Z Fold 6', lastActive: '15m ago' },
+  { id: 'u-5', name: 'Vikram Deshmukh', email: 'vikram.deshmukh@ringvia360.com', role: 'Compliance Officer', status: 'Active', sim: 'Unbound', device: 'MacBook Pro / Web', lastActive: '1h ago' }
+];
+
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [calls, setCalls] = useState<CallLog[]>(initialCalls);
   const [whatsAppLogs, setWhatsAppLogs] = useState<WhatsAppLog[]>(initialWhatsAppLogs);
   const [reps, setReps] = useState<SalesRep[]>(initialReps);
-  const [crmConnectors] = useState<CrmConnector[]>(initialCrmConnectors);
+  const [crmConnectors, setCrmConnectors] = useState<CrmConnector[]>(initialCrmConnectors);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(initialAdminUsers);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialAuditLogs);
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings>(initialSecurity);
   const [activeAudioCall, setActiveAudioCall] = useState<CallLog | null>(initialCalls[0]);
@@ -537,10 +554,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearToast = () => setToastMessage(null);
 
-  // Sync calls from server database tables
-  const fetchCallsFromServer = async () => {
+  // Sync all data from server database tables
+  const fetchAllDataFromServer = async () => {
     try {
       const endpoints = [
+        '/api/calls.php?action=all_data',
+        'https://ringvia360.com/api/calls.php?action=all_data',
         '/api/calls.php',
         'https://ringvia360.com/api/calls.php'
       ];
@@ -553,19 +572,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
           if (res.ok) {
             const data = await res.json();
-            if (data && data.success && Array.isArray(data.data) && data.data.length > 0) {
+            if (data && data.success) {
               json = data;
               break;
             }
           }
         } catch (_) {}
       }
-      if (!json || !Array.isArray(json.data) || json.data.length === 0) return;
+
+      if (!json) return;
       if (json.database === 'mysql' || json.database === 'sqlite') {
         setDbEngine(json.database);
       }
+
+      // Check if all_data payload or standard calls array
+      const rawCalls = json.data?.calls || (Array.isArray(json.data) ? json.data : null);
+
+      if (Array.isArray(rawCalls) && rawCalls.length > 0) {
         setCalls(prevCalls => {
-          const serverCalls: CallLog[] = json.data.map((c: any) => ({
+          const serverCalls: CallLog[] = rawCalls.map((c: any) => ({
             id: String(c.id),
             contactName: c.contactName || 'Client Contact',
             phoneNumber: c.phoneNumber || '',
@@ -590,8 +615,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             recordingUrl: c.recordingUrl || 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
             waveform: Array.isArray(c.waveform) && c.waveform.length > 0 ? c.waveform : [30, 45, 65, 80, 70, 85, 90, 75, 60, 50, 65, 80, 95, 75, 60, 45, 40, 55, 70, 60],
             transcript: Array.isArray(c.transcript) && c.transcript.length > 0 ? c.transcript : [
-              { speaker: c.repName || 'Rajesh Kumar', text: `Call with ${c.contactName} logged via RingVia360 mobile app.`, timestamp: '00:03' },
-              { speaker: c.contactName, text: 'All audio, transcripts, and wrap-up notes synced to RingVia360 tables.', timestamp: '00:15' }
+              { speaker: c.repName || 'Rajesh Kumar', text: `Call with ${c.contactName} logged via RingVia360 companion app.`, timestamp: '00:03' },
+              { speaker: c.contactName, text: 'All audio recordings, transcripts, and wrap-up notes synced to RingVia360 tables.', timestamp: '00:15' }
             ],
             keyActionItems: Array.isArray(c.keyActionItems) && c.keyActionItems.length > 0
               ? c.keyActionItems
@@ -603,24 +628,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ]
           }));
 
-          // Notify Admin if a new call was posted from phone
           const prevIds = new Set(prevCalls.map(c => c.id));
           const brandNew = serverCalls.filter(c => !prevIds.has(c.id));
           if (brandNew.length > 0 && prevCalls.length > 0) {
-            showToast(`📱 New call synced from phone: ${brandNew[0].contactName} (${brandNew[0].direction}) with recording & notes!`);
+            showToast(`📱 New call synced: ${brandNew[0].contactName} (${brandNew[0].direction}) with live recording!`);
           }
 
-          // Return combined list with server table as primary source
           const serverIds = new Set(serverCalls.map(c => c.id));
           const localOnly = prevCalls.filter(c => !serverIds.has(c.id));
           return [...localOnly, ...serverCalls];
         });
+      }
+
+      // Reps sync
+      if (Array.isArray(json.data?.reps) && json.data.reps.length > 0) {
+        setReps(json.data.reps);
+      }
+
+      // CRM Connectors sync
+      if (Array.isArray(json.data?.crmConnectors) && json.data.crmConnectors.length > 0) {
+        setCrmConnectors(json.data.crmConnectors);
+      }
+
+      // Admin Users sync
+      if (Array.isArray(json.data?.adminUsers) && json.data.adminUsers.length > 0) {
+        setAdminUsers(json.data.adminUsers);
+      }
+
+      // Settings sync
+      if (json.data?.settings?.security) {
+        setSecuritySettings(prev => ({ ...prev, ...json.data.settings.security }));
+      }
     } catch (_) {}
   };
 
+  const fetchCallsFromServer = fetchAllDataFromServer;
+
   useEffect(() => {
-    fetchCallsFromServer();
-    const interval = setInterval(fetchCallsFromServer, 4000);
+    fetchAllDataFromServer();
+    const interval = setInterval(fetchAllDataFromServer, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -950,13 +996,150 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const refreshCalls = async () => {
-    await fetchCallsFromServer();
+    await fetchAllDataFromServer();
     showToast(`🔄 Synchronized live feed from ${dbEngine.toUpperCase()} database.`);
   };
 
-  const updateSecuritySettings = (newSettings: Partial<SecuritySettings>) => {
-    setSecuritySettings(prev => ({ ...prev, ...newSettings }));
-    showToast('🛡️ Security and compliance settings updated & encrypted.');
+  const refreshAllData = async () => {
+    await fetchAllDataFromServer();
+    showToast(`🔄 Refreshed all tables from ${dbEngine.toUpperCase()} database.`);
+  };
+
+  const updateSecuritySettings = async (newSettings: Partial<SecuritySettings>) => {
+    const updated = { ...securitySettings, ...newSettings };
+    setSecuritySettings(updated);
+    showToast('🛡️ Security and compliance policies saved to database.');
+    const endpoints = ['/api/calls.php?action=settings', 'https://ringvia360.com/api/calls.php?action=settings'];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'security', value: updated })
+        });
+        break;
+      } catch (_) {}
+    }
+  };
+
+  const toggleCrmConnector = async (id: string) => {
+    let nextState = true;
+    setCrmConnectors(prev =>
+      prev.map(c => {
+        if (c.id === id) {
+          nextState = !c.isConnected;
+          return { ...c, isConnected: nextState, lastSyncTime: 'Just now' };
+        }
+        return c;
+      })
+    );
+    showToast(`🔌 CRM Connector #${id} updated: ${nextState ? 'Connected' : 'Disabled'}`);
+    const endpoints = ['/api/calls.php?action=crm_connectors', 'https://ringvia360.com/api/calls.php?action=crm_connectors'];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, isConnected: nextState })
+        });
+        break;
+      } catch (_) {}
+    }
+  };
+
+  const addAdminUser = async (user: Omit<AdminUser, 'id'>) => {
+    const newUser: AdminUser = {
+      ...user,
+      id: `u-${Date.now()}`
+    };
+    setAdminUsers(prev => [newUser, ...prev]);
+    showToast(`👤 Fleet User ${newUser.name} enrolled and saved to database.`);
+    const endpoints = ['/api/calls.php?action=admin_users', 'https://ringvia360.com/api/calls.php?action=admin_users'];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newUser)
+        });
+        break;
+      } catch (_) {}
+    }
+  };
+
+  const deleteAdminUser = async (id: string) => {
+    setAdminUsers(prev => prev.filter(u => u.id !== id));
+    showToast(`🗑️ User #${id} revoked and removed from fleet.`);
+    const endpoints = [`/api/calls.php?action=admin_users&id=${encodeURIComponent(id)}`, `https://ringvia360.com/api/calls.php?action=admin_users&id=${encodeURIComponent(id)}`];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, { method: 'DELETE' });
+        break;
+      } catch (_) {}
+    }
+  };
+
+  const addRep = async (repData: Partial<SalesRep>) => {
+    const newRep: SalesRep = {
+      id: repData.id || `rep-${Date.now()}`,
+      name: repData.name || 'Sales Rep',
+      role: repData.role || 'Account Executive',
+      avatar: repData.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
+      phone: repData.phone || '+91 98200 12345',
+      deviceModel: repData.deviceModel || 'Samsung Galaxy S24 (Knox)',
+      osVersion: repData.osVersion || 'Android 14',
+      batteryLevel: repData.batteryLevel ?? 95,
+      isOnline: repData.isOnline ?? true,
+      lastSync: 'Just now',
+      callsToday: repData.callsToday ?? 0,
+      talkTimeMinutes: repData.talkTimeMinutes ?? 0,
+      dealsClosed: repData.dealsClosed ?? 0,
+      conversionRate: repData.conversionRate ?? 22.5,
+      rank: repData.rank ?? reps.length + 1,
+      streakDays: repData.streakDays ?? 3,
+      badges: repData.badges ?? ['Enterprise Ready']
+    };
+    setReps(prev => [...prev, newRep]);
+    showToast(`🏆 Sales Rep ${newRep.name} added to leaderboard & saved to DB.`);
+    const endpoints = ['/api/calls.php?action=reps', 'https://ringvia360.com/api/calls.php?action=reps'];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newRep)
+        });
+        break;
+      } catch (_) {}
+    }
+  };
+
+  const updateRep = async (repData: Partial<SalesRep>) => {
+    if (!repData.id) return;
+    setReps(prev => prev.map(r => r.id === repData.id ? { ...r, ...repData } : r));
+    const endpoints = ['/api/calls.php?action=reps', 'https://ringvia360.com/api/calls.php?action=reps'];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(repData)
+        });
+        break;
+      } catch (_) {}
+    }
+  };
+
+  const deleteRep = async (id: string) => {
+    setReps(prev => prev.filter(r => r.id !== id));
+    showToast(`🗑️ Rep #${id} removed from database.`);
+    const endpoints = [`/api/calls.php?action=reps&id=${encodeURIComponent(id)}`, `https://ringvia360.com/api/calls.php?action=reps&id=${encodeURIComponent(id)}`];
+    for (const ep of endpoints) {
+      try {
+        await fetch(ep, { method: 'DELETE' });
+        break;
+      } catch (_) {}
+    }
   };
 
   return (
@@ -966,6 +1149,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         whatsAppLogs,
         reps,
         crmConnectors,
+        adminUsers,
         auditLogs,
         securitySettings,
         activeAudioCall,
@@ -994,8 +1178,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         triggerCrmSync,
         deleteCallLog,
         refreshCalls,
+        refreshAllData,
         dbEngine,
         updateSecuritySettings,
+        addAdminUser,
+        deleteAdminUser,
+        addRep,
+        updateRep,
+        deleteRep,
+        toggleCrmConnector,
         toastMessage,
         clearToast
       }}

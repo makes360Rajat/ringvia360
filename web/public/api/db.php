@@ -9,30 +9,37 @@ declare(strict_types=1);
 function getDatabaseConnection(): array {
     $mysqlHost = 'localhost';
     $mysqlDb = 'u488332847_dn_name';
-    $mysqlUser = 'u488332847_payvia360';
+    // Primary username provided: u488332847_ringvia360 (fallback to u488332847_payvia360 if needed)
+    $usernames = ['u488332847_ringvia360', 'u488332847_payvia360'];
     $mysqlPass = 'K6b?qnk2L/';
     
     $db = null;
     $driver = 'sqlite';
-    $error = null;
+    $activeUser = null;
+    $errors = [];
 
-    // 1. Try MySQL Production Connection
+    // 1. Try MySQL Production Connection with configured users
     if (extension_loaded('pdo_mysql')) {
-        try {
-            $dsn = "mysql:host={$mysqlHost};dbname={$mysqlDb};charset=utf8mb4";
-            $db = new PDO($dsn, $mysqlUser, $mysqlPass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-                PDO::ATTR_TIMEOUT => 3
-            ]);
-            $driver = 'mysql';
-        } catch (Throwable $e) {
-            $error = $e->getMessage();
+        foreach ($usernames as $user) {
+            try {
+                $dsn = "mysql:host={$mysqlHost};dbname={$mysqlDb};charset=utf8mb4";
+                $pdo = new PDO($dsn, $user, $mysqlPass, [
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::ATTR_EMULATE_PREPARES => false,
+                    PDO::ATTR_TIMEOUT => 3
+                ]);
+                $db = $pdo;
+                $driver = 'mysql';
+                $activeUser = $user;
+                break;
+            } catch (Throwable $e) {
+                $errors[$user] = $e->getMessage();
+            }
         }
     }
 
-    // 2. Fallback to Local SQLite if MySQL is unavailable (e.g., local development)
+    // 2. Fallback to Local SQLite if MySQL is unavailable (e.g. local development or during maintenance)
     if ($db === null) {
         $dataDir = __DIR__ . '/data';
         if (!is_dir($dataDir)) {
@@ -43,11 +50,13 @@ function getDatabaseConnection(): array {
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         $driver = 'sqlite';
+        $activeUser = 'sqlite_local';
     }
 
     return [
         'pdo' => $db,
         'driver' => $driver,
-        'mysql_error' => $error
+        'user' => $activeUser,
+        'errors' => $errors
     ];
 }

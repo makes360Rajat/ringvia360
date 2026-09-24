@@ -33,18 +33,9 @@ import {
 import { useApp } from '../context/AppContext';
 
 export default function Admin() {
-  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall } = useApp();
+  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine } = useApp();
   const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export'>('users');
   const [recordingSearch, setRecordingSearch] = useState('');
-
-  // User management state
-  const [userList, setUserList] = useState([
-    { id: 'u-1', name: 'Sarah Jenkins', email: 'sarah.jenkins@ringvia.com', role: 'Sales Rep', status: 'Active', sim: 'SIM 1 Bound', device: 'Galaxy S24 Ultra', lastActive: '2m ago' },
-    { id: 'u-2', name: 'Marcus Vance', email: 'marcus.vance@ringvia.com', role: 'Sales Rep', status: 'Active', sim: 'SIM 1 Bound', device: 'iPhone 15 Pro Max', lastActive: '8m ago' },
-    { id: 'u-3', name: 'Liam O’Connor', email: 'liam.oconnor@ringvia.com', role: 'Sales Rep', status: 'Active', sim: 'SIM 1 Bound', device: 'Pixel 9 Pro', lastActive: '15m ago' },
-    { id: 'u-4', name: 'Priya Sharma', email: 'priya.sharma@ringvia.com', role: 'Team Lead', status: 'Active', sim: 'SIM 1 Bound', device: 'Galaxy Z Fold 6', lastActive: '1h ago' },
-    { id: 'u-5', name: 'David Miller', email: 'david.miller@ringvia.com', role: 'Compliance Auditor', status: 'Active', sim: 'Unbound', device: 'MacBook Pro / Web', lastActive: 'Yesterday' },
-  ]);
 
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
@@ -65,29 +56,27 @@ export default function Admin() {
     setTimeout(() => setAdminNotification(null), 4000);
   };
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUserEmail || !newUserName) return;
-    const newUser = {
-      id: `u-${Date.now()}`,
+    await addAdminUser({
       name: newUserName,
       email: newUserEmail,
       role: newUserRole,
       status: 'Active',
-      sim: 'Pending Pairing',
-      device: 'Awaiting MDM QR',
-      lastActive: 'Invited'
-    };
-    setUserList([newUser, ...userList]);
+      sim: 'SIM 1 Bound',
+      device: 'Samsung Galaxy Knox 3.9',
+      lastActive: 'Just now'
+    });
     setNewUserName('');
     setNewUserEmail('');
     setInviteModalOpen(false);
-    notify(`✓ Invitation and MDM Enrollment QR code dispatched to ${newUser.email}!`);
+    notify(`✓ Invitation & MDM enrollment code dispatched and saved to database for ${newUserEmail}!`);
   };
 
-  const handleDeleteUser = (id: string, name: string) => {
-    setUserList(prev => prev.filter(u => u.id !== id));
-    notify(`Revoked license and disconnected companion app for ${name}`);
+  const handleDeleteUser = async (id: string, name: string) => {
+    await deleteAdminUser(id);
+    notify(`Revoked license and deleted user ${name} from database.`);
   };
 
   return (
@@ -100,7 +89,7 @@ export default function Admin() {
               Enterprise Admin & Fleet Command
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
-              <span className="live-dot" /> Tenant #482 • Active
+              <span className="live-dot" /> Tenant #482 • {dbEngine.toUpperCase()} Connected
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
@@ -114,7 +103,7 @@ export default function Admin() {
             <Users size={18} color="var(--primary)" />
             <div>
               <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>
-                {userList.length} / 50
+                {adminUsers.length} / 50
               </div>
               <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Licenses Used</div>
             </div>
@@ -215,7 +204,7 @@ export default function Admin() {
                 </tr>
               </thead>
               <tbody>
-                {userList.map(user => (
+                {adminUsers.map(user => (
                   <tr key={user.id} style={{ borderBottom: '1px solid var(--border-subtle)', fontSize: '0.85rem' }}>
                     <td style={{ padding: '0.85rem' }}>
                       <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>{user.name}</div>

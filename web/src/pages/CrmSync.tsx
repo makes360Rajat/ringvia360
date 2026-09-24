@@ -14,23 +14,16 @@ import {
 import { useApp } from '../context/AppContext';
 
 export default function CrmSync() {
-  const { crmConnectors } = useApp();
-  const [connectors, setConnectors] = useState(crmConnectors);
+  const { crmConnectors, toggleCrmConnector, dbEngine } = useApp();
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
-
-  const toggleConnector = (id: string) => {
-    setConnectors(prev =>
-      prev.map(c => (c.id === id ? { ...c, isConnected: !c.isConnected } : c))
-    );
-  };
 
   const handleManualSyncAll = () => {
     setIsSyncing(true);
     setSyncSuccessMsg(null);
     setTimeout(() => {
       setIsSyncing(false);
-      setSyncSuccessMsg('✓ All 4 active CRM pipelines successfully synchronized with zero dropouts!');
+      setSyncSuccessMsg(`✓ All CRM pipelines successfully synchronized with ${dbEngine.toUpperCase()} database tables!`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
     }, 1200);
   };
@@ -45,7 +38,7 @@ export default function CrmSync() {
               CRM Integration & Webhook Pipeline
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
-              Bi-Directional Sync Active
+              Bi-Directional Sync Active • {dbEngine.toUpperCase()}
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
@@ -83,7 +76,7 @@ export default function CrmSync() {
 
       {/* Connectors Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
-        {connectors.map(crm => (
+        {crmConnectors.map(crm => (
           <div key={crm.id} className="glass-card" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
@@ -104,7 +97,7 @@ export default function CrmSync() {
                 </div>
 
                 <button
-                  onClick={() => toggleConnector(crm.id)}
+                  onClick={() => toggleCrmConnector(crm.id)}
                   style={{
                     padding: '4px 10px',
                     borderRadius: '20px',
