@@ -50,6 +50,9 @@ interface AppContextType {
   simulateNewCall: (data: Partial<CallLog>) => void;
   simulateWhatsAppMessage: (data: Partial<WhatsAppLog>) => void;
   triggerCrmSync: (id: string) => void;
+  deleteCallLog: (id: string) => Promise<void>;
+  refreshCalls: () => Promise<void>;
+  dbEngine: 'mysql' | 'sqlite';
   updateSecuritySettings: (settings: Partial<SecuritySettings>) => void;
   toastMessage: string | null;
   clearToast: () => void;
@@ -469,6 +472,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [accent, setAccent] = useState<'violet' | 'emerald' | 'cyan' | 'amber'>('violet');
   const [isSimulatorOpen, setIsSimulatorOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [dbEngine, setDbEngine] = useState<'mysql' | 'sqlite'>('mysql');
 
   const [incomingCallAlert, setIncomingCallAlert] = useState<IncomingCallEvent | null>(null);
   const [activeCallSession, setActiveCallSession] = useState<ActiveCallSession | null>(null);
@@ -557,6 +561,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (_) {}
       }
       if (!json || !Array.isArray(json.data) || json.data.length === 0) return;
+      if (json.database === 'mysql' || json.database === 'sqlite') {
+        setDbEngine(json.database);
+      }
         setCalls(prevCalls => {
           const serverCalls: CallLog[] = json.data.map((c: any) => ({
             id: String(c.id),
@@ -923,6 +930,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerCrmSync = (id: string) => {
     setCalls(prev => prev.map(c => (c.id === id ? { ...c, crmStatus: 'synced' as const, crmType: 'RingVia360' } : c)));
     showToast(`✓ Call #${id} successfully synced with RingVia360 CRM!`);
+    const endpoints = ['/api/calls.php?action=crm_sync', 'https://ringvia360.com/api/calls.php?action=crm_sync'];
+    endpoints.forEach(ep => {
+      fetch(ep, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action: 'crm_sync', crmType: 'RingVia360' })
+      }).catch(() => {});
+    });
+  };
+
+  const deleteCallLog = async (id: string) => {
+    setCalls(prev => prev.filter(c => c.id !== id));
+    showToast(`🗑️ Call #${id} deleted from live ${dbEngine.toUpperCase()} database.`);
+    const endpoints = [`/api/calls.php?id=${encodeURIComponent(id)}`, `https://ringvia360.com/api/calls.php?id=${encodeURIComponent(id)}`];
+    endpoints.forEach(ep => {
+      fetch(ep, { method: 'DELETE' }).catch(() => {});
+    });
+  };
+
+  const refreshCalls = async () => {
+    await fetchCallsFromServer();
+    showToast(`🔄 Synchronized live feed from ${dbEngine.toUpperCase()} database.`);
   };
 
   const updateSecuritySettings = (newSettings: Partial<SecuritySettings>) => {
@@ -963,6 +992,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         simulateNewCall,
         simulateWhatsAppMessage,
         triggerCrmSync,
+        deleteCallLog,
+        refreshCalls,
+        dbEngine,
         updateSecuritySettings,
         toastMessage,
         clearToast

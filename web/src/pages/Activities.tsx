@@ -22,7 +22,9 @@ import {
   FileText,
   CheckCircle,
   ExternalLink,
-  X
+  X,
+  RotateCw,
+  Trash2
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { CallLog } from '../types';
@@ -35,7 +37,10 @@ export default function Activities() {
     setActiveAudioCall,
     triggerIncomingCall,
     startOutboundCallSession,
-    setIsSimulatorOpen
+    setIsSimulatorOpen,
+    deleteCallLog,
+    refreshCalls,
+    dbEngine
   } = useApp();
 
   const [filterType, setFilterType] = useState<'all' | 'inbound' | 'outbound' | 'missed' | 'whatsapp'>('all');
@@ -210,9 +215,9 @@ export default function Activities() {
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
           <button
             onClick={() => triggerIncomingCall({
-              contactName: 'Chloe Bennett (Inbound Lead)',
-              company: 'Stratos Data Systems',
-              phoneNumber: '+1 (415) 890-4411',
+              contactName: 'Pooja Iyer (Inbound Lead)',
+              company: 'Reliance Digital Solutions',
+              phoneNumber: '+91 98330 11223',
               dealValue: 64000
             })}
             className="btn-primary"
@@ -375,6 +380,37 @@ export default function Activities() {
             <option value="neutral">Neutral Intent</option>
             <option value="negative">Objection / Risk</option>
           </select>
+
+          <button
+            onClick={() => refreshCalls()}
+            className="btn-ghost"
+            style={{
+              padding: '8px 12px',
+              fontSize: '0.8rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: 'var(--text-main)',
+              background: 'var(--bg-surface-elevated)',
+              border: '1px solid var(--border-glass)',
+              borderRadius: 'var(--radius-md)',
+              cursor: 'pointer'
+            }}
+            title="Refresh from Production Database"
+          >
+            <RotateCw size={14} />
+            <span>Sync DB</span>
+            <span style={{
+              fontSize: '0.68rem',
+              padding: '1px 5px',
+              borderRadius: '4px',
+              background: dbEngine === 'mysql' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(124, 58, 237, 0.2)',
+              color: dbEngine === 'mysql' ? '#34d399' : '#a78bfa',
+              fontWeight: 700
+            }}>
+              {dbEngine.toUpperCase()}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -545,6 +581,24 @@ export default function Activities() {
                     >
                       <ExternalLink size={14} />
                       <span>Deep Dive Modal</span>
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Delete call record for ${call.contactName}?`)) {
+                          deleteCallLog(call.id);
+                        }
+                      }}
+                      className="btn-ghost"
+                      style={{
+                        padding: '0.45rem',
+                        color: 'var(--accent-rose)',
+                        borderRadius: 'var(--radius-sm)'
+                      }}
+                      title="Delete record from live database"
+                    >
+                      <Trash2 size={15} />
                     </button>
                   </div>
                 </div>

@@ -71,8 +71,8 @@ export default function Dashboard() {
           <button
             onClick={() => simulateNewCall({
               direction: 'inbound',
-              contactName: 'Victoria Sterling (Inbound Lead)',
-              company: 'Vanguard Logistics',
+              contactName: 'Ananya Deshmukh (Inbound Lead)',
+              company: 'HCL Technologies',
               outcome: 'Inbound Qualified - Demo Booked',
               dealValue: 64000
             })}

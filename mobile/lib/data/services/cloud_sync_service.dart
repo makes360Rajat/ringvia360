@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/call_record.dart';
+import '../models/lead_contact.dart';
 
 class CloudSyncResult {
   final bool success;
@@ -166,6 +167,37 @@ class CloudSyncService {
     } catch (e) {
       print('Error fetching calls from cloud: $e');
     }
+    return [];
+  }
+
+  Future<List<LeadContact>> fetchLeadsFromCloud() async {
+    try {
+      final url = serverUrl.contains('?') ? '$serverUrl&action=leads' : '$serverUrl?action=leads';
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map && decoded['data'] is List) {
+          final List<LeadContact> leads = [];
+          for (final item in decoded['data']) {
+            leads.add(LeadContact(
+              id: item['id']?.toString() ?? '',
+              name: item['name']?.toString() ?? 'Contact',
+              phoneNumber: item['phoneNumber']?.toString() ?? '',
+              company: item['company']?.toString() ?? '',
+              title: item['title']?.toString() ?? 'Executive',
+              openDealValue: (item['openDealValue'] as num?)?.toDouble() ?? 0.0,
+              lastContacted: item['lastContacted']?.toString() ?? 'Recent',
+              crmAccountId: item['crmAccountId']?.toString() ?? 'RV360-ACC-01',
+            ));
+          }
+          return leads;
+        }
+      }
+    } catch (_) {}
     return [];
   }
 }

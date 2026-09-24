@@ -251,10 +251,23 @@ class CallRepository {
   }
 
   Future<List<LeadContact>> searchContacts(String query) async {
-    if (query.isEmpty) return _mockContacts;
+    final List<LeadContact> allContacts = List.of(_mockContacts);
+    try {
+      final cloudLeads = await _cloudSyncService.fetchLeadsFromCloud();
+      if (cloudLeads.isNotEmpty) {
+        final existingIds = allContacts.map((c) => c.id).toSet();
+        for (final l in cloudLeads) {
+          if (!existingIds.contains(l.id)) {
+            allContacts.add(l);
+          }
+        }
+      }
+    } catch (_) {}
+
+    if (query.isEmpty) return allContacts;
     final clean = query.replaceAll(RegExp(r'[^0-9a-zA-Z]'), '').toLowerCase();
 
-    return _mockContacts.where((c) {
+    return allContacts.where((c) {
       final cleanPhone = c.phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
       return c.name.toLowerCase().contains(query.toLowerCase()) ||
           c.company.toLowerCase().contains(query.toLowerCase()) ||

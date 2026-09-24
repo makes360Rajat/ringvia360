@@ -23,6 +23,7 @@ class DialerViewModel extends ChangeNotifier {
     _initTelephonyListener();
   }
 
+  bool _isDisposed = false;
   String _inputNumber = '';
   String get inputNumber => _inputNumber;
   String get dialedNumber => _inputNumber;
@@ -158,7 +159,9 @@ class DialerViewModel extends ChangeNotifier {
   }
 
   Future<void> _searchContacts() async {
-    _matchingContacts = await _callRepository.searchContacts(_inputNumber);
+    final contacts = await _callRepository.searchContacts(_inputNumber);
+    if (_isDisposed) return;
+    _matchingContacts = contacts;
     notifyListeners();
   }
 
@@ -393,7 +396,15 @@ class DialerViewModel extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_isDisposed) {
+      super.notifyListeners();
+    }
+  }
+
+  @override
   void dispose() {
+    _isDisposed = true;
     _sub?.cancel();
     super.dispose();
   }
