@@ -198,24 +198,26 @@ export const Navbar: React.FC = () => {
           <span>Customer Admin</span>
         </NavLink>
 
-        <NavLink
-          to="/super-admin"
-          className={({ isActive }) => `btn-ghost ${isActive ? 'btn-primary' : ''}`}
-          style={({ isActive }) => ({
-            padding: '0.45rem 0.85rem',
-            borderRadius: 'var(--radius-md)',
-            color: isActive ? '#fff' : '#eab308',
-            background: isActive ? 'linear-gradient(135deg, #eab308 0%, #f97316 100%)' : 'rgba(234, 179, 8, 0.1)',
-            border: '1px solid rgba(234, 179, 8, 0.3)',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            fontWeight: 700
-          })}
-        >
-          <Crown size={15} />
-          <span>Super Admin</span>
-        </NavLink>
+        {currentUser?.role === 'super_admin' && (
+          <NavLink
+            to="/super-admin"
+            className={({ isActive }) => `btn-ghost ${isActive ? 'btn-primary' : ''}`}
+            style={({ isActive }) => ({
+              padding: '0.45rem 0.85rem',
+              borderRadius: 'var(--radius-md)',
+              color: isActive ? '#fff' : '#eab308',
+              background: isActive ? 'linear-gradient(135deg, #eab308 0%, #f97316 100%)' : 'rgba(234, 179, 8, 0.1)',
+              border: '1px solid rgba(234, 179, 8, 0.3)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontWeight: 700
+            })}
+          >
+            <Crown size={15} />
+            <span>Super Admin</span>
+          </NavLink>
+        )}
       </nav>
 
       {/* Action Hub & Utilities */}
@@ -270,7 +272,11 @@ export const Navbar: React.FC = () => {
 
         {/* Workspace Partition Badge */}
         <div
-          onClick={() => navigate('/super-admin')}
+          onClick={() => {
+            if (currentUser?.role === 'super_admin') navigate('/super-admin');
+            else if (currentUser) navigate('/admin');
+            else navigate('/login');
+          }}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -284,7 +290,7 @@ export const Navbar: React.FC = () => {
             color: activeTenantId === 'all' ? '#eab308' : 'var(--accent-primary)',
             cursor: 'pointer'
           }}
-          title="Current Workspace Scope - Click to inspect in Super Admin"
+          title={currentUser ? "Current Workspace Scope - Click to open Admin console" : "Click to Sign In"}
         >
           {activeTenantId === 'all' ? <Crown size={13} /> : <Building size={13} />}
           <span style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

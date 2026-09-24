@@ -440,14 +440,31 @@ try {
         ]);
 
         // 3. Seed Default Admin User & Settings for the tenant
-        $db->prepare("
-            INSERT INTO admin_users (id, name, email, role, status, sim, device, last_active)
-            VALUES (:id, :name, :email, 'Admin Director', 'Active', 'SIM 1 Bound', 'Samsung Knox Fleet', 'Just now')
-        ")->execute([
-            ':id' => 'u-' . $userId,
-            ':name' => $name,
-            ':email' => $email
-        ]);
+        try {
+            $db->prepare("
+                INSERT INTO admin_users (id, org_id, name, email, role, status, sim, device, last_active)
+                VALUES (:id, :org_id, :name, :email, 'Admin Director', 'Active', 'SIM 1 Bound', 'Samsung Knox Fleet', 'Just now')
+            ")->execute([
+                ':id' => 'u-' . $userId,
+                ':org_id' => $orgId,
+                ':name' => $name,
+                ':email' => $email
+            ]);
+        } catch (Throwable $e) {}
+
+        // 4. Seed Default Sales Rep for the tenant
+        try {
+            $repId = 'rep-' . substr(bin2hex(random_bytes(4)), 0, 8);
+            $db->prepare("
+                INSERT INTO sales_reps (id, org_id, name, avatar, calls_count, avg_duration, status, conversion_rate, daily_target, rank_order)
+                VALUES (:id, :org_id, :name, :avatar, 0, '0m 00s', 'Online', 0, 40, 1)
+            ")->execute([
+                ':id' => $repId,
+                ':org_id' => $orgId,
+                ':name' => $name,
+                ':avatar' => 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80'
+            ]);
+        } catch (Throwable $e) {}
 
         $tokenPayload = [
             'userId' => $userId,

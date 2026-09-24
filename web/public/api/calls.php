@@ -720,6 +720,61 @@ try {
     }
 
     // =========================================================
+    // 4b. SECURE AUDIO STREAMING (Strict Multi-Tenant Verification)
+    // =========================================================
+    if ($action === 'stream_audio') {
+        $callId = $_GET['id'] ?? ($_GET['callId'] ?? '');
+        if (!$callId) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Missing call ID']);
+            exit();
+        }
+
+        $stmtCall = $db->prepare("SELECT * FROM call_logs WHERE id = :id LIMIT 1");
+        $stmtCall->execute([':id' => $callId]);
+        $callRecord = $stmtCall->fetch();
+
+        if (!$callRecord) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => 'Call recording not found']);
+            exit();
+        }
+
+        // Verify tenant isolation: customer admin can only stream their own recordings
+        if ($authPayload && ($authPayload['role'] ?? '') !== 'super_admin') {
+            $userOrg = (string) ($authPayload['orgId'] ?? '');
+            $callOrg = (string) ($callRecord['org_id'] ?? '');
+            if ($userOrg !== $callOrg) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Cross-tenant recording access forbidden. Recording belongs to another workspace.']);
+                exit();
+            }
+        }
+
+        $recUrl = (string) ($callRecord['recording_url'] ?? '');
+        if (empty($recUrl)) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => 'No audio recording file associated with this call']);
+            exit();
+        }
+
+        // If local file in uploads
+        $basename = basename($recUrl);
+        $localPath = __DIR__ . '/uploads/' . $basename;
+        if (file_exists($localPath)) {
+            header('Content-Type: audio/mpeg');
+            header('Content-Length: ' . filesize($localPath));
+            header('Accept-Ranges: bytes');
+            readfile($localPath);
+            exit();
+        }
+
+        // Otherwise redirect to stored URL
+        header('Location: ' . $recUrl);
+        exit();
+    }
+
+    // =========================================================
     // =========================================================
     // 5. ALL DATA (Single Round-Trip Fetch Scoped by Multi-Tenant Isolation)
     // =========================================================

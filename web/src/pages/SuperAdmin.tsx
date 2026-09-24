@@ -138,6 +138,70 @@ export default function SuperAdmin() {
   const totalSeats = tenants.reduce((acc, t) => acc + (t.seats || 50), 0);
   const activeCount = tenants.filter(t => t.status === 'active').length;
 
+  if (currentUser?.role !== 'super_admin') {
+    return (
+      <div style={{ maxWidth: '640px', margin: '5rem auto', padding: '2rem 1.5rem', textAlign: 'center' }}>
+        <div className="glass-card" style={{ padding: '3.5rem 2.5rem', border: '1px solid rgba(234, 179, 8, 0.3)' }}>
+          <div style={{
+            width: '68px',
+            height: '68px',
+            borderRadius: '20px',
+            background: 'rgba(234, 179, 8, 0.15)',
+            border: '1px solid rgba(234, 179, 8, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem',
+            color: '#eab308'
+          }}>
+            <Crown size={34} />
+          </div>
+          <h2 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-main)' }}>
+            Super Admin Authority Required
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
+            The Global SaaS Management console contains sovereign cross-tenant client telemetry, billing tier controls, and company lifecycle administration. Please authenticate with Super Admin credentials.
+          </p>
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => navigate('/login')}
+              className="btn-primary"
+              style={{
+                padding: '0.8rem 1.75rem',
+                borderRadius: '10px',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                background: 'linear-gradient(135deg, #eab308 0%, #f97316 100%)',
+                color: '#000',
+                border: 'none',
+                boxShadow: '0 4px 14px rgba(234, 179, 8, 0.3)'
+              }}
+            >
+              <Crown size={16} />
+              Sign In as Super Admin
+            </button>
+            <button
+              onClick={() => navigate('/admin')}
+              className="btn-ghost"
+              style={{
+                padding: '0.8rem 1.5rem',
+                borderRadius: '10px',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                border: '1px solid var(--border-glass)'
+              }}
+            >
+              Go to Customer Admin
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: '1440px', margin: '0 auto', padding: '2rem 1.5rem 5rem' }}>
       {/* Super Admin Top Header */}

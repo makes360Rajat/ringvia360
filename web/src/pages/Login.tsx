@@ -47,7 +47,13 @@ export default function Login() {
     try {
       const success = await login(loginEmail, loginPassword);
       if (success) {
-        navigate('/dashboard');
+        const storedUser = localStorage.getItem('ringvia360_user');
+        const role = storedUser ? JSON.parse(storedUser)?.role : null;
+        if (role === 'super_admin') {
+          navigate('/super-admin');
+        } else {
+          navigate('/admin');
+        }
       } else {
         setErrorMessage('Invalid email or password. Please verify credentials or use a demo account.');
       }
@@ -72,7 +78,7 @@ export default function Login() {
         plan: selectedPlan
       });
       if (success) {
-        navigate('/dashboard');
+        navigate('/admin');
       } else {
         setErrorMessage('Signup failed. An account with this email may already exist.');
       }
@@ -181,7 +187,7 @@ export default function Login() {
                 <ArrowRight size={14} color="#f59e0b" />
               </button>
 
-              {/* Customer demo account 1 */}
+              {/* Customer demo account 1: TCS */}
               <button
                 type="button"
                 onClick={() => {
@@ -203,17 +209,17 @@ export default function Login() {
                   <Building size={18} color="var(--primary)" />
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      Customer Demo Account (Admin)
+                      🏢 Tata Consultancy Services (Customer Admin)
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      Demo administrator • 120 Licenses Active
+                      aarav.sharma@tcs.com • 120 Seats Active
                     </div>
                   </div>
                 </div>
                 <ArrowRight size={14} color="var(--primary)" />
               </button>
 
-              {/* Customer demo account 2 */}
+              {/* Customer demo account 2: Infosys */}
               <button
                 type="button"
                 onClick={() => {
@@ -235,14 +241,46 @@ export default function Login() {
                   <Briefcase size={18} color="#06b6d4" />
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      Customer Demo Account (Admin)
+                      🏢 Infosys Technologies (Customer Admin)
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      Demo administrator • 50 Licenses Active
+                      priya.patel@infosys.com • 50 Seats Active
                     </div>
                   </div>
                 </div>
                 <ArrowRight size={14} color="#06b6d4" />
+              </button>
+
+              {/* Customer demo account 3: HDFC */}
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  selectDemoAccount('vikram.malhotra@hdfcbank.com');
+                }}
+                className="glass-panel"
+                style={{
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  cursor: 'pointer',
+                  border: loginEmail === 'vikram.malhotra@hdfcbank.com' ? '1px solid #10b981' : '1px solid var(--border-subtle)',
+                  background: loginEmail === 'vikram.malhotra@hdfcbank.com' ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-glass)'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textAlign: 'left' }}>
+                  <Building size={18} color="#10b981" />
+                  <div>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
+                      🏦 HDFC Bank Commercial (Customer Admin)
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
+                      vikram.malhotra@hdfcbank.com • 200 Seats Active
+                    </div>
+                  </div>
+                </div>
+                <ArrowRight size={14} color="#10b981" />
               </button>
             </div>
           </div>

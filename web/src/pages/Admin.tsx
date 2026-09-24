@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Users,
   Smartphone,
@@ -28,13 +29,16 @@ import {
   PhoneCall,
   ArrowDownLeft,
   ArrowUpRight,
-  Sparkles
+  Sparkles,
+  Building,
+  LogIn
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import ContentEditorPanel from '../components/ContentEditorPanel';
 
 export default function Admin() {
-  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine, currentUser } = useApp();
+  const navigate = useNavigate();
+  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine, currentUser, currentOrg } = useApp();
   const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export' | 'content'>('users');
   const [recordingSearch, setRecordingSearch] = useState('');
 
@@ -57,7 +61,7 @@ export default function Admin() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'generate_pair_code',
-          orgId: currentUser?.orgId || 'org-tcs',
+          orgId: currentUser?.orgId || currentOrg?.id || 'org-tcs',
           repId: repId || 'rep-mobile',
           repName: repName,
         })
@@ -111,21 +115,85 @@ export default function Admin() {
     notify(`Revoked license and deleted user ${name} from database.`);
   };
 
+  if (!currentUser) {
+    return (
+      <div style={{ maxWidth: '640px', margin: '5rem auto', padding: '2rem 1.5rem', textAlign: 'center' }}>
+        <div className="glass-card" style={{ padding: '3.5rem 2.5rem', border: '1px solid var(--border-glass)' }}>
+          <div style={{
+            width: '68px',
+            height: '68px',
+            borderRadius: '20px',
+            background: 'rgba(99, 102, 241, 0.15)',
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem',
+            color: 'var(--primary)'
+          }}>
+            <Building size={34} />
+          </div>
+          <h2 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-main)' }}>
+            Customer Admin Portal
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', lineHeight: 1.6, marginBottom: '2rem' }}>
+            Please sign in to access your company's dedicated call recordings, sales rep telemetry, MDM device enrollment PINs, and CRM integrations.
+          </p>
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => navigate('/login')}
+              className="btn-primary"
+              style={{
+                padding: '0.8rem 1.75rem',
+                borderRadius: '10px',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <LogIn size={16} />
+              Sign In to Your Workspace
+            </button>
+            <button
+              onClick={() => navigate('/signup')}
+              className="btn-ghost"
+              style={{
+                padding: '0.8rem 1.5rem',
+                borderRadius: '10px',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                border: '1px solid var(--border-glass)'
+              }}
+            >
+              Register New Company
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const orgName = currentOrg?.name || currentUser.orgName || 'Corporate Workspace';
+  const orgPlan = currentOrg?.plan || 'Pro Growth';
+  const allocatedSeats = currentOrg?.seats || 50;
+
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
       {/* Top Header & Org Tenant Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Enterprise Admin & Fleet Command
+              {orgName} Admin Console
             </h1>
             <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
-              <span className="live-dot" /> Tenant #482 • {dbEngine.toUpperCase()} Connected
+              <span className="live-dot" /> Tenant #{currentUser.orgId || currentOrg?.id || 'tcs'} • Plan: {orgPlan}
             </span>
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            Global policies, mobile device MDM enrollment, call recording storage vaults, and CRM sync rules.
+            Dedicated Sovereign Workspace: Call telemetry, sales reps, device pairing PINs, and CRM sync rules.
           </p>
         </div>
 
@@ -135,7 +203,7 @@ export default function Admin() {
             <Users size={18} color="var(--primary)" />
             <div>
               <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>
-                {adminUsers.length} / 50
+                {adminUsers.length} / {allocatedSeats}
               </div>
               <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>Licenses Used</div>
             </div>
@@ -843,7 +911,7 @@ export default function Admin() {
                   Pair Member Device
                 </h3>
                 <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)' }}>
-                  Tenant: {currentUser?.orgName || 'Tata Consultancy Services'}
+                  Tenant: {currentOrg?.name || currentUser?.orgName || 'Corporate Workspace'}
                 </span>
               </div>
               <button onClick={() => setQrModalRep(null)} className="btn-ghost" style={{ padding: '4px' }}>
