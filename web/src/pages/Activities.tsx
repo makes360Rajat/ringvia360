@@ -92,6 +92,15 @@ export default function Activities() {
     };
   }, []);
 
+  // Auto-sync live feeds from database on mount and periodically
+  useEffect(() => {
+    refreshCalls();
+    const interval = setInterval(() => {
+      refreshCalls();
+    }, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Update speed & mute when changed
   useEffect(() => {
     if (audioRef.current) {

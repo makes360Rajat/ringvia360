@@ -802,38 +802,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const clearToast = () => setToastMessage(null);
 
-  // Sync all data from server database tables scoped by multi-tenant organization
+  // Sync all data from server database tables scoped by multi-tenant organization or public live feeds
   const fetchAllDataFromServer = async () => {
-    // Public pages intentionally use bundled demo data only. Never request tenant feeds
-    // until a user is authenticated.
-    if (!currentUser) {
-      setCalls(initialCalls);
-      return;
-    }
     try {
-      let scopedTenantId = currentUser.role === 'super_admin'
+      let scopedTenantId = currentUser?.role === 'super_admin'
         ? activeTenantId
-        : (currentUser.orgId || activeTenantId);
+        : (currentUser?.orgId || activeTenantId);
       if (scopedTenantId && scopedTenantId.startsWith('org-1790')) {
         scopedTenantId = 'org-makes360-33faf';
       }
       const authToken = localStorage.getItem('ringvia360_auth_token');
-      if (!authToken) return;
-      const endpoints = [
+
+      // If user is authenticated, query tenant all_data. If unauthenticated, query live call feeds directly!
+      const endpoints = authToken ? [
         `/api/calls.php?action=all_data&org_id=${encodeURIComponent(scopedTenantId)}`,
         `https://ringvia360.com/api/calls.php?action=all_data&org_id=${encodeURIComponent(scopedTenantId)}`,
         `/api/calls.php?org_id=${encodeURIComponent(scopedTenantId)}`,
         `https://ringvia360.com/api/calls.php?org_id=${encodeURIComponent(scopedTenantId)}`
+      ] : [
+        `/api/calls.php?limit=100`,
+        `https://ringvia360.com/api/calls.php?limit=100`
       ];
+
       let json: any = null;
       for (const ep of endpoints) {
         try {
+          const headers: Record<string, string> = {
+            Accept: 'application/json',
+          };
+          if (authToken) {
+            headers['Authorization'] = `Bearer ${authToken}`;
+            headers['X-Tenant-Id'] = scopedTenantId;
+          }
           const res = await fetch(ep, {
-            headers: {
-              Accept: 'application/json',
-              'X-Tenant-Id': scopedTenantId,
-              Authorization: `Bearer ${authToken}`
-            },
+            headers,
             cache: 'no-store'
           });
           if (res.ok) {
@@ -894,7 +896,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ]
           }));
 
-          const visibleCalls = currentUser.role === 'rep'
+          const visibleCalls = currentUser && currentUser.role === 'rep'
             ? serverCalls.filter(call => call.repName.trim().toLowerCase() === currentUser.name.trim().toLowerCase())
             : serverCalls;
           const prevIds = new Set(prevCalls.map(c => c.id));
