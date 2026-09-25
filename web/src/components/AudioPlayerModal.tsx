@@ -371,11 +371,11 @@ export const AudioPlayerModal: React.FC = () => {
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-main)' }}>
               {activeAudioCall.outcome}
             </div>
-            {activeAudioCall.dealValue && (
-              <p style={{ fontSize: '0.82rem', color: 'var(--accent-emerald)', marginTop: '0.2rem', fontWeight: 600 }}>
-                Deal Pipeline Value: ${activeAudioCall.dealValue.toLocaleString()}
+            {activeAudioCall.dealValue && Number(activeAudioCall.dealValue) > 0 ? (
+              <p style={{ fontSize: '0.85rem', color: 'var(--accent-amber)', marginTop: '0.25rem', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                💰 Deal Pipeline: ₹{Number(activeAudioCall.dealValue).toLocaleString('en-IN')} {activeAudioCall.dealStage ? `(${activeAudioCall.dealStage})` : ''}
               </p>
-            )}
+            ) : null}
           </div>
 
           {/* CRM Sync Status */}

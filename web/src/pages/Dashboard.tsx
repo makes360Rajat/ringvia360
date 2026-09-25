@@ -23,6 +23,8 @@ export default function Dashboard() {
   const totalDurationMinutes = Math.round(calls.reduce((acc, c) => acc + c.duration, 0) / 60);
   const connectedCalls = calls.filter(c => c.duration > 0).length;
   const connectRate = Math.round((connectedCalls / Math.max(1, calls.length)) * 100);
+  const totalPipelineDealValue = calls.reduce((acc, c) => acc + (Number(c.dealValue) || 0), 0);
+  const dealsCount = calls.filter(c => (Number(c.dealValue) || 0) > 0).length;
 
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -136,15 +138,15 @@ export default function Dashboard() {
         {/* Metric 5 */}
         <div className="glass-card" style={{ padding: '1.25rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-dim)', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Deals Influenced</span>
-            <DollarSign size={18} color="var(--accent-amber)" />
+            <span style={{ fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Pipeline Deal Value</span>
+            <TrendingUp size={18} color="var(--accent-amber)" />
           </div>
           <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
-            $584,000
+            ₹{totalPipelineDealValue.toLocaleString('en-IN')}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.4rem', fontSize: '0.75rem', color: 'var(--accent-emerald)' }}>
             <ArrowUpRight size={14} />
-            <span>12 Closed Won this month</span>
+            <span>{dealsCount} Active Deals Influenced</span>
           </div>
         </div>
 

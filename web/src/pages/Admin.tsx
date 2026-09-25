@@ -33,7 +33,8 @@ import {
   Building,
   LogIn,
   Edit3,
-  Battery
+  Battery,
+  TrendingUp
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import ContentEditorPanel from '../components/ContentEditorPanel';
@@ -43,6 +44,9 @@ export default function Admin() {
   const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine, currentUser, currentOrg, addRep, updateRep, deleteRep } = useApp();
   const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export' | 'content'>('users');
   const [recordingSearch, setRecordingSearch] = useState('');
+
+  const totalPipelineValue = calls.reduce((acc, c) => acc + (Number(c.dealValue) || 0), 0);
+  const activeDealsCount = calls.filter(c => (Number(c.dealValue) || 0) > 0).length;
 
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
   const [newUserName, setNewUserName] = useState('');
@@ -293,7 +297,19 @@ export default function Admin() {
         </div>
 
         {/* Global Stats Counter */}
-        <div style={{ display: 'flex', gap: '1rem' }}>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+          <div className="glass-card" style={{ padding: '0.6rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', border: '1px solid rgba(245, 158, 11, 0.35)', background: 'rgba(245, 158, 11, 0.06)' }}>
+            <TrendingUp size={20} color="var(--accent-amber)" />
+            <div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
+                ₹{totalPipelineValue.toLocaleString('en-IN')}
+              </div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>
+                Pipeline Deal Value ({activeDealsCount} Deals)
+              </div>
+            </div>
+          </div>
+
           <div className="glass-card" style={{ padding: '0.6rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <Users size={18} color="var(--primary)" />
             <div>
@@ -762,11 +778,14 @@ export default function Admin() {
           <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
-                <h4 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h4 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <Headphones size={18} color="var(--primary)" />
                   Enterprise Encrypted Call Recordings Archive
                   <span className="glass-pill" style={{ fontSize: '0.75rem', background: 'var(--primary-subtle)', color: 'var(--primary)' }}>
                     {calls.length} Verified Recordings
+                  </span>
+                  <span className="glass-pill" style={{ fontSize: '0.75rem', background: 'rgba(245, 158, 11, 0.15)', color: 'var(--accent-amber)', border: '1px solid rgba(245, 158, 11, 0.3)' }}>
+                    💰 ₹{totalPipelineValue.toLocaleString('en-IN')} Total Pipeline
                   </span>
                 </h4>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '2px' }}>
@@ -796,13 +815,14 @@ export default function Admin() {
             </div>
 
             <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '780px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', minWidth: '880px' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border-glass)', fontSize: '0.78rem', color: 'var(--text-dim)' }}>
                     <th style={{ padding: '0.75rem' }}>TYPE</th>
                     <th style={{ padding: '0.75rem' }}>CONTACT / PROSPECT</th>
                     <th style={{ padding: '0.75rem' }}>REP / LINE</th>
                     <th style={{ padding: '0.75rem' }}>DURATION & DATE</th>
+                    <th style={{ padding: '0.75rem' }}>DEAL VALUE & STAGE</th>
                     <th style={{ padding: '0.75rem' }}>ENCRYPTION VAULT</th>
                     <th style={{ padding: '0.75rem' }}>AI SENTIMENT</th>
                     <th style={{ padding: '0.75rem', textAlign: 'right' }}>RECORDING ACTIONS</th>
@@ -843,6 +863,20 @@ export default function Admin() {
                           <td style={{ padding: '0.75rem' }}>
                             <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-main)' }}>{durationStr}</div>
                             <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>{call.timestamp}</div>
+                          </td>
+                          <td style={{ padding: '0.75rem' }}>
+                            <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: 'var(--accent-amber)' }}>
+                              {call.dealValue && Number(call.dealValue) > 0 ? `₹${Number(call.dealValue).toLocaleString('en-IN')}` : '₹0'}
+                            </div>
+                            <span className="glass-pill" style={{
+                              fontSize: '0.68rem',
+                              padding: '2px 6px',
+                              background: 'rgba(245, 158, 11, 0.12)',
+                              color: 'var(--accent-amber)',
+                              border: '1px solid rgba(245, 158, 11, 0.25)'
+                            }}>
+                              {call.dealStage || 'Proposal'}
+                            </span>
                           </td>
                           <td style={{ padding: '0.75rem' }}>
                             <span className="glass-pill" style={{ fontSize: '0.72rem', color: 'var(--accent-emerald)', gap: '4px' }}>

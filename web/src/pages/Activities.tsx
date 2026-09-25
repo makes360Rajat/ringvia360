@@ -23,7 +23,8 @@ import {
   ExternalLink,
   X,
   RotateCw,
-  Trash2
+  Trash2,
+  TrendingUp
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { CallLog } from '../types';
@@ -218,9 +219,22 @@ export default function Activities() {
           </p>
         </div>
 
-        <span className="glass-pill" style={{ color: 'var(--accent-cyan)', fontSize: '0.75rem' }}>
-          Read-only admin feed • records are sent from mobile
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div className="glass-card" style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem', border: '1px solid rgba(245, 158, 11, 0.35)', background: 'rgba(245, 158, 11, 0.08)' }}>
+            <TrendingUp size={18} color="var(--accent-amber)" />
+            <div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)' }}>
+                ₹{calls.reduce((acc, c) => acc + (Number(c.dealValue) || 0), 0).toLocaleString('en-IN')}
+              </div>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-dim)' }}>
+                Pipeline Value ({calls.filter(c => (Number(c.dealValue) || 0) > 0).length} Deals)
+              </div>
+            </div>
+          </div>
+          <span className="glass-pill" style={{ color: 'var(--accent-cyan)', fontSize: '0.75rem' }}>
+            Read-only admin feed • records are sent from mobile
+          </span>
+        </div>
       </div>
 
       {/* Prominent Audio Pod Live Banner */}
@@ -503,6 +517,21 @@ export default function Activities() {
 
                   {/* Top Right: Badges & Deep Dive Launchers */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+                    {call.dealValue && Number(call.dealValue) > 0 ? (
+                      <span className="glass-pill" style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        color: 'var(--accent-amber)',
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        💰 ₹{Number(call.dealValue).toLocaleString('en-IN')} • {call.dealStage || 'Proposal'}
+                      </span>
+                    ) : null}
+
                     <span className={`glass-pill ${
                       call.sentiment === 'positive' ? 'badge-sentiment-pos' :
                       call.sentiment === 'neutral' ? 'badge-sentiment-neu' : 'badge-sentiment-neg'
