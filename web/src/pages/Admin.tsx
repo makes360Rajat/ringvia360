@@ -31,14 +31,16 @@ import {
   ArrowUpRight,
   Sparkles,
   Building,
-  LogIn
+  LogIn,
+  Edit3,
+  Battery
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import ContentEditorPanel from '../components/ContentEditorPanel';
 
 export default function Admin() {
   const navigate = useNavigate();
-  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine, currentUser, currentOrg } = useApp();
+  const { reps, securitySettings, updateSecuritySettings, auditLogs, calls, setActiveAudioCall, adminUsers, addAdminUser, deleteAdminUser, dbEngine, currentUser, currentOrg, addRep, updateRep, deleteRep } = useApp();
   const [activeTab, setActiveTab] = useState<'users' | 'devices' | 'recording' | 'crm-rules' | 'privacy' | 'export' | 'content'>('users');
   const [recordingSearch, setRecordingSearch] = useState('');
 
@@ -61,7 +63,9 @@ export default function Admin() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'generate_pair_code',
-          orgId: currentUser?.orgId || currentOrg?.id || 'org-tcs',
+          orgId: (currentUser?.orgId && !currentUser.orgId.startsWith('org-1790'))
+            ? currentUser.orgId
+            : ((currentOrg?.id && !currentOrg.id.startsWith('org-1790')) ? currentOrg.id : 'org-makes360-33faf'),
           repId: repId || 'rep-mobile',
           repName: repName,
         })
@@ -113,6 +117,97 @@ export default function Admin() {
   const handleDeleteUser = async (id: string, name: string) => {
     await deleteAdminUser(id);
     notify(`Revoked license and deleted user ${name} from database.`);
+  };
+
+  // Fleet Device Management State
+  const [deviceSearch, setDeviceSearch] = useState('');
+  const [deviceModalOpen, setDeviceModalOpen] = useState(false);
+  const [editingRepId, setEditingRepId] = useState<string | null>(null);
+  const [deviceRepName, setDeviceRepName] = useState('');
+  const [deviceRepRole, setDeviceRepRole] = useState('Account Executive');
+  const [deviceModel, setDeviceModel] = useState('');
+  const [deviceOsVersion, setDeviceOsVersion] = useState('Android 14 (Knox v3.9)');
+  const [devicePhone, setDevicePhone] = useState('+91 98200 12345');
+  const [deviceBatteryLevel, setDeviceBatteryLevel] = useState<number>(92);
+  const [deviceIsOnline, setDeviceIsOnline] = useState<boolean>(true);
+  const [deviceAvatar, setDeviceAvatar] = useState('https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80');
+
+  const handleOpenAddDevice = () => {
+    setEditingRepId(null);
+    setDeviceRepName('');
+    setDeviceRepRole('Account Executive');
+    setDeviceModel('infi0');
+    setDeviceOsVersion('Android 14 (Knox v3.9)');
+    setDevicePhone('+91 98200 12345');
+    setDeviceBatteryLevel(95);
+    setDeviceIsOnline(true);
+    setDeviceAvatar('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80');
+    setDeviceModalOpen(true);
+  };
+
+  const handleOpenEditDevice = (rep: any) => {
+    setEditingRepId(rep.id);
+    setDeviceRepName(rep.name);
+    setDeviceRepRole(rep.role || 'Account Executive');
+    setDeviceModel(rep.deviceModel || 'infi0');
+    setDeviceOsVersion(rep.osVersion || 'Android 14 (Knox v3.9)');
+    setDevicePhone(rep.phone || '+91 98200 12345');
+    setDeviceBatteryLevel(rep.batteryLevel ?? 90);
+    setDeviceIsOnline(rep.isOnline ?? true);
+    setDeviceAvatar(rep.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80');
+    setDeviceModalOpen(true);
+  };
+
+  const handleSaveDevice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deviceRepName.trim()) return;
+
+    if (editingRepId) {
+      await updateRep({
+        id: editingRepId,
+        name: deviceRepName.trim(),
+        role: deviceRepRole.trim() || 'Account Executive',
+        deviceModel: deviceModel.trim() || 'infi0',
+        osVersion: deviceOsVersion.trim() || 'Android 14',
+        phone: devicePhone.trim() || '+91 98200 12345',
+        batteryLevel: Number(deviceBatteryLevel) || 90,
+        isOnline: deviceIsOnline,
+        avatar: deviceAvatar,
+        lastSync: 'Just now'
+      });
+      notify(`✓ Fleet Device "${deviceModel}" updated for ${deviceRepName}.`);
+    } else {
+      const newId = `rep-${Date.now()}`;
+      await addRep({
+        id: newId,
+        orgId: currentUser?.orgId || currentOrg?.id || 'org-tcs',
+        name: deviceRepName.trim(),
+        role: deviceRepRole.trim() || 'Account Executive',
+        deviceModel: deviceModel.trim() || 'infi0',
+        osVersion: deviceOsVersion.trim() || 'Android 14 (Knox v3.9)',
+        phone: devicePhone.trim() || '+91 98200 12345',
+        batteryLevel: Number(deviceBatteryLevel) || 95,
+        isOnline: deviceIsOnline,
+        avatar: deviceAvatar,
+        callsToday: 0,
+        talkTimeMinutes: 0,
+        dealsClosed: 0,
+        conversionRate: 20.0,
+        rank: reps.length + 1,
+        streakDays: 1,
+        badges: ['Enterprise Enrolled']
+      });
+      notify(`✓ New fleet device "${deviceModel}" enrolled for ${deviceRepName}.`);
+    }
+
+    setDeviceModalOpen(false);
+  };
+
+  const handleDeleteRepDevice = async (repId: string, repName: string) => {
+    if (window.confirm(`Are you sure you want to remove ${repName}'s device from the fleet?`)) {
+      await deleteRep(repId);
+      notify(`✓ Device for ${repName} removed from fleet.`);
+    }
   };
 
   if (!currentUser) {
@@ -363,51 +458,202 @@ export default function Admin() {
       {/* TAB 2: DEVICE FLEET & QR PAIRING */}
       {activeTab === 'devices' && (
         <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <div>
-            <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
-              Companion App Mobile Device Fleet
-            </h3>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-              Enrolled Android Knox & iOS CallKit hardware tokens. Reps scan the QR code to pair corporate phones.
-            </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Smartphone size={22} color="var(--primary)" />
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
+                  Companion App Mobile Device Fleet
+                </h3>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '4px' }}>
+                Enrolled Android Knox & iOS CallKit hardware tokens. Admins can enroll, rename (e.g. infi0), update OS/battery, and pair corporate phones.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)' }} />
+                <input
+                  type="text"
+                  placeholder="Filter fleet (name, infi0, phone)..."
+                  value={deviceSearch}
+                  onChange={e => setDeviceSearch(e.target.value)}
+                  style={{
+                    padding: '0.45rem 0.75rem 0.45rem 2rem',
+                    borderRadius: '8px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-glass)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.8rem',
+                    minWidth: '220px'
+                  }}
+                />
+              </div>
+
+              <button
+                onClick={handleOpenAddDevice}
+                className="btn-primary"
+                style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <Plus size={16} /> Enroll Fleet Device
+              </button>
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.25rem' }}>
-            {reps.map(rep => (
-              <div key={rep.id} className="glass-card" style={{ padding: '1.25rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <img src={rep.avatar} alt={rep.name} style={{ width: '42px', height: '42px', borderRadius: '50%', objectFit: 'cover' }} />
-                    <div>
-                      <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>{rep.name}</h4>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{rep.deviceModel}</span>
+          {/* Quick Metrics Bar */}
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <div className="glass-card" style={{ padding: '0.6rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.8rem' }}>
+              <Smartphone size={16} color="var(--primary)" />
+              <span style={{ color: 'var(--text-dim)' }}>Total Enrolled:</span>
+              <strong style={{ color: 'var(--text-main)' }}>{reps.length} Devices</strong>
+            </div>
+            <div className="glass-card" style={{ padding: '0.6rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.8rem' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--accent-emerald)', display: 'inline-block' }} />
+              <span style={{ color: 'var(--text-dim)' }}>Online Telemetry:</span>
+              <strong style={{ color: 'var(--accent-emerald)' }}>{reps.filter(r => r.isOnline).length} Active</strong>
+            </div>
+            <div className="glass-card" style={{ padding: '0.6rem 1rem', display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.8rem' }}>
+              <Battery size={16} color="var(--accent-cyan)" />
+              <span style={{ color: 'var(--text-dim)' }}>Avg Battery:</span>
+              <strong style={{ color: 'var(--accent-cyan)' }}>
+                {reps.length > 0 ? Math.round(reps.reduce((acc, r) => acc + (r.batteryLevel || 0), 0) / reps.length) : 0}%
+              </strong>
+            </div>
+          </div>
+
+          {/* Device Cards Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+            {reps
+              .filter(rep => {
+                if (!deviceSearch.trim()) return true;
+                const q = deviceSearch.toLowerCase();
+                return (
+                  rep.name.toLowerCase().includes(q) ||
+                  (rep.deviceModel && rep.deviceModel.toLowerCase().includes(q)) ||
+                  (rep.phone && rep.phone.toLowerCase().includes(q)) ||
+                  (rep.osVersion && rep.osVersion.toLowerCase().includes(q)) ||
+                  (rep.role && rep.role.toLowerCase().includes(q))
+                );
+              })
+              .map(rep => (
+                <div key={rep.id} className="glass-card" style={{ padding: '1.25rem', position: 'relative' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{ position: 'relative' }}>
+                        <img
+                          src={rep.avatar}
+                          alt={rep.name}
+                          style={{
+                            width: '44px',
+                            height: '44px',
+                            borderRadius: '50%',
+                            objectFit: 'cover',
+                            border: rep.isOnline ? '2px solid var(--accent-emerald)' : '2px solid rgba(255,255,255,0.1)'
+                          }}
+                        />
+                        <span style={{
+                          position: 'absolute',
+                          bottom: '-1px',
+                          right: '-1px',
+                          width: '12px',
+                          height: '12px',
+                          borderRadius: '50%',
+                          background: rep.isOnline ? '#10b981' : '#64748b',
+                          border: '2px solid #0f172a'
+                        }} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>{rep.name}</h4>
+                          <span style={{
+                            fontSize: '0.65rem',
+                            padding: '1px 6px',
+                            borderRadius: '6px',
+                            background: 'var(--primary-subtle)',
+                            color: 'var(--primary)',
+                            fontWeight: 600
+                          }}>
+                            {rep.role || 'Sales Rep'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px' }}>
+                          <Smartphone size={13} color="var(--accent-cyan)" />
+                          <span style={{
+                            fontSize: '0.78rem',
+                            color: 'var(--accent-cyan)',
+                            fontWeight: 700,
+                            letterSpacing: '0.02em',
+                            background: 'rgba(6, 182, 212, 0.1)',
+                            padding: '1px 6px',
+                            borderRadius: '4px'
+                          }}>
+                            {rep.deviceModel || 'infi0'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button
+                        onClick={() => handleOpenEditDevice(rep)}
+                        className="btn-ghost"
+                        style={{ padding: '0.4rem', color: 'var(--text-main)' }}
+                        title="Edit Fleet Device & Rep Settings (Change to infi0, update OS/battery)"
+                      >
+                        <Edit3 size={15} />
+                      </button>
+                      <button
+                        onClick={() => handleOpenPairModal(rep.name, rep.id)}
+                        className="btn-primary"
+                        style={{ padding: '0.35rem 0.65rem', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        title="Pair Companion App via QR / PIN"
+                      >
+                        <QrCode size={13} /> Pair
+                      </button>
+                      <button
+                        onClick={() => handleDeleteRepDevice(rep.id, rep.name)}
+                        className="btn-ghost"
+                        style={{ padding: '0.4rem', color: 'var(--accent-rose)' }}
+                        title="Remove Device from Fleet"
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
                   </div>
-                  <button
-                    onClick={() => handleOpenPairModal(rep.name, rep.id)}
-                    className="btn-primary"
-                    style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                  >
-                    <QrCode size={14} /> Pair Device
-                  </button>
-                </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.8rem', background: 'var(--bg-surface-elevated)', padding: '0.85rem', borderRadius: 'var(--radius-sm)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-dim)' }}>OS Security:</span>
-                    <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>{rep.osVersion}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-dim)' }}>Battery & Telemetry:</span>
-                    <span style={{ color: 'var(--text-main)' }}>{rep.batteryLevel}% • Last ping {rep.lastSync}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-dim)' }}>MDM Knox State:</span>
-                    <span style={{ color: 'var(--accent-cyan)' }}>Hardware Attested ✓</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.8rem', background: 'var(--bg-surface-elevated)', padding: '0.85rem', borderRadius: 'var(--radius-sm)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Hardware Device:</span>
+                      <span style={{ color: 'var(--text-main)', fontWeight: 700 }}>{rep.deviceModel || 'infi0'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>OS Security:</span>
+                      <span style={{ color: 'var(--accent-emerald)', fontWeight: 600 }}>{rep.osVersion || 'Android 14'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Corporate SIM:</span>
+                      <span style={{ color: 'var(--text-main)', fontFamily: 'var(--font-mono)' }}>{rep.phone || '+91 98200 12345'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>Battery & Telemetry:</span>
+                      <span style={{
+                        color: (rep.batteryLevel || 0) > 30 ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <Battery size={14} /> {rep.batteryLevel}% • Last ping {rep.lastSync || 'Just now'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-dim)' }}>MDM Knox State:</span>
+                      <span style={{ color: 'var(--accent-cyan)' }}>Hardware Attested ✓</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
           </div>
         </div>
       )}
@@ -884,6 +1130,294 @@ export default function Admin() {
                 </button>
                 <button type="submit" className="btn-primary">
                   <Mail size={16} /> Send MDM Invite
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD / EDIT FLEET DEVICE */}
+      {deviceModalOpen && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          background: 'rgba(5,7,15,0.85)',
+          backdropFilter: 'blur(10px)',
+          zIndex: 150,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem'
+        }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: '520px', padding: '1.75rem', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Smartphone size={18} color="var(--primary)" />
+                  {editingRepId ? 'Edit Fleet Device & Rep Settings' : 'Enroll New Fleet Device'}
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)' }}>
+                  Tenant #{currentUser?.orgId || currentOrg?.id || 'org-tcs'} • Fleet Management
+                </span>
+              </div>
+              <button onClick={() => setDeviceModalOpen(false)} className="btn-ghost" style={{ padding: '4px' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveDevice} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {/* Representative Name */}
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>
+                  Representative Full Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Rajesh Kumar"
+                  value={deviceRepName}
+                  onChange={e => setDeviceRepName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-glass)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                  required
+                />
+              </div>
+
+              {/* Role */}
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>
+                  Role & Department
+                </label>
+                <select
+                  value={deviceRepRole}
+                  onChange={e => setDeviceRepRole(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-glass)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  <option value="Account Executive">Account Executive (Enterprise Sales)</option>
+                  <option value="Senior SDR">Senior SDR (Inbound & Outbound)</option>
+                  <option value="Field Sales Executive">Field Sales Executive</option>
+                  <option value="Team Lead">Team Lead / Sales Manager</option>
+                  <option value="Technical Solutions Rep">Technical Solutions Rep</option>
+                </select>
+              </div>
+
+              {/* Device Model / Hardware Name */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontWeight: 600 }}>
+                    Device Name / Hardware Model (e.g. infi0)
+                  </label>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--accent-cyan)' }}>Quick Chips</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="e.g. infi0, Infinix Note 40, Samsung Galaxy S24 Ultra"
+                  value={deviceModel}
+                  onChange={e => setDeviceModel(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-glass)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                  required
+                />
+                {/* Device Quick Chips */}
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '6px' }}>
+                  {['infi0', 'Infinix Note 40 Pro', 'Samsung Galaxy S24 Ultra', 'iPhone 16 Pro Max', 'Google Pixel 9 Pro', 'OnePlus 12'].map(model => (
+                    <button
+                      key={model}
+                      type="button"
+                      onClick={() => setDeviceModel(model)}
+                      style={{
+                        fontSize: '0.72rem',
+                        padding: '3px 8px',
+                        borderRadius: '6px',
+                        background: deviceModel === model ? 'var(--primary)' : 'rgba(255,255,255,0.06)',
+                        color: deviceModel === model ? '#fff' : 'var(--text-muted)',
+                        border: '1px solid ' + (deviceModel === model ? 'var(--primary)' : 'var(--border-glass)'),
+                        cursor: 'pointer',
+                        fontWeight: deviceModel === model ? 700 : 400
+                      }}
+                    >
+                      {model === 'infi0' ? '⚡ infi0' : model}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* OS Security & Knox Version */}
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>
+                  Operating System & Security Profile
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Android 14 (Knox v3.9)"
+                  value={deviceOsVersion}
+                  onChange={e => setDeviceOsVersion(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-glass)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem'
+                  }}
+                  required
+                />
+                <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '6px' }}>
+                  {['Android 15 (Knox v3.10)', 'Android 14 (Knox v3.9)', 'Android 14 (Stock)', 'iOS 18.2 (CallKit)'].map(os => (
+                    <button
+                      key={os}
+                      type="button"
+                      onClick={() => setDeviceOsVersion(os)}
+                      style={{
+                        fontSize: '0.7rem',
+                        padding: '2px 7px',
+                        borderRadius: '6px',
+                        background: deviceOsVersion === os ? 'rgba(16, 185, 129, 0.2)' : 'rgba(255,255,255,0.04)',
+                        color: deviceOsVersion === os ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                        border: '1px solid ' + (deviceOsVersion === os ? 'var(--accent-emerald)' : 'var(--border-glass)'),
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {os}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Corporate SIM / Phone */}
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>
+                  Corporate Phone Number / SIM Binding
+                </label>
+                <input
+                  type="text"
+                  placeholder="+91 98200 12345"
+                  value={devicePhone}
+                  onChange={e => setDevicePhone(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: '8px',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-glass)',
+                    color: 'var(--text-main)',
+                    fontSize: '0.85rem',
+                    fontFamily: 'var(--font-mono)'
+                  }}
+                />
+              </div>
+
+              {/* Battery & Telemetry Status Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontWeight: 600 }}>
+                      Battery Level
+                    </label>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: deviceBatteryLevel > 30 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                      {deviceBatteryLevel}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={deviceBatteryLevel}
+                    onChange={e => setDeviceBatteryLevel(parseInt(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '4px', fontWeight: 600 }}>
+                    Device State
+                  </label>
+                  <select
+                    value={deviceIsOnline ? 'online' : 'offline'}
+                    onChange={e => setDeviceIsOnline(e.target.value === 'online')}
+                    style={{
+                      width: '100%',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      background: 'var(--bg-surface-elevated)',
+                      border: '1px solid var(--border-glass)',
+                      color: deviceIsOnline ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                      fontSize: '0.82rem',
+                      fontWeight: 600
+                    }}
+                  >
+                    <option value="online">● Online (Connected)</option>
+                    <option value="offline">○ Offline (Suspended)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Avatar Selector */}
+              <div>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-dim)', display: 'block', marginBottom: '6px', fontWeight: 600 }}>
+                  Representative Avatar
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <img src={deviceAvatar} alt="preview" style={{ width: '40px', height: '40px', borderRadius: '50%', objectFit: 'cover', border: '2px solid var(--primary)' }} />
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {[
+                      'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
+                      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120&auto=format&fit=crop&q=80',
+                      'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80',
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+                      'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=120&auto=format&fit=crop&q=80'
+                    ].map((url, idx) => (
+                      <img
+                        key={idx}
+                        src={url}
+                        alt="avatar option"
+                        onClick={() => setDeviceAvatar(url)}
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          objectFit: 'cover',
+                          cursor: 'pointer',
+                          opacity: deviceAvatar === url ? 1 : 0.45,
+                          border: deviceAvatar === url ? '2px solid var(--primary)' : '1px solid transparent'
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.75rem' }}>
+                <button type="button" onClick={() => setDeviceModalOpen(false)} className="btn-secondary">
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Check size={16} />
+                  <span>{editingRepId ? 'Update Fleet Device' : 'Enroll Fleet Device'}</span>
                 </button>
               </div>
             </form>

@@ -54,6 +54,7 @@ export interface WhatsAppLog {
 
 export interface SalesRep {
   id: string;
+  orgId?: string;
   name: string;
   role: string;
   avatar: string;

@@ -528,7 +528,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem('ringvia360_user');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const u = JSON.parse(saved);
+      if (u && u.orgId && u.orgId.startsWith('org-1790')) {
+        u.orgId = 'org-makes360-33faf';
+      }
+      return u;
     } catch (_) {
       return null;
     }
@@ -537,7 +542,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [currentOrg, setCurrentOrg] = useState<TenantOrganization | null>(() => {
     try {
       const saved = localStorage.getItem('ringvia360_org');
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const o = JSON.parse(saved);
+      if (o && o.id && o.id.startsWith('org-1790')) {
+        o.id = 'org-makes360-33faf';
+      }
+      return o;
     } catch (_) {
       return null;
     }
@@ -801,9 +811,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return;
     }
     try {
-      const scopedTenantId = currentUser.role === 'super_admin'
+      let scopedTenantId = currentUser.role === 'super_admin'
         ? activeTenantId
         : (currentUser.orgId || activeTenantId);
+      if (scopedTenantId && scopedTenantId.startsWith('org-1790')) {
+        scopedTenantId = 'org-makes360-33faf';
+      }
       const authToken = localStorage.getItem('ringvia360_auth_token');
       if (!authToken) return;
       const endpoints = [
@@ -1612,6 +1625,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addRep = async (repData: Partial<SalesRep>) => {
     const newRep: SalesRep = {
       id: repData.id || `rep-${Date.now()}`,
+      orgId: repData.orgId || activeTenantId || 'org-tcs',
       name: repData.name || 'Sales Rep',
       role: repData.role || 'Account Executive',
       avatar: repData.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
@@ -1630,7 +1644,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       badges: repData.badges ?? ['Enterprise Ready']
     };
     setReps(prev => [...prev, newRep]);
-    showToast(`🏆 Sales Rep ${newRep.name} added to leaderboard & saved to DB.`);
+    showToast(`📱 Fleet device "${newRep.deviceModel}" enrolled for ${newRep.name}.`);
     const endpoints = ['/api/calls.php?action=reps', 'https://ringvia360.com/api/calls.php?action=reps'];
     for (const ep of endpoints) {
       try {
@@ -1646,14 +1660,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateRep = async (repData: Partial<SalesRep>) => {
     if (!repData.id) return;
-    setReps(prev => prev.map(r => r.id === repData.id ? { ...r, ...repData } : r));
+    let fullMerged: SalesRep | undefined;
+    setReps(prev => {
+      return prev.map(r => {
+        if (r.id === repData.id) {
+          fullMerged = { ...r, ...repData };
+          return fullMerged;
+        }
+        return r;
+      });
+    });
+
+    // Also sync device name to adminUsers if matching name/id
+    if (repData.deviceModel) {
+      setAdminUsers(prev => prev.map(u => {
+        if (u.name.toLowerCase() === (repData.name || fullMerged?.name || '').toLowerCase() || u.id === repData.id) {
+          return { ...u, device: repData.deviceModel || u.device };
+        }
+        return u;
+      }));
+    }
+
+    const payload = fullMerged || repData;
+    showToast(`📱 Fleet Device updated: ${payload.name} (${payload.deviceModel || 'infi0'})`);
     const endpoints = ['/api/calls.php?action=reps', 'https://ringvia360.com/api/calls.php?action=reps'];
     for (const ep of endpoints) {
       try {
         await fetch(ep, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(repData)
+          body: JSON.stringify(payload)
         });
         break;
       } catch (_) {}

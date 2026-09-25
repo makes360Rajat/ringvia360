@@ -672,6 +672,13 @@ try {
         $repId = trim($body['repId'] ?? ($body['rep_id'] ?? ''));
         $repName = trim($body['repName'] ?? ($body['rep_name'] ?? ''));
 
+        if (!$orgId || str_starts_with($orgId, 'org-1790') || $orgId === 'org-tcs') {
+            $custOrg = $db->query("SELECT id FROM organizations WHERE id NOT IN ('org-tcs', 'org-ringvia360') ORDER BY created_at DESC LIMIT 1")->fetchColumn();
+            if ($custOrg) {
+                $orgId = $custOrg;
+            }
+        }
+
         if (!$orgId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Missing orgId']);
@@ -759,6 +766,19 @@ try {
             ];
             if (isset($demoPairings[$code])) {
                 $pairing = $demoPairings[$code];
+                $custOrg = $db->query("SELECT id FROM organizations WHERE id NOT IN ('org-tcs', 'org-ringvia360') ORDER BY created_at DESC LIMIT 1")->fetchColumn();
+                if ($custOrg) {
+                    $pairing['org_id'] = $custOrg;
+                }
+            }
+        }
+
+        if ($pairing) {
+            if (str_starts_with($pairing['org_id'], 'org-1790') || $pairing['org_id'] === 'org-tcs') {
+                $custOrg = $db->query("SELECT id FROM organizations WHERE id NOT IN ('org-tcs', 'org-ringvia360') ORDER BY created_at DESC LIMIT 1")->fetchColumn();
+                if ($custOrg) {
+                    $pairing['org_id'] = $custOrg;
+                }
             }
         }
 
