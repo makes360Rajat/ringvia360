@@ -16,6 +16,7 @@ import {
   Lock
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { DemoShowcaseBanner } from '../components/DemoShowcaseBanner';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -31,6 +32,9 @@ export default function Dashboard() {
 
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+      {/* Product Tour & Services Banner for unauthenticated visitors */}
+      {!currentUser && <DemoShowcaseBanner />}
+
       {/* Top Header & Range Filter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
@@ -38,9 +42,15 @@ export default function Dashboard() {
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
               {getPageSection('dashboard', 'hero')?.title}
             </h1>
-            <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
-              <span className="live-dot" /> Live Telemetry
-            </span>
+            {currentUser ? (
+              <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
+                <span className="live-dot" /> Live Telemetry
+              </span>
+            ) : (
+              <span className="glass-pill" style={{ color: '#c084fc', fontSize: '0.75rem' }}>
+                <Sparkles size={12} /> Interactive Demo Showcase
+              </span>
+            )}
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
             {getPageSection('dashboard', 'hero')?.subtitle}
@@ -302,41 +312,28 @@ export default function Dashboard() {
 
       {/* Live Recent Activity Feed Preview */}
       <div className="glass-panel" style={{ padding: '1.5rem' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div>
             <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
-              Live Telemetry Feed (Real-Time Ingestion)
+              {currentUser ? 'Live Telemetry Feed (Real-Time Ingestion)' : 'Recent Call Telemetry (Interactive Demo)'}
             </h3>
             <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginTop: '2px' }}>
-              Click any call to open the encrypted audio recording player and AI Whisper transcript.
+              Click any call to open the audio recording player and AI Whisper transcript.
             </p>
           </div>
-          <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
-            <span className="live-dot" /> Cloud Telemetry Connected
-          </span>
+          {currentUser ? (
+            <span className="glass-pill" style={{ color: 'var(--accent-emerald)', fontSize: '0.75rem' }}>
+              <span className="live-dot" /> Cloud Telemetry Connected
+            </span>
+          ) : (
+            <span className="glass-pill" style={{ color: '#c084fc', fontSize: '0.75rem' }}>
+              <Sparkles size={12} /> Demo Showcase (Dummy Data)
+            </span>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {!currentUser ? (
-            <div style={{
-              padding: '2.5rem 1.5rem',
-              textAlign: 'center',
-              border: '1px dashed rgba(124, 58, 237, 0.35)',
-              borderRadius: 'var(--radius-md)',
-              background: 'rgba(15, 23, 42, 0.5)'
-            }}>
-              <Lock size={32} color="var(--primary)" style={{ marginBottom: '0.75rem' }} />
-              <div style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '1.05rem', marginBottom: '0.35rem' }}>
-                Private Telemetry Feed Shielded
-              </div>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '480px', margin: '0 auto 1.25rem' }}>
-                You are currently signed out. Real-time call streams, client prospect details, and audio recordings are privatized to authorized enterprise team members.
-              </p>
-              <button onClick={() => navigate('/login')} className="btn-primary" style={{ fontSize: '0.85rem', padding: '0.6rem 1.4rem' }}>
-                Sign In to View Live Telemetry
-              </button>
-            </div>
-          ) : calls.length === 0 ? (
+          {calls.length === 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-dim)' }}>
               No call activities recorded yet. Start calls with the companion app to see live telemetry.
             </div>
@@ -352,7 +349,8 @@ export default function Dashboard() {
                   justifyContent: 'space-between',
                   padding: '0.9rem 1.25rem',
                   gap: '1rem',
-                  flexWrap: 'wrap'
+                  flexWrap: 'wrap',
+                  cursor: 'pointer'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -364,10 +362,15 @@ export default function Dashboard() {
                   </span>
 
                   <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
                         {call.contactName}
                       </span>
+                      {!currentUser && (
+                        <span style={{ fontSize: '0.68rem', padding: '1px 6px', borderRadius: '4px', background: 'rgba(124, 58, 237, 0.15)', color: '#c084fc', border: '1px solid rgba(124, 58, 237, 0.3)' }}>
+                          Demo Lead
+                        </span>
+                      )}
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
                         • {call.company}
                       </span>
@@ -408,6 +411,41 @@ export default function Dashboard() {
                 </div>
               </div>
             ))
+          )}
+          {!currentUser && (
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '0.85rem 1.25rem',
+                background: 'rgba(255, 255, 255, 0.02)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid rgba(124, 58, 237, 0.2)',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                marginTop: '0.5rem'
+              }}
+            >
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                Viewing interactive evaluation calls. Click any call to test the audio player, waveform, and AI transcription.
+              </span>
+              <button
+                onClick={() => navigate('/activities')}
+                className="btn-ghost"
+                style={{
+                  fontSize: '0.82rem',
+                  color: 'var(--primary)',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                Open Full Activity Stream & Waveforms →
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -52,6 +52,7 @@ interface AppContextType {
   manageTenantStatus: (orgId: string, status: 'active' | 'suspended', plan?: string) => Promise<boolean>;
   activeAudioCall: CallLog | null;
   setActiveAudioCall: (call: CallLog | null) => void;
+  isDemoMode: boolean;
   selectedRole: 'admin' | 'rep';
   setSelectedRole: (role: 'admin' | 'rep') => void;
   theme: 'dark' | 'light';
@@ -97,19 +98,20 @@ interface AppContextType {
 }
 
 // NO hardcoded content. All content is fetched from the site_pages MySQL table.
-// Default is empty — DB is the single source of truth.
+// Generic sanitized dummy showcase data for unauthenticated client evaluation.
+// ZERO confidential or dynamic database telemetry is included.
 const initialCalls: CallLog[] = [
   {
-    id: 'call-101',
-    contactName: 'Aarav Sharma',
-    phoneNumber: '+91 98201 43210',
-    company: 'Tata Consultancy Services',
+    id: 'demo-101',
+    contactName: 'Aarav Sharma (Sample Lead)',
+    phoneNumber: '+91 98000 43210 (Demo)',
+    company: 'Acme Cloud Solutions (Demo)',
     direction: 'outbound',
     duration: 384, // 6m 24s
     timestamp: '2 mins ago',
-    repName: 'Rajesh Kumar',
+    repName: 'Rajesh Kumar (Enterprise Rep)',
     repAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-    repId: 'rep-1',
+    repId: 'rep-demo-1',
     recordingUrl: 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
     waveform: [20, 45, 60, 80, 50, 65, 90, 40, 75, 85, 95, 70, 55, 65, 85, 100, 70, 60, 40, 55, 75, 90, 60, 30],
     transcript: [
@@ -122,31 +124,32 @@ const initialCalls: CallLog[] = [
     sentiment: 'positive',
     sentimentScore: 94,
     outcome: 'Demo Completed - Contract Requested',
-    notes: 'Decision maker confirmed budget for 50 licenses. Requested RingVia360 custom field mapping for lead source and call tags.',
+    notes: 'Sample evaluation note: Decision maker confirmed budget for 50 licenses. Tested automated WhatsApp & call telemetry sync.',
     crmStatus: 'synced',
-    crmType: 'RingVia360',
-    crmRecordId: 'rv360-rec-001',
+    crmType: 'Salesforce',
+    crmRecordId: 'SF-DEMO-001',
     dealValue: 48000,
     dealStage: 'Proposal / Review',
-    tags: ['Hot Lead', 'Enterprise', 'RingVia360 Sync', 'E2EE Ready'],
+    tags: ['Sample Lead', 'Enterprise Pilot', 'E2EE Ready', 'Salesforce Synced'],
     keyActionItems: [
       'Send Docusign MSA for 50 licenses',
       'Invite Aarav to RingVia360 Admin Portal sandbox',
       'Schedule kickoff call with technical lead'
     ],
-    isEncrypted: true
+    isEncrypted: true,
+    simSlot: 'SIM 1 (Corporate E2EE)'
   },
   {
-    id: 'call-102',
-    contactName: 'Priya Patel',
-    phoneNumber: '+91 98450 12890',
-    company: 'Infosys Technologies',
+    id: 'demo-102',
+    contactName: 'Priya Patel (Sample Lead)',
+    phoneNumber: '+91 98000 12890 (Demo)',
+    company: 'Nexus Retail Technologies (Demo)',
     direction: 'inbound',
     duration: 512, // 8m 32s
     timestamp: '18 mins ago',
-    repName: 'Ananya Iyer',
+    repName: 'Ananya Iyer (Senior Rep)',
     repAvatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=120&auto=format&fit=crop&q=80',
-    repId: 'rep-2',
+    repId: 'rep-demo-2',
     recordingUrl: 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
     waveform: [30, 40, 50, 70, 80, 85, 60, 45, 70, 95, 80, 60, 75, 90, 85, 70, 60, 50, 40, 65, 80, 70, 50, 35],
     transcript: [
@@ -157,93 +160,102 @@ const initialCalls: CallLog[] = [
     sentiment: 'positive',
     sentimentScore: 88,
     outcome: 'Technical Validation Passed',
-    notes: 'Client tested inbound call capture on Samsung Knox devices. Confirmed zero delay sync to RingVia360.',
+    notes: 'Sample evaluation note: Client tested inbound call capture on Samsung Knox devices. Confirmed zero delay sync to CRM.',
     crmStatus: 'synced',
-    crmType: 'RingVia360',
-    crmRecordId: 'rv360-rec-002',
+    crmType: 'HubSpot',
+    crmRecordId: 'HS-DEMO-002',
     dealValue: 72000,
     dealStage: 'Technical Validation',
-    tags: ['Inbound Inquiry', 'RingVia360', 'Android 14', 'High Intent'],
+    tags: ['Inbound Inquiry', 'HubSpot Synced', 'Android Knox 3.10', 'High Intent'],
     keyActionItems: [
       'Email Android MDM deployment guide',
       'Verify webhook delivery endpoints'
     ],
-    isEncrypted: true
+    isEncrypted: true,
+    simSlot: 'SIM 1 (Corporate E2EE)'
   },
   {
-    id: 'call-103',
-    contactName: 'Vikram Malhotra',
-    phoneNumber: '+91 97110 56789',
-    company: 'Wipro Enterprises',
+    id: 'demo-103',
+    contactName: 'Vikram Malhotra (Sample Lead)',
+    phoneNumber: '+91 97000 56789 (Demo)',
+    company: 'Starlight Global Logistics (Demo)',
     direction: 'missed',
     duration: 0,
     timestamp: '42 mins ago',
-    repName: 'Rajesh Kumar',
+    repName: 'Rajesh Kumar (Enterprise Rep)',
     repAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-    repId: 'rep-1',
+    repId: 'rep-demo-1',
     sentiment: 'neutral',
     sentimentScore: 50,
     outcome: 'Missed Call - Auto Follow-up WhatsApp Sent',
-    notes: 'Incoming call was missed during meeting. Auto-responder dispatched instant WhatsApp template with meeting link.',
+    notes: 'Sample evaluation note: Incoming call was missed. Auto-responder dispatched instant WhatsApp template with meeting link.',
     crmStatus: 'synced',
-    crmType: 'RingVia360',
-    crmRecordId: 'rv360-rec-003',
-    tags: ['Missed Call', 'Automated Bot Triggered'],
+    crmType: 'Zoho',
+    crmRecordId: 'ZH-DEMO-003',
+    dealValue: 0,
+    dealStage: 'Discovery',
+    tags: ['Missed Call', 'Automated Bot Triggered', 'Zoho CRM'],
     keyActionItems: [
       'Check if client booked calendar slot by 4 PM'
     ],
-    isEncrypted: true
+    isEncrypted: true,
+    simSlot: 'SIM 1 (Corporate E2EE)'
   },
   {
-    id: 'call-104',
-    contactName: 'Ananya Iyer',
-    phoneNumber: '+91 99001 77654',
-    company: 'HDFC Bank Corporate',
+    id: 'demo-104',
+    contactName: 'Ananya Iyer (Sample Lead)',
+    phoneNumber: '+91 99000 77654 (Demo)',
+    company: 'Apex Corporate Banking (Demo)',
     direction: 'outbound',
     duration: 215, // 3m 35s
     timestamp: '1 hour ago',
-    repName: 'Rajesh Kumar',
+    repName: 'Rajesh Kumar (Enterprise Rep)',
     repAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-    repId: 'rep-1',
+    repId: 'rep-demo-1',
     recordingUrl: 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3',
     waveform: [25, 35, 45, 60, 50, 70, 75, 65, 80, 60, 50, 45, 60, 75, 65, 55, 45, 50, 60, 55, 40, 30, 25, 20],
     sentiment: 'neutral',
     sentimentScore: 65,
-    outcome: 'Follow-up Scheduled',
-    notes: 'Spoke with Ananya. Reviewed banking compliance and Knox E2EE dual-SIM isolation.',
+    outcome: 'Security & Compliance Review',
+    notes: 'Sample evaluation note: Reviewed banking compliance and Knox E2EE dual-SIM isolation with CISO team.',
     crmStatus: 'synced',
     crmType: 'RingVia360',
-    crmRecordId: 'rv360-rec-004',
+    crmRecordId: 'RV-DEMO-004',
     dealValue: 24000,
     dealStage: 'Discovery',
-    tags: ['Enterprise Banking', 'RingVia360 CRM'],
+    tags: ['Enterprise Banking', 'RingVia360 CRM', 'DPDP Compliant'],
     keyActionItems: [
       'Send RingVia360 security battlecard'
     ],
-    isEncrypted: true
+    isEncrypted: true,
+    simSlot: 'SIM 1 (Corporate E2EE)'
   },
   {
-    id: 'call-105',
-    contactName: 'Rohan Mehta',
-    phoneNumber: '+91 98190 23456',
-    company: 'Razorpay Software',
+    id: 'demo-105',
+    contactName: 'Rohan Mehta (Sample Lead)',
+    phoneNumber: '+91 98000 23456 (Demo)',
+    company: 'FinCore Enterprise Payments (Demo)',
     direction: 'outbound',
     duration: 140,
     timestamp: '2 hours ago',
-    repName: 'Rajesh Kumar',
+    repName: 'Rajesh Kumar (Enterprise Rep)',
     repAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-    repId: 'rep-1',
+    repId: 'rep-demo-1',
     sentiment: 'positive',
     sentimentScore: 82,
     outcome: 'Commercial Agreement Sent',
-    notes: 'Confirmed 25 licenses for payment sales squad. Pre-configured RingVia360 webhooks and live telemetry.',
+    notes: 'Sample evaluation note: Confirmed 25 licenses for payment sales squad. Pre-configured RingVia360 webhooks and live telemetry.',
     crmStatus: 'synced',
     crmType: 'RingVia360',
-    tags: ['Fast Close', 'Fintech'],
+    crmRecordId: 'RV-DEMO-005',
+    dealValue: 18000,
+    dealStage: 'Negotiation',
+    tags: ['Fast Close', 'Fintech', 'Commercial Contract'],
     keyActionItems: [
-      'Verify Razorpay webhook authorization keys'
+      'Verify webhook authorization keys'
     ],
-    isEncrypted: true
+    isEncrypted: true,
+    simSlot: 'SIM 1 (Corporate E2EE)'
   }
 ];
 
@@ -508,26 +520,8 @@ const initialAdminUsers: AdminUser[] = [
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [calls, setCalls] = useState<CallLog[]>(() => {
-    try {
-      const user = localStorage.getItem('ringvia360_user');
-      const token = localStorage.getItem('ringvia360_auth_token');
-      if (user && token) {
-        return initialCalls;
-      }
-    } catch (_) {}
-    return [];
-  });
-  const [whatsAppLogs, setWhatsAppLogs] = useState<WhatsAppLog[]>(() => {
-    try {
-      const user = localStorage.getItem('ringvia360_user');
-      const token = localStorage.getItem('ringvia360_auth_token');
-      if (user && token) {
-        return initialWhatsAppLogs;
-      }
-    } catch (_) {}
-    return [];
-  });
+  const [calls, setCalls] = useState<CallLog[]>(initialCalls);
+  const [whatsAppLogs, setWhatsAppLogs] = useState<WhatsAppLog[]>(initialWhatsAppLogs);
   const [reps, setReps] = useState<SalesRep[]>(initialReps);
   const [crmConnectors, setCrmConnectors] = useState<CrmConnector[]>(initialCrmConnectors);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => {
@@ -849,9 +843,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       const authToken = localStorage.getItem('ringvia360_auth_token');
 
-      // STRICT PRIVACY PROTECTION: When logged out, never query or expose enterprise call telemetry!
+      // STRICT PRIVACY & DEMO SHOWCASE ISOLATION:
+      // When unauthenticated, never query the dynamic MySQL database or expose real calls.
+      // Prospective clients see sanitized dummy showcase calls so they can evaluate features.
       if (!authToken || !currentUser) {
-        setCalls([]);
+        setCalls(initialCalls);
+        setWhatsAppLogs(initialWhatsAppLogs);
         return;
       }
 
@@ -1187,13 +1184,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('ringvia360_user');
     localStorage.removeItem('ringvia360_org');
     localStorage.removeItem('ringvia360_active_tenant');
-    localStorage.removeItem('ringvia360_auth_token');
-    setCalls([]);
-    setWhatsAppLogs([]);
+    setCalls(initialCalls);
+    setWhatsAppLogs(initialWhatsAppLogs);
     setAuditLogs([]);
     setAdminUsers([]);
     setActiveAudioCall(null);
-    showToast('Logged out successfully. Work and feeds privatized.');
+    showToast('Logged out. Interactive Demo Showcase is now active.');
   };
 
   const switchTenant = async (orgId: string) => {
@@ -1775,6 +1771,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         securitySettings,
         activeAudioCall,
         setActiveAudioCall,
+        isDemoMode: !currentUser,
         selectedRole,
         setSelectedRole,
         theme,

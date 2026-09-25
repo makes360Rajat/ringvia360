@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { CallLog } from '../types';
+import { DemoShowcaseBanner } from '../components/DemoShowcaseBanner';
 
 export default function Activities() {
   const navigate = useNavigate();
@@ -205,74 +206,12 @@ export default function Activities() {
     document.body.removeChild(a);
   };
 
-  if (!currentUser) {
-    return (
-      <div style={{ maxWidth: '680px', margin: '4.5rem auto', padding: '2rem 1.5rem', textAlign: 'center' }}>
-        <div className="glass-card" style={{ padding: '3.5rem 2.5rem', border: '1px solid rgba(124, 58, 237, 0.35)', background: 'rgba(15, 23, 42, 0.85)' }}>
-          <div style={{
-            width: '76px',
-            height: '76px',
-            borderRadius: '24px',
-            background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.25), rgba(6, 182, 212, 0.2))',
-            border: '1px solid rgba(124, 58, 237, 0.45)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            margin: '0 auto 1.5rem',
-            color: 'var(--primary)'
-          }}>
-            <Lock size={38} color="var(--primary)" />
-          </div>
-
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 14px', borderRadius: '20px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#f87171', fontSize: '0.8rem', fontWeight: 700, marginBottom: '1.25rem' }}>
-            <ShieldAlert size={14} /> ZERO-LEAK ENTERPRISE PRIVACY SHIELD
-          </div>
-
-          <h2 style={{ fontSize: '1.85rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-main)' }}>
-            Live Feeds Restricted & Privatized
-          </h2>
-
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.65, marginBottom: '2rem' }}>
-            Enterprise voice recordings, customer identities, AI sentiment transcripts, and sales deal values are strictly privatized and encrypted at rest. Telemetry is accessible only by authorized team members of your sovereign workspace.
-          </p>
-
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button
-              onClick={() => navigate('/login')}
-              className="btn-primary"
-              style={{
-                padding: '0.85rem 1.85rem',
-                borderRadius: '10px',
-                fontSize: '0.92rem',
-                fontWeight: 700,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px'
-              }}
-            >
-              <LogIn size={16} /> Sign In to Access Telemetry
-            </button>
-            <button
-              onClick={() => navigate('/signup')}
-              className="btn-secondary"
-              style={{
-                padding: '0.85rem 1.85rem',
-                borderRadius: '10px',
-                fontSize: '0.92rem',
-                fontWeight: 700
-              }}
-            >
-              Register Sovereign Organization
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div style={{ padding: '1rem 1.5rem 6rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       
+      {/* Product Tour & Services Banner for unauthenticated visitors */}
+      {!currentUser && <DemoShowcaseBanner />}
+
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
@@ -280,12 +219,18 @@ export default function Activities() {
             <h1 style={{ fontSize: '1.85rem', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
               {getPageSection('activities', 'hero')?.title}
             </h1>
-            <span className="glass-pill" style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-              <Radio size={12} color="var(--primary)" /> {calls.length} Active Records
-            </span>
+            {currentUser ? (
+              <span className="glass-pill" style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                <Radio size={12} color="var(--primary)" /> {calls.length} Active Records
+              </span>
+            ) : (
+              <span className="glass-pill" style={{ fontSize: '0.75rem', color: '#c084fc', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                <Sparkles size={12} /> Interactive Demo Showcase (5 Sample Calls)
+              </span>
+            )}
           </div>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.88rem', marginTop: '0.25rem' }}>
-            {getPageSection('activities', 'hero')?.subtitle}
+            {currentUser ? getPageSection('activities', 'hero')?.subtitle : 'Explore sample sales activities, dual-SIM call recordings, and AI-generated sentiment transcripts.'}
           </p>
         </div>
 
@@ -1061,6 +1006,71 @@ export default function Activities() {
               title="Download MP3"
             >
               <Download size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Visitor Decision & Conversion CTA Card */}
+      {!currentUser && (
+        <div
+          className="glass-card"
+          style={{
+            marginTop: '1.5rem',
+            padding: '2.5rem 2rem',
+            borderRadius: 'var(--radius-lg)',
+            textAlign: 'center',
+            background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.16) 0%, rgba(15, 23, 42, 0.95) 50%, rgba(6, 182, 212, 0.12) 100%)',
+            border: '1px solid rgba(124, 58, 237, 0.45)',
+            boxShadow: '0 8px 32px rgba(124, 58, 237, 0.15)'
+          }}
+        >
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '4px 12px', borderRadius: '20px', background: 'rgba(124, 58, 237, 0.2)', border: '1px solid rgba(124, 58, 237, 0.4)', color: '#c084fc', fontSize: '0.78rem', fontWeight: 800, marginBottom: '1rem' }}>
+            <Sparkles size={13} /> READY TO ACCELERATE YOUR SALES TEAM?
+          </div>
+          <h3 style={{ fontSize: '1.75rem', fontWeight: 800, margin: '0 0 0.65rem', color: 'var(--text-main)', letterSpacing: '-0.3px' }}>
+            Turn Every Sales Conversation Into Structured CRM Intelligence
+          </h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem', maxWidth: '640px', margin: '0 auto 1.75rem', lineHeight: 1.65 }}>
+            Empower your reps with zero-click mobile call logging, hardware-isolated dual-SIM privacy, instant AI transcripts in 90+ languages, and direct pipeline revenue attribution.
+          </p>
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => navigate('/signup')}
+              className="btn-primary"
+              style={{
+                padding: '0.85rem 1.85rem',
+                borderRadius: '10px',
+                fontSize: '0.92rem',
+                fontWeight: 700,
+                boxShadow: '0 4px 16px var(--primary-glow)'
+              }}
+            >
+              Start 14-Day Free Pilot
+            </button>
+            <button
+              onClick={() => navigate('/contact')}
+              className="btn-secondary"
+              style={{
+                padding: '0.85rem 1.85rem',
+                borderRadius: '10px',
+                fontSize: '0.92rem',
+                fontWeight: 600
+              }}
+            >
+              Schedule Architecture Consultation
+            </button>
+            <button
+              onClick={() => navigate('/login')}
+              className="btn-ghost"
+              style={{
+                padding: '0.85rem 1.4rem',
+                borderRadius: '10px',
+                fontSize: '0.9rem',
+                color: 'var(--text-muted)'
+              }}
+            >
+              Sign In to Existing Workspace →
             </button>
           </div>
         </div>
