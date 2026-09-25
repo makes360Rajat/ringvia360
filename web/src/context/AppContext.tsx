@@ -1009,63 +1009,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             },
             organization: null
           };
-        } else if (clean === 'aarav.sharma@tcs.com') {
+        } else if (clean === 'admin@ringvia360.com' || clean === 'admin' || clean.startsWith('admin@')) {
           resData = {
             user: {
-              id: 'user-tcs-01',
-              name: 'Aarav Sharma',
-              email: 'aarav.sharma@tcs.com',
+              id: 'user-admin-main',
+              name: 'Organization Admin',
+              email: 'admin@ringvia360.com',
               role: 'org_admin',
               avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=120&auto=format&fit=crop&q=80',
-              phone: '+91 98201 43210',
-              orgId: 'org-tcs'
+              phone: '+91 98201 11223',
+              orgId: 'org-makes360-33faf'
             },
             organization: {
-              id: 'org-tcs',
-              name: 'Tata Consultancy Services',
-              slug: 'tcs',
-              plan: 'Enterprise Plus',
-              seats: 120,
-              status: 'active'
-            }
-          };
-        } else if (clean === 'priya.patel@infosys.com') {
-          resData = {
-            user: {
-              id: 'user-infosys-01',
-              name: 'Priya Patel',
-              email: 'priya.patel@infosys.com',
-              role: 'org_admin',
-              avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=120&auto=format&fit=crop&q=80',
-              phone: '+91 98450 12890',
-              orgId: 'org-infosys'
-            },
-            organization: {
-              id: 'org-infosys',
-              name: 'Infosys Technologies',
-              slug: 'infosys',
+              id: 'org-makes360-33faf',
+              name: 'RingVia360 Enterprise',
+              slug: 'makes360',
               plan: 'Pro Growth',
               seats: 50,
-              status: 'active'
-            }
-          };
-        } else if (clean === 'vikram.malhotra@hdfcbank.com') {
-          resData = {
-            user: {
-              id: 'user-hdfc-01',
-              name: 'Vikram Malhotra',
-              email: 'vikram.malhotra@hdfcbank.com',
-              role: 'org_admin',
-              avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=120&auto=format&fit=crop&q=80',
-              phone: '+91 97110 56789',
-              orgId: 'org-hdfc'
-            },
-            organization: {
-              id: 'org-hdfc',
-              name: 'HDFC Bank Commercial',
-              slug: 'hdfc',
-              plan: 'Enterprise Banking',
-              seats: 200,
               status: 'active'
             }
           };

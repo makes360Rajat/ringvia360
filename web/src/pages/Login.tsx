@@ -194,12 +194,12 @@ export default function Login() {
                 <ArrowRight size={14} color="#f59e0b" />
               </button>
 
-              {/* Customer demo account 1: TCS */}
+              {/* Organization Admin Preset */}
               <button
                 type="button"
                 onClick={() => {
                   setMode('login');
-                  selectDemoAccount('aarav.sharma@tcs.com');
+                  selectDemoAccount('admin@ringvia360.com');
                 }}
                 className="glass-panel"
                 style={{
@@ -208,86 +208,22 @@ export default function Login() {
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   cursor: 'pointer',
-                  border: loginEmail === 'aarav.sharma@tcs.com' ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
-                  background: loginEmail === 'aarav.sharma@tcs.com' ? 'rgba(99, 102, 241, 0.1)' : 'var(--bg-glass)'
+                  border: loginEmail === 'admin@ringvia360.com' ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
+                  background: loginEmail === 'admin@ringvia360.com' ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-glass)'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textAlign: 'left' }}>
                   <Building size={18} color="var(--primary)" />
                   <div>
                     <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      🏢 Tata Consultancy Services (Customer Admin)
+                      🏢 Admin (Enterprise Workspace)
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      aarav.sharma@tcs.com • 120 Seats Active
+                      admin@ringvia360.com • Enterprise workspace & team telemetry
                     </div>
                   </div>
                 </div>
                 <ArrowRight size={14} color="var(--primary)" />
-              </button>
-
-              {/* Customer demo account 2: Infosys */}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  selectDemoAccount('priya.patel@infosys.com');
-                }}
-                className="glass-panel"
-                style={{
-                  padding: '0.75rem 1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: 'pointer',
-                  border: loginEmail === 'priya.patel@infosys.com' ? '1px solid #06b6d4' : '1px solid var(--border-subtle)',
-                  background: loginEmail === 'priya.patel@infosys.com' ? 'rgba(6, 182, 212, 0.1)' : 'var(--bg-glass)'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textAlign: 'left' }}>
-                  <Briefcase size={18} color="#06b6d4" />
-                  <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      🏢 Infosys Technologies (Customer Admin)
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      priya.patel@infosys.com • 50 Seats Active
-                    </div>
-                  </div>
-                </div>
-                <ArrowRight size={14} color="#06b6d4" />
-              </button>
-
-              {/* Customer demo account 3: HDFC */}
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  selectDemoAccount('vikram.malhotra@hdfcbank.com');
-                }}
-                className="glass-panel"
-                style={{
-                  padding: '0.75rem 1rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: 'pointer',
-                  border: loginEmail === 'vikram.malhotra@hdfcbank.com' ? '1px solid #10b981' : '1px solid var(--border-subtle)',
-                  background: loginEmail === 'vikram.malhotra@hdfcbank.com' ? 'rgba(16, 185, 129, 0.1)' : 'var(--bg-glass)'
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', textAlign: 'left' }}>
-                  <Building size={18} color="#10b981" />
-                  <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-main)' }}>
-                      🏦 HDFC Bank Commercial (Customer Admin)
-                    </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      vikram.malhotra@hdfcbank.com • 200 Seats Active
-                    </div>
-                  </div>
-                </div>
-                <ArrowRight size={14} color="#10b981" />
               </button>
             </div>
           </div>
