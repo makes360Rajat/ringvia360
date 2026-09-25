@@ -142,6 +142,8 @@ export interface TenantOrganization {
   created_at?: string;
   user_count?: number;
   call_count?: number;
+  total_deal_value?: number | string;
+  rep_count?: number;
 }
 
 export interface SuperAdminOverview {

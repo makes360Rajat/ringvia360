@@ -562,8 +562,16 @@ try {
     // ACTION: SUPER ADMIN FLEET OVERVIEW
     // =========================================================
     if ($action === 'superadmin_overview') {
-        // Return all organizations, users, and platform metrics
-        $orgs = $db->query("SELECT * FROM organizations ORDER BY created_at DESC")->fetchAll();
+        // Return all organizations with live real-time aggregate counts
+        $orgs = $db->query("
+            SELECT o.*, 
+                   (SELECT COUNT(*) FROM users u WHERE u.org_id COLLATE utf8mb4_unicode_ci = o.id COLLATE utf8mb4_unicode_ci) as user_count,
+                   (SELECT COUNT(*) FROM call_logs c WHERE c.org_id COLLATE utf8mb4_unicode_ci = o.id COLLATE utf8mb4_unicode_ci) as call_count,
+                   (SELECT COALESCE(SUM(c.deal_value), 0) FROM call_logs c WHERE c.org_id COLLATE utf8mb4_unicode_ci = o.id COLLATE utf8mb4_unicode_ci) as total_deal_value,
+                   (SELECT COUNT(*) FROM sales_reps r WHERE r.org_id COLLATE utf8mb4_unicode_ci = o.id COLLATE utf8mb4_unicode_ci) as rep_count
+            FROM organizations o 
+            ORDER BY o.created_at DESC
+        ")->fetchAll();
         $users = $db->query("SELECT id, org_id, name, email, role, status, last_login, created_at FROM users ORDER BY created_at DESC")->fetchAll();
         $totalCalls = (int) $db->query("SELECT COUNT(*) FROM call_logs")->fetchColumn();
         
@@ -585,9 +593,77 @@ try {
                     'totalAllocatedSeats' => $totalSeats,
                     'platformHealth' => '99.98% SLA'
                 ],
+                'tenants' => $orgs,
                 'organizations' => $orgs,
                 'users' => $users,
                 'plans' => $db->query("SELECT * FROM subscription_plans ORDER BY monthly_price_inr ASC")->fetchAll()
+            ]
+        ]);
+        exit();
+    }
+
+    // =========================================================
+    // ACTION: SUPER ADMIN ORGANIZATION IN-DEPTH REVIEW
+    // =========================================================
+    if ($action === 'superadmin_org_details') {
+        $orgId = trim($_GET['org_id'] ?? ($body['org_id'] ?? ''));
+        if (!$orgId) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Missing org_id parameter']);
+            exit();
+        }
+
+        $orgStmt = $db->prepare("SELECT * FROM organizations WHERE id = :id LIMIT 1");
+        $orgStmt->execute([':id' => $orgId]);
+        $org = $orgStmt->fetch();
+        if (!$org) {
+            http_response_code(404);
+            echo json_encode(['success' => false, 'error' => 'Organization not found']);
+            exit();
+        }
+
+        // 1. Get all calls for this org
+        $callsStmt = $db->prepare("
+            SELECT * FROM call_logs 
+            WHERE org_id = :org_id 
+               OR rep_name IN (SELECT name FROM sales_reps WHERE org_id = :org_id2)
+               OR rep_id IN (SELECT id FROM sales_reps WHERE org_id = :org_id3)
+            ORDER BY created_at DESC LIMIT 200
+        ");
+        $callsStmt->execute([':org_id' => $orgId, ':org_id2' => $orgId, ':org_id3' => $orgId]);
+        $calls = $callsStmt->fetchAll();
+
+        // 2. Get all reps for this org
+        $repsStmt = $db->prepare("SELECT * FROM sales_reps WHERE org_id = :org_id ORDER BY rank_order ASC");
+        $repsStmt->execute([':org_id' => $orgId]);
+        $reps = $repsStmt->fetchAll();
+
+        // 3. Get all users/admins for this org
+        $usersStmt = $db->prepare("SELECT id, org_id, name, email, role, status, phone, avatar, last_login, created_at FROM users WHERE org_id = :org_id ORDER BY created_at DESC");
+        $usersStmt->execute([':org_id' => $orgId]);
+        $users = $usersStmt->fetchAll();
+
+        // 4. Calculate summary metrics
+        $totalCalls = count($calls);
+        $totalTalkSecs = array_sum(array_column($calls, 'duration'));
+        $totalDealVal = array_sum(array_column($calls, 'deal_value'));
+        $connectedCalls = count(array_filter($calls, function($c) { return ((int)$c['duration']) > 0; }));
+
+        echo json_encode([
+            'success' => true,
+            'data' => [
+                'organization' => $org,
+                'metrics' => [
+                    'totalCalls' => $totalCalls,
+                    'connectedCalls' => $connectedCalls,
+                    'totalTalkTimeMinutes' => round($totalTalkSecs / 60),
+                    'totalPipelineValue' => (float)$totalDealVal,
+                    'repCount' => count($reps),
+                    'userCount' => count($users)
+                ],
+                'calls' => $calls,
+                'reps' => $reps,
+                'users' => $users
             ]
         ]);
         exit();

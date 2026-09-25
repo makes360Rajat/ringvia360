@@ -34,7 +34,9 @@ import {
   LogIn,
   Edit3,
   Battery,
-  TrendingUp
+  TrendingUp,
+  Crown,
+  ArrowLeft
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import ContentEditorPanel from '../components/ContentEditorPanel';
@@ -280,6 +282,84 @@ export default function Admin() {
 
   return (
     <div style={{ padding: '1rem 1.5rem 4rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+      {/* Super Admin Review Inspection Mode Banner */}
+      {currentUser?.role === 'super_admin' && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.16), rgba(249, 115, 22, 0.08))',
+          border: '1px solid rgba(234, 179, 8, 0.5)',
+          borderRadius: '14px',
+          padding: '1rem 1.4rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          boxShadow: '0 4px 20px rgba(234, 179, 8, 0.12)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '10px',
+              background: '#eab308',
+              color: '#000',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: 800,
+              boxShadow: '0 2px 10px rgba(234, 179, 8, 0.4)'
+            }}>
+              <Crown size={24} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <span style={{
+                  background: 'rgba(234, 179, 8, 0.25)',
+                  color: '#eab308',
+                  padding: '0.2rem 0.6rem',
+                  borderRadius: '6px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.05em'
+                }}>
+                  SUPER ADMIN REVIEW ACTIVE
+                </span>
+                <span style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>
+                  Inspecting: {orgName}
+                </span>
+                <code style={{ fontSize: '0.75rem', background: 'rgba(0,0,0,0.3)', padding: '0.15rem 0.5rem', borderRadius: '4px', color: 'var(--accent-cyan)' }}>
+                  {currentOrg?.id || currentUser.orgId}
+                </code>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
+                Real-time Audit Active • Sovereign Calls: <strong style={{ color: 'var(--text-main)' }}>{calls.length}</strong> • Field Reps: <strong style={{ color: 'var(--text-main)' }}>{reps.length}</strong> • Pipeline Value: <strong style={{ color: 'var(--accent-amber)' }}>₹{totalPipelineValue.toLocaleString('en-IN')}</strong> • Database: <strong style={{ color: 'var(--accent-emerald)' }}>{dbEngine.toUpperCase()}</strong>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <button
+              onClick={() => navigate('/super-admin')}
+              style={{
+                background: 'rgba(234, 179, 8, 0.2)',
+                border: '1px solid rgba(234, 179, 8, 0.5)',
+                color: '#eab308',
+                borderRadius: '9px',
+                padding: '0.55rem 1.1rem',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <ArrowLeft size={15} />
+              Back to Super Admin Fleet Overview
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Top Header & Org Tenant Info */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>

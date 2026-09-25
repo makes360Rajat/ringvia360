@@ -1155,7 +1155,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const switchTenant = async (orgId: string) => {
     setActiveTenantId(orgId);
     localStorage.setItem('ringvia360_active_tenant', orgId);
-    showToast(orgId === 'all' ? 'Switched to Global Platform View (All Tenants)' : `Switched workspace view to: ${orgId}`);
+    if (orgId === 'all') {
+      setCurrentOrg(null);
+      localStorage.removeItem('ringvia360_org');
+      showToast('Switched to Global Platform Fleet View (All Organizations)');
+    } else {
+      const found = superAdminOverview?.tenants.find(t => t.id === orgId);
+      if (found) {
+        setCurrentOrg(found);
+        localStorage.setItem('ringvia360_org', JSON.stringify(found));
+        showToast(`Super Admin active review on: ${found.name} (${found.id})`);
+      } else {
+        showToast(`Switched workspace view to: ${orgId}`);
+      }
+    }
     await fetchAllDataFromServer();
   };
 
@@ -1169,10 +1182,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const res = await fetch(ep);
           if (res.ok) {
-            const data = await res.json();
-            if (data && data.success) {
-              setSuperAdminOverview(data);
-              return data;
+            const json = await res.json();
+            if (json && json.success) {
+              const d = json.data || json;
+              const rawTenants = d.tenants || d.organizations || [];
+              const tenants: TenantOrganization[] = rawTenants.map((o: any) => ({
+                id: o.id,
+                name: o.name,
+                slug: o.slug,
+                plan: o.plan,
+                seats: Number(o.seats) || 50,
+                monthly_price_inr: Number(o.monthly_price_inr) || 14999,
+                status: (o.status === 'active' || o.status === 'suspended') ? o.status : 'active',
+                owner_email: o.owner_email || 'admin@ringvia360.com',
+                created_at: o.created_at,
+                user_count: Number(o.user_count) || 0,
+                call_count: Number(o.call_count) || 0,
+                total_deal_value: Number(o.total_deal_value) || 0,
+                rep_count: Number(o.rep_count) || 0
+              }));
+
+              const overviewObj: SuperAdminOverview = {
+                platformMetrics: {
+                  totalTenants: d.stats?.totalTenants ?? tenants.length,
+                  activeTenants: tenants.filter(t => t.status === 'active').length,
+                  totalUsers: d.stats?.totalUsers ?? 0,
+                  totalCallsLogged: d.stats?.totalCallsCaptured ?? 0,
+                  totalMonthlyRevenueInr: d.stats?.totalMrrInr ?? 0,
+                  totalSeatsAllocated: d.stats?.totalAllocatedSeats ?? 0
+                },
+                tenants: tenants
+              };
+              setSuperAdminOverview(overviewObj);
+              return overviewObj;
             }
           }
         } catch (_) {}
