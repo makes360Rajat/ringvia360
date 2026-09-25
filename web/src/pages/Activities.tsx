@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   PhoneCall,
   Search,
@@ -24,12 +25,15 @@ import {
   X,
   RotateCw,
   Trash2,
-  TrendingUp
+  TrendingUp,
+  ShieldAlert,
+  LogIn
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import type { CallLog } from '../types';
 
 export default function Activities() {
+  const navigate = useNavigate();
   const {
     calls,
     whatsAppLogs,
@@ -38,6 +42,7 @@ export default function Activities() {
     deleteCallLog,
     refreshCalls,
     dbEngine,
+    currentUser,
     getPageSection
   } = useApp();
 
@@ -199,6 +204,71 @@ export default function Activities() {
     a.click();
     document.body.removeChild(a);
   };
+
+  if (!currentUser) {
+    return (
+      <div style={{ maxWidth: '680px', margin: '4.5rem auto', padding: '2rem 1.5rem', textAlign: 'center' }}>
+        <div className="glass-card" style={{ padding: '3.5rem 2.5rem', border: '1px solid rgba(124, 58, 237, 0.35)', background: 'rgba(15, 23, 42, 0.85)' }}>
+          <div style={{
+            width: '76px',
+            height: '76px',
+            borderRadius: '24px',
+            background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.25), rgba(6, 182, 212, 0.2))',
+            border: '1px solid rgba(124, 58, 237, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.5rem',
+            color: 'var(--primary)'
+          }}>
+            <Lock size={38} color="var(--primary)" />
+          </div>
+
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '5px 14px', borderRadius: '20px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.35)', color: '#f87171', fontSize: '0.8rem', fontWeight: 700, marginBottom: '1.25rem' }}>
+            <ShieldAlert size={14} /> ZERO-LEAK ENTERPRISE PRIVACY SHIELD
+          </div>
+
+          <h2 style={{ fontSize: '1.85rem', fontWeight: 800, marginBottom: '0.75rem', color: 'var(--text-main)' }}>
+            Live Feeds Restricted & Privatized
+          </h2>
+
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.65, marginBottom: '2rem' }}>
+            Enterprise voice recordings, customer identities, AI sentiment transcripts, and sales deal values are strictly privatized and encrypted at rest. Telemetry is accessible only by authorized team members of your sovereign workspace.
+          </p>
+
+          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => navigate('/login')}
+              className="btn-primary"
+              style={{
+                padding: '0.85rem 1.85rem',
+                borderRadius: '10px',
+                fontSize: '0.92rem',
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <LogIn size={16} /> Sign In to Access Telemetry
+            </button>
+            <button
+              onClick={() => navigate('/signup')}
+              className="btn-secondary"
+              style={{
+                padding: '0.85rem 1.85rem',
+                borderRadius: '10px',
+                fontSize: '0.92rem',
+                fontWeight: 700
+              }}
+            >
+              Register Sovereign Organization
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: '1rem 1.5rem 6rem', maxWidth: '1440px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>

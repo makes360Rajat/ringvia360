@@ -508,12 +508,48 @@ const initialAdminUsers: AdminUser[] = [
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [calls, setCalls] = useState<CallLog[]>(initialCalls);
-  const [whatsAppLogs, setWhatsAppLogs] = useState<WhatsAppLog[]>(initialWhatsAppLogs);
+  const [calls, setCalls] = useState<CallLog[]>(() => {
+    try {
+      const user = localStorage.getItem('ringvia360_user');
+      const token = localStorage.getItem('ringvia360_auth_token');
+      if (user && token) {
+        return initialCalls;
+      }
+    } catch (_) {}
+    return [];
+  });
+  const [whatsAppLogs, setWhatsAppLogs] = useState<WhatsAppLog[]>(() => {
+    try {
+      const user = localStorage.getItem('ringvia360_user');
+      const token = localStorage.getItem('ringvia360_auth_token');
+      if (user && token) {
+        return initialWhatsAppLogs;
+      }
+    } catch (_) {}
+    return [];
+  });
   const [reps, setReps] = useState<SalesRep[]>(initialReps);
   const [crmConnectors, setCrmConnectors] = useState<CrmConnector[]>(initialCrmConnectors);
-  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(initialAdminUsers);
-  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(initialAuditLogs);
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>(() => {
+    try {
+      const user = localStorage.getItem('ringvia360_user');
+      const token = localStorage.getItem('ringvia360_auth_token');
+      if (user && token) {
+        return initialAdminUsers;
+      }
+    } catch (_) {}
+    return [];
+  });
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
+    try {
+      const user = localStorage.getItem('ringvia360_user');
+      const token = localStorage.getItem('ringvia360_auth_token');
+      if (user && token) {
+        return initialAuditLogs;
+      }
+    } catch (_) {}
+    return [];
+  });
   const [securitySettings, setSecuritySettings] = useState<SecuritySettings>(initialSecurity);
   // The audio player is opened only when a user explicitly selects a recording.
   const [activeAudioCall, setActiveAudioCall] = useState<CallLog | null>(null);
@@ -813,15 +849,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       const authToken = localStorage.getItem('ringvia360_auth_token');
 
-      // If user is authenticated, query tenant all_data. If unauthenticated, query live call feeds directly!
-      const endpoints = authToken ? [
+      // STRICT PRIVACY PROTECTION: When logged out, never query or expose enterprise call telemetry!
+      if (!authToken || !currentUser) {
+        setCalls([]);
+        return;
+      }
+
+      const endpoints = [
         `/api/calls.php?action=all_data&org_id=${encodeURIComponent(scopedTenantId)}`,
         `https://ringvia360.com/api/calls.php?action=all_data&org_id=${encodeURIComponent(scopedTenantId)}`,
         `/api/calls.php?org_id=${encodeURIComponent(scopedTenantId)}`,
         `https://ringvia360.com/api/calls.php?org_id=${encodeURIComponent(scopedTenantId)}`
-      ] : [
-        `/api/calls.php?limit=100`,
-        `https://ringvia360.com/api/calls.php?limit=100`
       ];
 
       let json: any = null;
@@ -1150,7 +1188,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.removeItem('ringvia360_org');
     localStorage.removeItem('ringvia360_active_tenant');
     localStorage.removeItem('ringvia360_auth_token');
-    showToast('Logged out successfully.');
+    setCalls([]);
+    setWhatsAppLogs([]);
+    setAuditLogs([]);
+    setAdminUsers([]);
+    setActiveAudioCall(null);
+    showToast('Logged out successfully. Work and feeds privatized.');
   };
 
   const switchTenant = async (orgId: string) => {

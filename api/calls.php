@@ -740,8 +740,15 @@ try {
             exit();
         }
 
+        // Privacy protection: must be authenticated to stream enterprise audio
+        if (!$authPayload) {
+            http_response_code(401);
+            echo json_encode(['success' => false, 'error' => 'Authentication required to stream enterprise call audio']);
+            exit();
+        }
+
         // Verify tenant isolation: customer admin can only stream their own recordings
-        if ($authPayload && ($authPayload['role'] ?? '') !== 'super_admin') {
+        if (($authPayload['role'] ?? '') !== 'super_admin') {
             $userOrg = (string) ($authPayload['orgId'] ?? '');
             $callOrg = (string) ($callRecord['org_id'] ?? '');
             if ($userOrg !== $callOrg) {
@@ -1304,9 +1311,19 @@ try {
     }
 
     // =========================================================
-    // 12. CALL LOGS GET (List with filters)
+    // 12. CALL LOGS GET (List with filters - STRICT PRIVACY PRIVATIZATION)
     // =========================================================
     if ($method === 'GET' && empty($action)) {
+        if (!$authPayload) {
+            http_response_code(401);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Unauthorized: Authentication required. Private enterprise call telemetry is restricted.',
+                'data' => []
+            ]);
+            exit();
+        }
+
         $whereClauses = [];
         $params = [];
 

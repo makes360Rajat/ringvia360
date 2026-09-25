@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   PhoneCall,
   Clock,
@@ -12,11 +13,13 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Filter,
+  Lock
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
 export default function Dashboard() {
-  const { calls, reps, setActiveAudioCall, getPageSection } = useApp();
+  const navigate = useNavigate();
+  const { calls, reps, setActiveAudioCall, getPageSection, currentUser } = useApp();
   const [timeRange, setTimeRange] = useState<'today' | 'week' | 'month'>('today');
 
   const totalCalls = calls.length;
@@ -314,73 +317,98 @@ export default function Dashboard() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {calls.slice(0, 4).map(call => (
-            <div
-              key={call.id}
-              onClick={() => setActiveAudioCall(call)}
-              className="glass-card glass-card-interactive"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0.9rem 1.25rem',
-                gap: '1rem',
-                flexWrap: 'wrap'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <span className={`glass-pill ${
-                  call.direction === 'inbound' ? 'badge-inbound' :
-                  call.direction === 'outbound' ? 'badge-outbound' : 'badge-missed'
-                }`}>
-                  {call.direction.toUpperCase()}
-                </span>
+          {!currentUser ? (
+            <div style={{
+              padding: '2.5rem 1.5rem',
+              textAlign: 'center',
+              border: '1px dashed rgba(124, 58, 237, 0.35)',
+              borderRadius: 'var(--radius-md)',
+              background: 'rgba(15, 23, 42, 0.5)'
+            }}>
+              <Lock size={32} color="var(--primary)" style={{ marginBottom: '0.75rem' }} />
+              <div style={{ fontWeight: 700, color: 'var(--text-main)', fontSize: '1.05rem', marginBottom: '0.35rem' }}>
+                Private Telemetry Feed Shielded
+              </div>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '480px', margin: '0 auto 1.25rem' }}>
+                You are currently signed out. Real-time call streams, client prospect details, and audio recordings are privatized to authorized enterprise team members.
+              </p>
+              <button onClick={() => navigate('/login')} className="btn-primary" style={{ fontSize: '0.85rem', padding: '0.6rem 1.4rem' }}>
+                Sign In to View Live Telemetry
+              </button>
+            </div>
+          ) : calls.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-dim)' }}>
+              No call activities recorded yet. Start calls with the companion app to see live telemetry.
+            </div>
+          ) : (
+            calls.slice(0, 4).map(call => (
+              <div
+                key={call.id}
+                onClick={() => setActiveAudioCall(call)}
+                className="glass-card glass-card-interactive"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.9rem 1.25rem',
+                  gap: '1rem',
+                  flexWrap: 'wrap'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <span className={`glass-pill ${
+                    call.direction === 'inbound' ? 'badge-inbound' :
+                    call.direction === 'outbound' ? 'badge-outbound' : 'badge-missed'
+                  }`}>
+                    {call.direction.toUpperCase()}
+                  </span>
 
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
-                      {call.contactName}
-                    </span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                      • {call.company}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Rep: {call.repName} • Duration: {Math.floor(call.duration / 60)}m {call.duration % 60}s • {call.outcome}
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-main)' }}>
+                        {call.contactName}
+                      </span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
+                        • {call.company}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      Rep: {call.repName} • Duration: {Math.floor(call.duration / 60)}m {call.duration % 60}s • {call.outcome}
+                    </div>
                   </div>
                 </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                  <span className={`glass-pill ${
+                    call.sentiment === 'positive' ? 'badge-sentiment-pos' :
+                    call.sentiment === 'neutral' ? 'badge-sentiment-neu' : 'badge-sentiment-neg'
+                  }`}>
+                    {call.sentiment.toUpperCase()} ({call.sentimentScore}%)
+                  </span>
+
+                  <span className="glass-pill" style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)' }}>
+                    ✓ {call.crmType}
+                  </span>
+
+                  <button
+                    className="btn-ghost"
+                    style={{
+                      padding: '0.35rem 0.65rem',
+                      background: 'var(--primary-subtle)',
+                      color: 'var(--primary)',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: '0.75rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Play size={12} fill="var(--primary)" /> Listen
+                  </button>
+                </div>
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                <span className={`glass-pill ${
-                  call.sentiment === 'positive' ? 'badge-sentiment-pos' :
-                  call.sentiment === 'neutral' ? 'badge-sentiment-neu' : 'badge-sentiment-neg'
-                }`}>
-                  {call.sentiment.toUpperCase()} ({call.sentimentScore}%)
-                </span>
-
-                <span className="glass-pill" style={{ fontSize: '0.75rem', color: 'var(--accent-emerald)' }}>
-                  ✓ {call.crmType}
-                </span>
-
-                <button
-                  className="btn-ghost"
-                  style={{
-                    padding: '0.35rem 0.65rem',
-                    background: 'var(--primary-subtle)',
-                    color: 'var(--primary)',
-                    borderRadius: 'var(--radius-sm)',
-                    fontSize: '0.75rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px'
-                  }}
-                >
-                  <Play size={12} fill="var(--primary)" /> Listen
-                </button>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>
