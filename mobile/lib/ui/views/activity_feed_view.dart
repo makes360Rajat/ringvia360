@@ -233,48 +233,84 @@ class ActivityFeedView extends StatelessWidget {
 
                             const SizedBox(height: 10),
 
-                            // Bottom Player Strip
+                            // Bottom Player Strip with Audio Name Display
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                               decoration: BoxDecoration(
                                 color: AppColors.bgSurfaceElevated,
                                 borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: AppColors.borderSubtle),
                               ),
-                              child: Row(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  GestureDetector(
-                                    onTap: () => viewModel.togglePlayAudio(call.id),
-                                    child: Container(
-                                      width: 28,
-                                      height: 28,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.primary,
-                                        shape: BoxShape.circle,
+                                  Row(
+                                    children: [
+                                      GestureDetector(
+                                        onTap: () => viewModel.togglePlayAudio(call.id),
+                                        child: Container(
+                                          width: 28,
+                                          height: 28,
+                                          decoration: const BoxDecoration(
+                                            color: AppColors.primary,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: Icon(
+                                            isPlaying ? Icons.pause : Icons.play_arrow,
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                        ),
                                       ),
-                                      child: Icon(
-                                        isPlaying ? Icons.pause : Icons.play_arrow,
-                                        color: Colors.white,
-                                        size: 16,
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        _formatDuration(call.durationSeconds),
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textMain,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      const Icon(Icons.lock, size: 12, color: AppColors.accentEmerald),
+                                      const SizedBox(width: 4),
+                                      const Text(
+                                        'AES-256 E2EE',
+                                        style: TextStyle(fontSize: 9, color: AppColors.accentEmerald),
+                                      ),
+                                    ],
+                                  ),
+                                  if (call.recordingPath != null && call.recordingPath!.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.bgSurface,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: AppColors.borderSubtle),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.graphic_eq, size: 12, color: AppColors.accentCyan),
+                                          const SizedBox(width: 5),
+                                          Flexible(
+                                            child: Text(
+                                              'Audio: ${call.recordingPath!.split('/').last}',
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                fontFamily: 'monospace',
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.accentCyan,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    _formatDuration(call.durationSeconds),
-                                    style: const TextStyle(
-                                      fontSize: 11,
-                                      fontFamily: 'monospace',
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.textMain,
-                                    ),
-                                  ),
-                                  const Spacer(),
-                                  const Icon(Icons.lock, size: 12, color: AppColors.accentEmerald),
-                                  const SizedBox(width: 4),
-                                  const Text(
-                                    'AES-256 E2EE',
-                                    style: TextStyle(fontSize: 9, color: AppColors.accentEmerald),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),

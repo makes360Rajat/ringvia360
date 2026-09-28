@@ -236,12 +236,21 @@ class CallRepository {
         if (index != -1) {
           _cachedCalls[index] = _cachedCalls[index].copyWith(
             crmSyncStatus: CrmSyncStatus.synced,
+            recordingPath: (res.recordingUrl != null && res.recordingUrl!.isNotEmpty && !res.recordingUrl!.contains('mixkit'))
+                ? res.recordingUrl
+                : _cachedCalls[index].recordingPath,
           );
           await _saveToLocalStorage();
           _callsStreamController.add(List.unmodifiable(_cachedCalls));
         }
       }
     } catch (_) {}
+  }
+
+  /// Uploads a local audio file to the server immediately and returns the
+  /// hosted URL, or null if upload failed.
+  Future<String?> uploadRecording(String callId, String localFilePath) async {
+    return _cloudSyncService.uploadAudioFile(localFilePath, callId);
   }
 
   Future<List<LeadContact>> searchContacts(String query) async {

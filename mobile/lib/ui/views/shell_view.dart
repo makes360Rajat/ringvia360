@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/services/auth_pairing_service.dart';
 import '../view_models/call_feed_view_model.dart';
+import '../view_models/dialer_view_model.dart';
 import 'device_pairing_view.dart';
 import 'dialer_view.dart';
 import 'activity_feed_view.dart';
@@ -19,7 +20,7 @@ class ShellView extends StatefulWidget {
   State<ShellView> createState() => _ShellViewState();
 }
 
-class _ShellViewState extends State<ShellView> {
+class _ShellViewState extends State<ShellView> with WidgetsBindingObserver {
   int _currentIndex = 0;
 
   final List<Widget> _pages = const [
@@ -28,6 +29,28 @@ class _ShellViewState extends State<ShellView> {
     RepScorecardView(),
     PrivacySettingsView(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Called by Flutter when the app lifecycle changes.
+  /// On [resumed] we ask the DialerViewModel to check SharedPreferences for
+  /// any call that was recorded by the background [CallRecordingService].
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<DialerViewModel>().checkForPendingBackgroundCall();
+    }
+  }
 
   void _showPairingOptions(BuildContext context, AuthPairingService auth) {
     showModalBottomSheet(

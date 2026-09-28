@@ -198,9 +198,11 @@ export default function Activities() {
   const triggerDownload = (call: CallLog, e: React.MouseEvent) => {
     e.stopPropagation();
     const url = call.recordingUrl || 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
+    const ext = url.split('.').pop()?.split('?')[0] || 'm4a';
+    const filename = url.split('/').pop()?.split('?')[0] || `RingVia360_${call.contactName.replace(/\s+/g, '_')}_${call.id}.${ext}`;
     const a = document.createElement('a');
     a.href = url;
-    a.download = `RingVia360_${call.contactName.replace(/\s+/g, '_')}_${call.id}.mp3`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -618,8 +620,24 @@ export default function Activities() {
                         {isCallPlaying ? 'PODCAST AUDIO PLAYBACK ACTIVE' : 'CALL RECORDING POD'}
                       </span>
                       <span className="glass-pill" style={{ fontSize: '0.68rem', padding: '2px 8px' }}>
-                        MP3 • 320kbps
+                        {call.recordingUrl ? (call.recordingUrl.split('.').pop()?.split('?')[0].toUpperCase() || 'AUDIO') : 'MP3'} • HD Voice
                       </span>
+                      {call.recordingUrl && (
+                        <span className="glass-pill" style={{
+                          fontSize: '0.68rem',
+                          padding: '2px 8px',
+                          fontFamily: 'var(--font-mono)',
+                          color: '#38bdf8',
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          maxWidth: '220px',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }} title={call.recordingUrl.split('/').pop()}>
+                          🎵 {call.recordingUrl.split('/').pop()}
+                        </span>
+                      )}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
@@ -630,7 +648,7 @@ export default function Activities() {
                         title="Download call audio file"
                       >
                         <Download size={13} />
-                        <span>Download MP3</span>
+                        <span>Download {call.recordingUrl ? (call.recordingUrl.split('.').pop()?.split('?')[0].toUpperCase() || 'Audio') : 'MP3'}</span>
                       </button>
 
                       <button

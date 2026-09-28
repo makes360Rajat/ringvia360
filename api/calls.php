@@ -656,14 +656,24 @@ try {
 
         // Case A: Multipart File Upload
         if (!empty($_FILES['audio']['tmp_name']) && is_uploaded_file($_FILES['audio']['tmp_name'])) {
-            if (($_FILES['audio']['size'] ?? 0) > 25 * 1024 * 1024) {
+            if (($_FILES['audio']['size'] ?? 0) > 50 * 1024 * 1024) {
                 http_response_code(413);
-                echo json_encode(['success' => false, 'error' => 'Audio recording exceeds the 25 MB limit']);
+                echo json_encode(['success' => false, 'error' => 'Audio/video recording exceeds the 50 MB limit']);
                 exit();
             }
-            $ext = pathinfo($_FILES['audio']['name'], PATHINFO_EXTENSION) ?: 'mp3';
-            $safeExt = in_array(strtolower($ext), ['mp3', 'm4a', 'wav', 'aac', 'ogg']) ? strtolower($ext) : 'mp3';
-            $filename = 'rec_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $safeExt;
+            $ext = pathinfo($_FILES['audio']['name'], PATHINFO_EXTENSION) ?: 'm4a';
+            $allowedExts = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'amr', '3gp', 'mp4', 'webm'];
+            $safeExt = in_array(strtolower($ext), $allowedExts) ? strtolower($ext) : 'm4a';
+            
+            $origName = pathinfo($_FILES['audio']['name'], PATHINFO_FILENAME);
+            $cleanName = preg_replace('/[^a-zA-Z0-9_\-\+\.]/', '_', $origName);
+            if (empty($cleanName) || $cleanName === 'audio' || $cleanName === 'blob') {
+                $cleanName = 'rec_' . time();
+            }
+            $filename = $cleanName . '.' . $safeExt;
+            if (file_exists($uploadDir . '/' . $filename)) {
+                $filename = $cleanName . '_' . substr(bin2hex(random_bytes(3)), 0, 4) . '.' . $safeExt;
+            }
             $dest = $uploadDir . '/' . $filename;
             if (move_uploaded_file($_FILES['audio']['tmp_name'], $dest)) {
                 $savedFilename = $filename;
@@ -681,8 +691,15 @@ try {
                 }
                 $decoded = base64_decode($base64);
                 if ($decoded !== false) {
-                    $ext = !empty($body['format']) ? strtolower($body['format']) : 'mp3';
-                    $filename = 'rec_' . time() . '_' . bin2hex(random_bytes(6)) . '.' . $ext;
+                    $ext = !empty($body['format']) ? strtolower($body['format']) : 'm4a';
+                    $allowedExts = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'amr', '3gp', 'mp4', 'webm'];
+                    $safeExt = in_array($ext, $allowedExts) ? $ext : 'm4a';
+                    $customName = !empty($body['fileName']) ? pathinfo($body['fileName'], PATHINFO_FILENAME) : ('rec_' . time());
+                    $cleanName = preg_replace('/[^a-zA-Z0-9_\-\+\.]/', '_', $customName);
+                    $filename = $cleanName . '.' . $safeExt;
+                    if (file_exists($uploadDir . '/' . $filename)) {
+                        $filename = $cleanName . '_' . substr(bin2hex(random_bytes(3)), 0, 4) . '.' . $safeExt;
+                    }
                     file_put_contents($uploadDir . '/' . $filename, $decoded);
                     $savedFilename = $filename;
                     if (empty($callId) && !empty($body['callId'])) {
@@ -705,8 +722,16 @@ try {
 
         // If callId provided, automatically update recording_url in call_logs table
         if (!empty($callId)) {
-            $upd = $db->prepare("UPDATE call_logs SET recording_url = :url WHERE id = :id");
-            $upd->execute([':url' => $audioUrl, ':id' => $callId]);
+            $chk = $db->prepare("SELECT id FROM call_logs WHERE id = :id");
+            $chk->execute([':id' => $callId]);
+            if ($chk->fetch()) {
+                $upd = $db->prepare("UPDATE call_logs SET recording_url = :url WHERE id = :id");
+                $upd->execute([':url' => $audioUrl, ':id' => $callId]);
+            } else {
+                $orgId = $_POST['org_id'] ?? ($_GET['org_id'] ?? ($tenantId !== 'all' ? $tenantId : 'org-tcs'));
+                $ins = $db->prepare("INSERT INTO call_logs (id, org_id, contact_name, phone_number, company, direction, duration, timestamp, recording_url) VALUES (:id, :org_id, 'Inbound Call', 'Recorded Call', 'Enterprise Client', 'inbound', 60, 'Just now', :url)");
+                $ins->execute([':id' => $callId, ':org_id' => $orgId, ':url' => $audioUrl]);
+            }
         }
 
         echo json_encode([
@@ -1463,7 +1488,7 @@ try {
         $crmType = !empty($payload['crmType']) ? (string) $payload['crmType'] : 'RingVia360';
         $simSlot = !empty($payload['simSlot']) ? (string) $payload['simSlot'] : 'SIM 1 (Airtel Enterprise)';
         $isEncrypted = isset($payload['isEncrypted']) ? ($payload['isEncrypted'] ? 1 : 0) : 1;
-        $recordingUrl = !empty($payload['recordingUrl']) ? (string) $payload['recordingUrl'] : null;
+        $recordingUrl = !empty($payload['recordingUrl']) ? (string) $payload['recordingUrl'] : 'https://assets.mixkit.co/active_storage/sfx/2874/2874-preview.mp3';
 
         $waveform = !empty($payload['waveform']) ? json_encode($payload['waveform']) : json_encode([30, 45, 65, 80, 70, 85, 90, 75, 60, 50, 65, 80, 95, 75, 60, 45, 40, 55, 70, 60]);
         $transcript = !empty($payload['transcript']) ? json_encode($payload['transcript']) : json_encode([
@@ -1529,6 +1554,15 @@ try {
                 :recording_url, :waveform, :transcript, :key_action_items
             ) ON DUPLICATE KEY UPDATE 
                 org_id = VALUES(org_id),
+                contact_name = VALUES(contact_name),
+                phone_number = VALUES(phone_number),
+                company = VALUES(company),
+                direction = VALUES(direction),
+                duration = VALUES(duration),
+                timestamp = VALUES(timestamp),
+                rep_name = VALUES(rep_name),
+                rep_avatar = VALUES(rep_avatar),
+                rep_id = VALUES(rep_id),
                 outcome = VALUES(outcome),
                 notes = VALUES(notes),
                 sentiment = VALUES(sentiment),
@@ -1537,7 +1571,7 @@ try {
                 deal_stage = VALUES(deal_stage),
                 crm_status = VALUES(crm_status),
                 crm_type = VALUES(crm_type),
-                recording_url = VALUES(recording_url),
+                recording_url = IF(VALUES(recording_url) IS NOT NULL AND VALUES(recording_url) != '' AND VALUES(recording_url) NOT LIKE '%mixkit%', VALUES(recording_url), COALESCE(recording_url, VALUES(recording_url))),
                 waveform = VALUES(waveform),
                 transcript = VALUES(transcript),
                 key_action_items = VALUES(key_action_items)"

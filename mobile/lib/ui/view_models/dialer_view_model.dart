@@ -6,22 +6,88 @@ import '../../data/models/lead_contact.dart';
 import '../../data/models/sim_config.dart';
 import '../../data/services/telephony_service.dart';
 import '../../data/services/audio_recorder_service.dart';
+import '../../data/services/native_call_sensor_service.dart';
 import '../../data/repositories/call_repository.dart';
 
 class DialerViewModel extends ChangeNotifier {
   final TelephonyService _telephonyService;
   final CallRepository _callRepository;
   final AudioRecorderService _audioRecorderService;
+  final NativeCallSensorService _nativeCallSensor;
 
   DialerViewModel({
     required TelephonyService telephonyService,
     required CallRepository callRepository,
     AudioRecorderService? audioRecorderService,
+    NativeCallSensorService? nativeCallSensor,
   })  : _telephonyService = telephonyService,
         _callRepository = callRepository,
-        _audioRecorderService = audioRecorderService ?? AudioRecorderService() {
+        _audioRecorderService = audioRecorderService ?? AudioRecorderService(),
+        _nativeCallSensor = nativeCallSensor ?? NativeCallSensorService() {
     _initTelephonyListener();
+    _initNativeCallSensor();
+    // Check if Android recorded a call while we were backgrounded/killed
+    checkForPendingBackgroundCall();
   }
+
+  /// Called at startup and whenever the app resumes from background.
+  /// If [CallRecordingService] stored a completed call in SharedPreferences,
+  /// we restore it as a [CallRecord], immediately upload the recording to the
+  /// server (so it appears on Admin regardless of whether wrap-up is submitted),
+  /// and then show the Post-Call Wrap-Up overlay.
+  Future<void> checkForPendingBackgroundCall() async {
+    final pending = await _nativeCallSensor.checkPendingCall();
+    if (pending == null || _isDisposed || _wrapUpCall?.id == pending.callId) return;
+
+    final record = CallRecord(
+      id:              pending.callId,
+      contactName:     pending.phoneNumber.isNotEmpty ? pending.phoneNumber : 'Unknown Caller',
+      phoneNumber:     pending.phoneNumber,
+      company:         'Inbound Call',
+      direction:       CallDirection.inbound,
+      durationSeconds: pending.durationSeconds,
+      timestamp:       pending.timestamp,
+      outcome:         'Background Call Recorded',
+      notes:           '',
+      sentiment:       SentimentScore.neutral,
+      dealValue:       0,
+      dealStage:       'Qualification',
+      crmSyncStatus:   CrmSyncStatus.pending,
+      crmType:         'RingVia360',
+      simSlot:         _selectedSim.label,
+      isEncrypted:     true,
+      recordingPath:   pending.recordingPath,
+      keyActionItems:  ['Add call notes', 'Log to CRM', 'Send to team feed'],
+    );
+
+    // Show wrap-up immediately — don't wait for upload.
+    _callRepository.addCall(record);
+    _wrapUpCall = record;
+    notifyListeners();
+
+    // Fire-and-forget: upload the audio file RIGHT NOW so admin sees the recording
+    // even if the rep dismisses the wrap-up without submitting notes.
+    if (pending.recordingPath != null && pending.recordingPath!.isNotEmpty) {
+      unawaited(_uploadBackgroundRecording(record));
+    }
+  }
+
+  Future<void> _uploadBackgroundRecording(CallRecord record) async {
+    try {
+      final url = await _callRepository.uploadRecording(record.id, record.recordingPath!);
+      if (url != null && !_isDisposed) {
+        // Update the record with the live server URL.
+        final updated = record.copyWith(recordingPath: url, crmSyncStatus: CrmSyncStatus.synced);
+        _callRepository.addCall(updated);
+        if (_wrapUpCall?.id == record.id) {
+          _wrapUpCall = _wrapUpCall!.copyWith(recordingPath: url, crmSyncStatus: CrmSyncStatus.synced);
+          notifyListeners();
+        }
+      }
+    } catch (_) {}
+  }
+
+
 
   bool _isDisposed = false;
   String _inputNumber = '';
@@ -79,6 +145,7 @@ class DialerViewModel extends ChangeNotifier {
   CallRecord? get wrapUpCall => _wrapUpCall;
 
   StreamSubscription<TelephonyEvent>? _sub;
+  StreamSubscription<NativeCallEvent>? _nativeSub;
 
   void _initTelephonyListener() {
     _sub = _telephonyService.onCallEvent.listen((event) {
@@ -98,6 +165,135 @@ class DialerViewModel extends ChangeNotifier {
         _isIncomingCallRinging = false;
         _isInCall = false;
         notifyListeners();
+      }
+    });
+  }
+
+  /// Listens to the Android phone-state EventChannel so that real (non-simulated)
+  /// calls automatically trigger recording and the post-call wrap-up overlay.
+  void _initNativeCallSensor() {
+    _nativeSub = _nativeCallSensor.callEvents.listen((event) async {
+      switch (event.state) {
+        case NativeCallState.ringing:
+          // Show the incoming ringing HUD.
+          _isIncomingCallRinging = true;
+          _activeContactName = event.phoneNumber.isNotEmpty ? event.phoneNumber : 'Unknown Caller';
+          _activeCompany = 'Inbound Call';
+          _activeDirection = CallDirection.inbound;
+          _inputNumber = event.phoneNumber;
+          notifyListeners();
+
+        case NativeCallState.connected:
+          // Real call answered — native CallRecordingService handles background audio recording.
+          _isIncomingCallRinging = false;
+          _isInCall = true;
+          _callDurationSeconds = 0;
+          _isMuted = false;
+          _isSpeakerOn = false;
+          _currentCallId = (event.callId != null && event.callId!.isNotEmpty)
+              ? event.callId
+              : 'native-call-${DateTime.now().millisecondsSinceEpoch}';
+          notifyListeners();
+
+        case NativeCallState.disconnected:
+          // Real call ended.
+          _isInCall = false;
+          _isIncomingCallRinging = false;
+          notifyListeners();
+
+          // 1. Resolve call details directly from event or from SharedPreferences fallback
+          String callId = (event.callId != null && event.callId!.isNotEmpty)
+              ? event.callId!
+              : (_currentCallId ?? 'native-call-${DateTime.now().millisecondsSinceEpoch}');
+          String? recordingPath = event.recordingPath;
+          int duration = event.durationSeconds;
+
+          if (recordingPath == null || recordingPath.isEmpty) {
+            final pending = await _nativeCallSensor.checkPendingCall();
+            if (pending != null) {
+              if (pending.callId.isNotEmpty) callId = pending.callId;
+              if (pending.durationSeconds > 0) duration = pending.durationSeconds;
+              recordingPath = pending.recordingPath;
+            }
+          }
+
+          _currentCallId = null;
+
+          // If this call is ALREADY open in the wrap-up modal and rep is typing notes, do NOT overwrite it!
+          if (_wrapUpCall != null && _wrapUpCall!.id == callId) {
+            if (recordingPath != null && recordingPath.isNotEmpty &&
+                (_wrapUpCall!.recordingPath == null || !_wrapUpCall!.recordingPath!.startsWith('http'))) {
+              _wrapUpCall = _wrapUpCall!.copyWith(recordingPath: recordingPath);
+              notifyListeners();
+              unawaited(_uploadBackgroundRecording(_wrapUpCall!));
+            }
+            return;
+          }
+
+          final phone = event.phoneNumber.isNotEmpty
+              ? event.phoneNumber
+              : (_inputNumber.isNotEmpty ? _inputNumber : '+91 98201 43210');
+          final contactName = (_activeContactName.isNotEmpty &&
+                  _activeContactName != 'Corporate Contact' &&
+                  _activeContactName != 'Lead Contact')
+              ? _activeContactName
+              : phone;
+
+          final record = CallRecord(
+            id: callId,
+            contactName: contactName,
+            phoneNumber: phone,
+            company: _activeCompany,
+            direction: _activeDirection,
+            durationSeconds: duration > 0 ? duration : (_callDurationSeconds > 0 ? _callDurationSeconds : 45),
+            timestamp: DateTime.now(),
+            outcome: _activeDirection == CallDirection.inbound
+                ? 'Inbound Call Completed — Wrap-up Pending'
+                : 'Outbound Call Completed — Wrap-up Pending',
+            notes: '',
+            sentiment: SentimentScore.neutral,
+            dealValue: 25000,
+            dealStage: 'Qualification',
+            crmSyncStatus: CrmSyncStatus.pending,
+            crmType: 'RingVia360',
+            simSlot: _selectedSim.label,
+            isEncrypted: true,
+            recordingPath: recordingPath,
+            keyActionItems: ['Submit wrap-up notes', 'Sync to CRM pipeline', 'Audio attached to live feed'],
+          );
+
+          // 2. Persist to local repository & stream to Feed View immediately
+          await _callRepository.addCall(record);
+
+          // 3. Open Post-Call Wrap-Up pop-up modal immediately!
+          _wrapUpCall = record;
+          notifyListeners();
+
+          // 4. Immediately trigger audio upload in background so live feed and admin get the recording URL
+          if (recordingPath != null && recordingPath.isNotEmpty) {
+            unawaited(_uploadBackgroundRecording(record));
+          }
+
+        case NativeCallState.recordingReady:
+          // Phone dialer finished writing audio recording file in background
+          if (event.recordingPath != null && event.recordingPath!.isNotEmpty) {
+            final readyPath = event.recordingPath!;
+            if (_wrapUpCall != null && (_wrapUpCall!.recordingPath == null || !_wrapUpCall!.recordingPath!.startsWith('http'))) {
+              _wrapUpCall = _wrapUpCall!.copyWith(recordingPath: readyPath);
+              notifyListeners();
+              unawaited(_uploadBackgroundRecording(_wrapUpCall!));
+            }
+            final calls = await _callRepository.getCalls();
+            final targetId = event.callId ?? (_wrapUpCall?.id);
+            if (targetId != null) {
+              final idx = calls.indexWhere((c) => c.id == targetId);
+              if (idx != -1 && (calls[idx].recordingPath == null || !calls[idx].recordingPath!.startsWith('http'))) {
+                final updated = calls[idx].copyWith(recordingPath: readyPath);
+                await _callRepository.addCall(updated);
+                unawaited(_uploadBackgroundRecording(updated));
+              }
+            }
+          }
       }
     });
   }
@@ -205,7 +401,9 @@ class DialerViewModel extends ChangeNotifier {
     _isSpeakerOn = false;
 
     _currentCallId = 'call-${DateTime.now().millisecondsSinceEpoch}';
-    await _audioRecorderService.startRecording(callId: _currentCallId!);
+    if (!launchNative) {
+      await _audioRecorderService.startRecording(callId: _currentCallId!);
+    }
 
     _telephonyService.startOutboundCall(
       phoneNumber: number,
@@ -366,11 +564,21 @@ class DialerViewModel extends ChangeNotifier {
     // 2. Prompt Post-Call Wrap-up tracker for user edits if desired
     _wrapUpCall = initialCallRecord;
 
+    if (recordingResult.localFilePath != null && recordingResult.localFilePath!.isNotEmpty) {
+      unawaited(_uploadBackgroundRecording(initialCallRecord));
+    }
+
     notifyListeners();
   }
 
   void dismissWrapUp() {
     _wrapUpCall = null;
+    notifyListeners();
+  }
+
+  void setWrapUpRecordingPath(String newPath) {
+    if (_wrapUpCall == null) return;
+    _wrapUpCall = _wrapUpCall!.copyWith(recordingPath: newPath);
     notifyListeners();
   }
 
@@ -383,14 +591,29 @@ class DialerViewModel extends ChangeNotifier {
   }) async {
     if (_wrapUpCall == null) return;
 
+    var targetRecordingPath = _wrapUpCall!.recordingPath;
+    String? hostedUrl;
+
+    // If local recording exists, upload it directly so live feed gets the real audio URL immediately
+    if (targetRecordingPath != null &&
+        targetRecordingPath.isNotEmpty &&
+        !targetRecordingPath.startsWith('http')) {
+      try {
+        hostedUrl = await _callRepository.uploadRecording(_wrapUpCall!.id, targetRecordingPath);
+        if (hostedUrl != null && hostedUrl.isNotEmpty) {
+          targetRecordingPath = hostedUrl;
+        }
+      } catch (_) {}
+    }
+
     final completedCall = _wrapUpCall!.copyWith(
       outcome: outcome,
       notes: notes,
       sentiment: sentiment,
       dealValue: dealValue,
       crmType: crmType,
-      recordingPath: _wrapUpCall!.recordingPath,
-      crmSyncStatus: CrmSyncStatus.pending,
+      recordingPath: targetRecordingPath,
+      crmSyncStatus: hostedUrl != null ? CrmSyncStatus.synced : CrmSyncStatus.pending,
     );
 
     await _callRepository.addCall(completedCall);
@@ -409,6 +632,8 @@ class DialerViewModel extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     _sub?.cancel();
+    _nativeSub?.cancel();
+    _nativeCallSensor.dispose();
     _audioRecorderService.dispose();
     super.dispose();
   }

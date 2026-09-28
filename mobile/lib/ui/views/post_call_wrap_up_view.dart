@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/call_record.dart';
+import '../../data/services/local_recording_service.dart';
 import '../view_models/dialer_view_model.dart';
 
 class PostCallWrapUpView extends StatefulWidget {
@@ -13,12 +14,33 @@ class PostCallWrapUpView extends StatefulWidget {
 
 class _PostCallWrapUpViewState extends State<PostCallWrapUpView> {
   String _selectedOutcome = 'Demo Completed - Contract Requested';
-  final _notesController = TextEditingController(
-    text: 'Client validated RingVia360 mobile dialer. Confirmed 50 seats pilot.',
-  );
-  final _dealValueController = TextEditingController(text: '48000');
-  SentimentScore _selectedSentiment = SentimentScore.positive;
+  final _notesController = TextEditingController();
+  final _dealValueController = TextEditingController(text: '0');
+  SentimentScore _selectedSentiment = SentimentScore.neutral;
   final String _selectedCrm = 'RingVia360';
+  String? _initializedCallId;
+
+  /// Populate fields from the wrapUpCall once per unique call ID — avoid overwriting user edits on rebuild.
+  void _maybeInit(CallRecord call) {
+    if (_initializedCallId == call.id) return;
+    _initializedCallId = call.id;
+    _notesController.text = call.notes.isNotEmpty ? call.notes : '';
+    _dealValueController.text = call.dealValue > 0
+        ? call.dealValue.toStringAsFixed(0)
+        : '0';
+    _selectedSentiment = call.sentiment;
+    const validOutcomes = [
+      'Demo Completed - Contract Requested',
+      'Follow-up Scheduled',
+      'Gatekeeper Blocked',
+      'Left Voicemail',
+    ];
+    if (validOutcomes.contains(call.outcome)) {
+      _selectedOutcome = call.outcome;
+    } else {
+      _selectedOutcome = 'Demo Completed - Contract Requested';
+    }
+  }
 
   @override
   void dispose() {
@@ -31,57 +53,106 @@ class _PostCallWrapUpViewState extends State<PostCallWrapUpView> {
   Widget build(BuildContext context) {
     final viewModel = context.watch<DialerViewModel>();
     final wrapUpCall = viewModel.wrapUpCall;
-    if (wrapUpCall == null) return const SizedBox.shrink();
+    if (wrapUpCall == null) {
+      _initializedCallId = null;
+      return const SizedBox.shrink();
+    }
 
+    // Pre-fill form the first time the overlay appears for this call
+    _maybeInit(wrapUpCall);
+
+    final isBackgroundCall = wrapUpCall.id.startsWith('native-call-');
     final mins = wrapUpCall.durationSeconds ~/ 60;
     final secs = wrapUpCall.durationSeconds % 60;
+    final viewInsets = MediaQuery.of(context).viewInsets;
+    final screenHeight = MediaQuery.of(context).size.height;
+    final availableHeight = (screenHeight - viewInsets.bottom).clamp(320.0, screenHeight);
 
     return Material(
-      color: Colors.black.withOpacity(0.75),
-      child: Center(
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.92,
-          constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.85,
-          ),
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: AppColors.bgSurfaceElevated,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: AppColors.borderGlass),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.8),
-                blurRadius: 32,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+      color: Colors.black.withValues(alpha: 0.75),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: SafeArea(
+          child: AnimatedPadding(
+            padding: EdgeInsets.only(bottom: viewInsets.bottom > 0 ? viewInsets.bottom : 0),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutQuad,
+            child: Center(
+              child: GestureDetector(
+                onTap: () {}, // Prevent tap inside container from unfocusing
+                child: Container(
+                  width: MediaQuery.of(context).size.width * 0.92,
+                  constraints: BoxConstraints(
+                    maxHeight: availableHeight * 0.88,
+                  ),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: AppColors.bgSurfaceElevated,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: AppColors.borderGlass),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.8),
+                        blurRadius: 32,
+                        offset: const Offset(0, 12),
+                      ),
+                    ],
+                  ),
+                  child: SingleChildScrollView(
+                    keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                 // Top Header Badge
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppColors.primarySubtle,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.auto_awesome, size: 14, color: AppColors.primary),
-                          SizedBox(width: 4),
-                          Text(
-                            'Post-Call Wrap-up',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySubtle,
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        ],
-                      ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.auto_awesome, size: 14, color: AppColors.primary),
+                              SizedBox(width: 4),
+                              Text(
+                                'Post-Call Wrap-up',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Badge shown only for background-recorded calls
+                        if (isBackgroundCall) ...
+                          [
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1A2A1A),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.accentEmerald.withValues(alpha: 0.4)),
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.fiber_manual_record, size: 8, color: AppColors.accentEmerald),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'BG Recorded',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.accentEmerald),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                      ],
                     ),
                     IconButton(
                       icon: const Icon(Icons.close, color: AppColors.textDim, size: 20),
@@ -100,6 +171,75 @@ class _PostCallWrapUpViewState extends State<PostCallWrapUpView> {
                 Text(
                   '${wrapUpCall.company} • Duration: ${mins}m ${secs}s • Recorded & Encrypted',
                   style: const TextStyle(fontSize: 12, color: AppColors.textDim),
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: (wrapUpCall.recordingPath != null && wrapUpCall.recordingPath!.isNotEmpty)
+                        ? AppColors.accentEmerald.withValues(alpha: 0.1)
+                        : AppColors.accentAmber.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (wrapUpCall.recordingPath != null && wrapUpCall.recordingPath!.isNotEmpty)
+                          ? AppColors.accentEmerald.withValues(alpha: 0.25)
+                          : AppColors.accentAmber.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        (wrapUpCall.recordingPath != null && wrapUpCall.recordingPath!.isNotEmpty)
+                            ? Icons.mic
+                            : Icons.mic_none,
+                        size: 14,
+                        color: (wrapUpCall.recordingPath != null && wrapUpCall.recordingPath!.isNotEmpty)
+                            ? AppColors.accentEmerald
+                            : AppColors.accentAmber,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          (wrapUpCall.recordingPath != null && wrapUpCall.recordingPath!.isNotEmpty)
+                              ? wrapUpCall.recordingPath!.split('/').last
+                              : 'No auto-recording linked',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: (wrapUpCall.recordingPath != null && wrapUpCall.recordingPath!.isNotEmpty)
+                                ? AppColors.accentEmerald
+                                : AppColors.accentAmber,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      GestureDetector(
+                        onTap: () async {
+                          final service = context.read<LocalRecordingService>();
+                          final picked = await service.pickAndImportAudio();
+                          if (picked != null) {
+                            viewModel.setWrapUpRecordingPath(picked.filePath);
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.bgSurfaceElevated,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: AppColors.borderSubtle),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.folder_open, size: 12, color: AppColors.primary),
+                              SizedBox(width: 4),
+                              Text('Select Audio', style: TextStyle(fontSize: 10, color: AppColors.primary, fontWeight: FontWeight.w700)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
 
                 const Divider(height: 28, color: AppColors.borderSubtle),
@@ -264,7 +404,7 @@ class _PostCallWrapUpViewState extends State<PostCallWrapUpView> {
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.primary.withOpacity(0.4),
+                          color: AppColors.primary.withValues(alpha: 0.4),
                           blurRadius: 16,
                           offset: const Offset(0, 4),
                         ),
@@ -287,7 +427,11 @@ class _PostCallWrapUpViewState extends State<PostCallWrapUpView> {
                     ),
                   ),
                 ),
-              ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -317,7 +461,7 @@ class _SentimentPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isSelected ? color.withOpacity(0.2) : AppColors.bgSurface,
+            color: isSelected ? color.withValues(alpha: 0.2) : AppColors.bgSurface,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: isSelected ? color : AppColors.borderSubtle,

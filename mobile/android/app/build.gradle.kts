@@ -42,3 +42,8 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Required for NotificationCompat in CallRecordingService
+    implementation("androidx.core:core-ktx:1.13.1")
+}

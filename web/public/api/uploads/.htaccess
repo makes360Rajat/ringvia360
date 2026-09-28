@@ -1,0 +1,22 @@
+<IfModule mod_mime.c>
+    AddType audio/mp4 .m4a
+    AddType video/mp4 .mp4
+    AddType audio/mpeg .mp3
+    AddType audio/wav .wav
+    AddType audio/aac .aac
+    AddType audio/ogg .ogg
+    AddType audio/amr .amr
+    AddType audio/3gpp .3gp
+    AddType video/webm .webm
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header set Access-Control-Allow-Origin "*"
+    Header set Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+    Header set Accept-Ranges "bytes"
+</IfModule>
+
+# Disable gzip compression for audio/video media files so browsers can stream byte ranges properly
+<IfModule mod_deflate.c>
+    SetEnvIfNoCase Request_URI "\.(m4a|mp3|wav|aac|ogg|amr|mp4|3gp|webm)$" no-gzip dont-vary
+</IfModule>
