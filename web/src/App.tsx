@@ -13,6 +13,7 @@ import Security from './pages/Security';
 import Admin from './pages/Admin';
 import Login from './pages/Login';
 import SuperAdmin from './pages/SuperAdmin';
+import PhoneWhatsAppCall from './pages/PhoneWhatsAppCall';
 
 import './styles/design.css';
 import './App.css';
@@ -71,6 +72,9 @@ function MainLayout() {
           <Route path="/" element={<Home />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/activities" element={<Activities />} />
+          <Route path="/phoneWhtsAppCall" element={<PhoneWhatsAppCall />} />
+          <Route path="/phone-whatsapp-call" element={<PhoneWhatsAppCall />} />
+          <Route path="/phonewhtsappcall" element={<PhoneWhatsAppCall />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/crm-sync" element={<CrmSync />} />
           <Route path="/security" element={<Security />} />

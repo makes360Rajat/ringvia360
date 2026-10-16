@@ -15,7 +15,8 @@ import {
   Building,
   LogOut,
   LogIn,
-  User
+  User,
+  Smartphone
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 
@@ -144,6 +145,36 @@ export const Navbar: React.FC = () => {
               {activeCallsCount}
             </span>
           )}
+        </NavLink>
+
+        <NavLink
+          to="/phoneWhtsAppCall"
+          className={({ isActive }) => `btn-ghost ${isActive ? 'btn-primary' : ''}`}
+          style={({ isActive }) => ({
+            padding: '0.45rem 0.85rem',
+            borderRadius: 'var(--radius-md)',
+            color: isActive ? '#fff' : '#10b981',
+            background: isActive ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            fontWeight: 700
+          })}
+        >
+          <Smartphone size={16} />
+          <span>phoneWhtsAppCall</span>
+          <span style={{
+            background: '#10b981',
+            color: '#000',
+            fontSize: '0.6rem',
+            fontWeight: 900,
+            borderRadius: '999px',
+            padding: '0.05rem 0.35rem',
+            lineHeight: 1
+          }}>
+            LIVE
+          </span>
         </NavLink>
 
         <NavLink
