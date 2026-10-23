@@ -137,6 +137,12 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 ((now - start) / 1000).toInt()
             } else 0
 
+            val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+                title
+            } else {
+                ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
+            }
+
             return mapOf(
                 "type" to "whatsapp_call",
                 "uid" to "wacall_${sbn.postTime}_$contentHash",
@@ -146,7 +152,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "isWeb" to isWebCompanion,
                 "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else (if (isWebCompanion) "WhatsApp Web" else "WhatsApp")),
                 "name" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
-                "number" to (if (title.matches(Regex("^[+0-9\\s\\-()]+$"))) title else ""),
+                "number" to callNumber,
                 "direction" to direction,
                 "media" to (if (isVideo) "video" else "voice"),
                 "duration" to durationSeconds,
@@ -157,17 +163,22 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         } else {
             // WhatsApp Chat / SMS Message
             val groupName = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
+            val msgNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+                title
+            } else {
+                ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
+            }
             return mapOf(
                 "type" to "whatsapp_message",
                 "uid" to "wamsg_${sbn.postTime}_$contentHash",
-                "kind" to "sms",
+                "kind" to "whatsapp_message",
                 "packageName" to packageName,
                 "isBusiness" to isWhatsAppBusiness,
                 "isWeb" to isWebCompanion,
                 "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else (if (isWebCompanion) "WhatsApp Web" else "WhatsApp")),
                 "sender" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
                 "name" to title,
-                "number" to (if (title.matches(Regex("^[+0-9\\s\\-()]+$"))) title else ""),
+                "number" to msgNumber,
                 "groupName" to (groupName ?: ""),
                 "text" to text,
                 "direction" to "incoming",
@@ -199,6 +210,12 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             val isWhatsAppBusiness = packageName == "com.whatsapp.w4b"
             val callerHash = Math.abs(callerKey.hashCode())
 
+            val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+                title
+            } else {
+                ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
+            }
+
             val event = mapOf(
                 "type" to "whatsapp_call_completed",
                 "uid" to "wacall_done_${startTime}_$callerHash",
@@ -207,7 +224,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "isBusiness" to isWhatsAppBusiness,
                 "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else "WhatsApp"),
                 "name" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
-                "number" to (if (title.matches(Regex("^[+0-9\\s\\-()]+$"))) title else ""),
+                "number" to callNumber,
                 "direction" to "incoming",
                 "media" to "voice",
                 "duration" to durationSec,

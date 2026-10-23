@@ -92,4 +92,32 @@ object ContactLookupHelper {
         } catch (_: Exception) {}
         return map
     }
+
+    fun resolvePhoneNumberByName(context: Context, name: String?): String? {
+        if (name.isNullOrEmpty()) return null
+        try {
+            val projection = arrayOf(
+                ContactsContract.CommonDataKinds.Phone.NUMBER,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME
+            )
+            val selection = "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} = ?"
+            val selectionArgs = arrayOf(name.trim())
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                    if (numIdx != -1) {
+                        val num = cursor.getString(numIdx)
+                        if (!num.isNullOrEmpty()) return num
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return null
+    }
 }

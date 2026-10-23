@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/theme/sales_track_theme.dart';
+import '../../services/sales_track_api_service.dart';
 import '../../services/telemetry_sync_service.dart';
 
 class PairingScreen extends StatefulWidget {
@@ -19,7 +20,8 @@ class PairingScreen extends StatefulWidget {
 }
 
 class _PairingScreenState extends State<PairingScreen> {
-  final TextEditingController _urlController = TextEditingController(text: 'https://crm.make360.in');
+  final TextEditingController _urlController = TextEditingController(text: SalesTrackApiService.defaultServerUrl);
+  final TextEditingController _apiPathController = TextEditingController(text: SalesTrackApiService.defaultApiPath);
   final TextEditingController _codeController = TextEditingController();
 
   bool _isPinging = false;
@@ -29,8 +31,22 @@ class _PairingScreenState extends State<PairingScreen> {
   String _errorMessage = '';
 
   @override
+  void initState() {
+    super.initState();
+    final currentUrl = widget.syncService.api.serverUrl;
+    if (currentUrl.isNotEmpty) {
+      _urlController.text = currentUrl;
+    }
+    _apiPathController.text = widget.syncService.api.apiPath;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _pingServer();
+    });
+  }
+
+  @override
   void dispose() {
     _urlController.dispose();
+    _apiPathController.dispose();
     _codeController.dispose();
     super.dispose();
   }
@@ -46,7 +62,10 @@ class _PairingScreenState extends State<PairingScreen> {
       _errorMessage = '';
     });
 
-    final res = await widget.syncService.api.ping(url);
+    final res = await widget.syncService.api.ping(
+      url,
+      apiPath: _apiPathController.text,
+    );
     if (mounted) {
       setState(() {
         _isPinging = false;
@@ -63,10 +82,12 @@ class _PairingScreenState extends State<PairingScreen> {
 
   Future<void> _pairDevice() async {
     final url = _urlController.text.trim();
-    final code = _codeController.text.trim();
+    final apiPath = _apiPathController.text.trim();
+    final rawCode = _codeController.text.trim();
+    final code = rawCode.replaceAll(RegExp(r'[\s-]+'), '');
 
-    if (url.isEmpty || code.isEmpty) {
-      setState(() => _errorMessage = 'Please enter both CRM Server URL and 6-digit code');
+    if (url.isEmpty || apiPath.isEmpty || code.isEmpty) {
+      setState(() => _errorMessage = 'Please enter the CRM address, API path, and pairing code');
       return;
     }
 
@@ -75,14 +96,28 @@ class _PairingScreenState extends State<PairingScreen> {
       _errorMessage = '';
     });
 
-    final res = await widget.syncService.pairWithCode(serverUrl: url, code: code);
+    try {
+      final res = await widget.syncService.pairWithCode(
+        serverUrl: url,
+        apiPath: apiPath,
+        code: code,
+      );
 
-    if (mounted) {
-      setState(() => _isPairing = false);
-      if (res.success) {
-        widget.onPaired();
-      } else {
-        setState(() => _errorMessage = res.message ?? 'Pairing failed. Please check the code.');
+      if (mounted) {
+        setState(() => _isPairing = false);
+        if (res.success) {
+          widget.onPaired();
+        } else {
+          setState(() => _errorMessage = res.message ?? 'Pairing failed. Please check the code.');
+        }
+      }
+    } catch (e) {
+      // Whatever happens, the button comes back and says why.
+      if (mounted) {
+        setState(() {
+          _isPairing = false;
+          _errorMessage = 'Pairing could not finish: $e';
+        });
       }
     }
   }
@@ -90,15 +125,20 @@ class _PairingScreenState extends State<PairingScreen> {
   void _parseQrPayload(String text) {
     try {
       final json = jsonDecode(text.trim()) as Map<String, dynamic>;
-      if (json['url'] != null) {
+      // The QR's API address is split into the two editable fields.
+      if (json['api'] != null && json['api'].toString().isNotEmpty) {
+        final apiUrl = json['api'].toString();
+        _urlController.text = SalesTrackApiService.serverUrlFromApiUrl(apiUrl);
+        _apiPathController.text = SalesTrackApiService.apiPathFromApiUrl(apiUrl);
+      } else if (json['url'] != null) {
         _urlController.text = json['url'].toString();
       }
       if (json['code'] != null) {
-        _codeController.text = json['code'].toString();
+        _codeController.text = json['code'].toString().replaceAll(RegExp(r'[\s-]+'), '');
       }
       _pingServer();
     } catch (_) {
-      _codeController.text = text.trim();
+      _codeController.text = text.trim().replaceAll(RegExp(r'[\s-]+'), '');
     }
   }
 
@@ -179,9 +219,9 @@ class _PairingScreenState extends State<PairingScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Server URL field
+                      // Customer-specific CRM host.
                       const Text(
-                        'CRM Server Address',
+                        'CRM Domain / Base URL',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: SalesTrackTheme.textSecondary),
                       ),
                       const SizedBox(height: 8),
@@ -222,6 +262,22 @@ class _PairingScreenState extends State<PairingScreen> {
                           ],
                         ),
                       ],
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: _apiPathController,
+                        keyboardType: TextInputType.url,
+                        enabled: !_isPairing,
+                        decoration: const InputDecoration(
+                          labelText: 'Sales Track API Path',
+                          hintText: '/mks_sales_track/api/v1',
+                          prefixIcon: Icon(Icons.account_tree_rounded, color: SalesTrackTheme.textMuted),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Usually unchanged. Edit only if your CRM administrator uses a custom module path.',
+                        style: TextStyle(fontSize: 11, color: SalesTrackTheme.textMuted, height: 1.35),
+                      ),
                       const SizedBox(height: 18),
 
                       // Pairing Code

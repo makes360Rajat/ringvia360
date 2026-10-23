@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/sales_track_theme.dart';
+import '../../models/sales_track_models.dart';
 import '../../services/app_lock_service.dart';
 import '../../services/telemetry_sync_service.dart';
 import 'outcome_modal.dart';
@@ -26,6 +27,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String _searchQuery = '';
   String? _expandedCallUid;
   String? _selectedContactFilter;
+  String _waFilter = 'all';
 
   @override
   void initState() {
@@ -744,7 +746,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (c.number.toLowerCase().contains(q)) return true;
       if (qNorm.isNotEmpty && numNorm.endsWith(qNorm.length >= 10 ? qNorm.substring(qNorm.length - 10) : qNorm)) return true;
       return false;
-    }).toList();
+    }).toList()..sort((a, b) => b.time.compareTo(a.time));
 
     // Determine if viewing a specific contact
     final bool isSingleContact = activeFilter.isNotEmpty && filtered.isNotEmpty &&
@@ -1393,6 +1395,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       );
     }
 
+    final allEvents = service.whatsappEvents;
+    final messageCount = allEvents.where((e) => e.kind == 'whatsapp_message').length;
+    final callCount = allEvents.where((e) => e.kind == 'whatsapp_call').length;
+
+    final filteredList = allEvents.where((ev) {
+      if (_waFilter == 'messages') return ev.kind == 'whatsapp_message';
+      if (_waFilter == 'calls') return ev.kind == 'whatsapp_call';
+      return true;
+    }).toList()..sort((a, b) => b.time.compareTo(a.time));
+
     return Column(
       children: [
         if (!service.hasWhatsAppAccessPermission)
@@ -1456,7 +1468,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'whatsapp_call'),
+                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'whatsapp'),
                 icon: const Icon(Icons.refresh_rounded, size: 15),
                 label: const Text('Resync All', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
@@ -1512,21 +1524,95 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ),
 
+        // Filter chips: All, Messages, Calls
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Row(
+            children: [
+              FilterChip(
+                label: Text('All (${service.whatsappEvents.length})'),
+                selected: _waFilter == 'all',
+                onSelected: (_) => setState(() => _waFilter = 'all'),
+                selectedColor: SalesTrackTheme.whatsappGreen.withOpacity(0.25),
+                checkmarkColor: SalesTrackTheme.whatsappGreen,
+                labelStyle: TextStyle(
+                  fontSize: 11,
+                  fontWeight: _waFilter == 'all' ? FontWeight.bold : FontWeight.normal,
+                  color: _waFilter == 'all' ? SalesTrackTheme.whatsappGreen : SalesTrackTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              FilterChip(
+                label: Text('WhatsApp Messages ($messageCount)'),
+                selected: _waFilter == 'messages',
+                onSelected: (_) => setState(() => _waFilter = 'messages'),
+                selectedColor: SalesTrackTheme.whatsappGreen.withOpacity(0.25),
+                checkmarkColor: SalesTrackTheme.whatsappGreen,
+                labelStyle: TextStyle(
+                  fontSize: 11,
+                  fontWeight: _waFilter == 'messages' ? FontWeight.bold : FontWeight.normal,
+                  color: _waFilter == 'messages' ? SalesTrackTheme.whatsappGreen : SalesTrackTheme.textSecondary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              FilterChip(
+                label: Text('WhatsApp Calls ($callCount)'),
+                selected: _waFilter == 'calls',
+                onSelected: (_) => setState(() => _waFilter = 'calls'),
+                selectedColor: SalesTrackTheme.whatsappGreen.withOpacity(0.25),
+                checkmarkColor: SalesTrackTheme.whatsappGreen,
+                labelStyle: TextStyle(
+                  fontSize: 11,
+                  fontWeight: _waFilter == 'calls' ? FontWeight.bold : FontWeight.normal,
+                  color: _waFilter == 'calls' ? SalesTrackTheme.whatsappGreen : SalesTrackTheme.textSecondary,
+                ),
+              ),
+            ],
+          ),
+        ),
+
         Expanded(
-          child: RefreshIndicator(
-            color: SalesTrackTheme.whatsappGreen,
-            backgroundColor: SalesTrackTheme.cardBackground,
-            onRefresh: () async {
-              await service.syncActiveWhatsAppNotifications();
-              await service.syncWhatsAppOnly();
-            },
-            child: ListView.builder(
-              padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
-              itemCount: service.whatsappEvents.length,
-              itemBuilder: (ctx, idx) {
-                final ev = service.whatsappEvents[idx];
-                final isBusiness = ev.app == 'com.whatsapp.w4b';
-                final isCall = ev.kind == 'whatsapp_call';
+          child: filteredList.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _waFilter == 'messages'
+                            ? Icons.chat_bubble_outline_rounded
+                            : _waFilter == 'calls'
+                                ? Icons.phone_missed_rounded
+                                : Icons.chat_rounded,
+                        size: 44,
+                        color: SalesTrackTheme.textMuted,
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _waFilter == 'messages'
+                            ? 'No WhatsApp Messages recorded'
+                            : _waFilter == 'calls'
+                                ? 'No WhatsApp Calls recorded'
+                                : 'No WhatsApp Activity recorded',
+                        style: const TextStyle(fontSize: 14, color: SalesTrackTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                )
+              : RefreshIndicator(
+              color: SalesTrackTheme.whatsappGreen,
+              backgroundColor: SalesTrackTheme.cardBackground,
+              onRefresh: () async {
+                await service.syncActiveWhatsAppNotifications();
+                await service.syncWhatsAppOnly();
+              },
+              child: ListView.builder(
+                padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
+                itemCount: filteredList.length,
+                itemBuilder: (ctx, idx) {
+                  final ev = filteredList[idx];
+                  final isBusiness = ev.app == 'com.whatsapp.w4b';
+                  final isCall = ev.kind == 'whatsapp_call';
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -1637,6 +1723,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       );
     }
 
+    final sortedSms = List<SalesTrackEvent>.from(service.smsList)
+      ..sort((a, b) => b.time.compareTo(a.time));
+
     return Column(
       children: [
         // SMS Sync Actions Bar
@@ -1726,9 +1815,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             },
             child: ListView.builder(
               padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
-              itemCount: service.smsList.length,
+              itemCount: sortedSms.length,
               itemBuilder: (ctx, idx) {
-                final sms = service.smsList[idx];
+                final sms = sortedSms[idx];
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
@@ -1812,6 +1901,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         onAction: () => service.scanLocalRecordings(),
       );
     }
+
+    final sortedRecs = List<Map<String, dynamic>>.from(service.localRecordings)
+      ..sort((a, b) {
+        final tA = (a['lastModified'] as num?)?.toInt() ?? 0;
+        final tB = (b['lastModified'] as num?)?.toInt() ?? 0;
+        return tB.compareTo(tA);
+      });
 
     return Column(
       children: [
@@ -1946,9 +2042,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             },
             child: ListView.builder(
               padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
-              itemCount: service.localRecordings.length,
+              itemCount: sortedRecs.length,
               itemBuilder: (ctx, idx) {
-                final rec = service.localRecordings[idx];
+                final rec = sortedRecs[idx];
                 final path = rec['filePath']?.toString() ?? '';
                 final name = rec['fileName']?.toString() ?? 'Call Recording';
                 final isCurrent = service.activeAudioPath == path;

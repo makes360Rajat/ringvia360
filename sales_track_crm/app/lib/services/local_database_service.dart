@@ -154,8 +154,14 @@ class LocalDatabaseService {
     final whereArgs = <dynamic>[];
 
     if (kind != null && kind.isNotEmpty) {
-      whereClauses.add('kind = ?');
-      whereArgs.add(kind);
+      if (kind == 'whatsapp') {
+        whereClauses.add("kind IN ('whatsapp_call', 'whatsapp_message')");
+      } else if (kind == 'sms') {
+        whereClauses.add("kind IN ('sms', 'notification')");
+      } else {
+        whereClauses.add('kind = ?');
+        whereArgs.add(kind);
+      }
     }
     if (syncStatus != null && syncStatus.isNotEmpty) {
       whereClauses.add('sync_status = ?');
@@ -185,7 +191,9 @@ class LocalDatabaseService {
 
     if (kind != null && kind.isNotEmpty) {
       if (kind == 'sms') {
-        query += " AND kind IN ('sms', 'whatsapp_message', 'notification')";
+        query += " AND kind IN ('sms', 'notification')";
+      } else if (kind == 'whatsapp') {
+        query += " AND kind IN ('whatsapp_call', 'whatsapp_message')";
       } else {
         query += " AND kind = ?";
         args.add(kind);
@@ -277,8 +285,10 @@ class LocalDatabaseService {
 
     if (kind != null && kind.isNotEmpty) {
       final kindClause = (kind == 'sms')
-          ? "kind IN ('sms', 'whatsapp_message', 'notification')"
-          : "kind = '$kind'";
+          ? "kind IN ('sms', 'notification')"
+          : (kind == 'whatsapp')
+              ? "kind IN ('whatsapp_call', 'whatsapp_message')"
+              : "kind = '$kind'";
       await db.rawUpdate('''
         UPDATE events 
         SET sync_status = 'pending',
@@ -320,11 +330,11 @@ class LocalDatabaseService {
     )) ?? 0;
 
     final pendingWhatsApp = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM events WHERE kind = 'whatsapp_call' AND sync_status != 'synced'",
+      "SELECT COUNT(*) FROM events WHERE kind IN ('whatsapp_call', 'whatsapp_message') AND sync_status != 'synced'",
     )) ?? 0;
 
     final pendingSms = Sqflite.firstIntValue(await db.rawQuery(
-      "SELECT COUNT(*) FROM events WHERE kind IN ('sms', 'whatsapp_message', 'notification') AND sync_status != 'synced'",
+      "SELECT COUNT(*) FROM events WHERE kind IN ('sms', 'notification') AND sync_status != 'synced'",
     )) ?? 0;
 
     final pendingRecs = Sqflite.firstIntValue(await db.rawQuery(
@@ -396,27 +406,21 @@ class LocalDatabaseService {
             updates['recording'] = 1;
           }
 
-          // Canonical UID preference: call-$id- over call_
-          if (removeUid.startsWith(RegExp(r'^call-\d+-')) && !keepUid.startsWith(RegExp(r'^call-\d+-'))) {
-            updates['uid'] = removeUid;
-          }
+          // Delete duplicate record first to maintain database integrity
+          await db.delete('events', where: 'uid = ?', whereArgs: [removeUid]);
 
           if (updates.isNotEmpty) {
             await db.update('events', updates, where: 'uid = ?', whereArgs: [keepUid]);
           }
-          await db.delete('events', where: 'uid = ?', whereArgs: [removeUid]);
           removed++;
         }
       }
 
-      // 2. Remove duplicate SMS & messages where another record exists with same direction, number, and time within 60s
+      // 2. Remove duplicate SMS & messages where another record exists with same kind, direction, number, and time within 60s
       final duplicateSms = await db.rawQuery('''
         SELECT e2.uid as remove_uid, e1.uid as keep_uid, e2.sync_status as sync2, e2.text as text2, e1.text as text1
         FROM events e1
-        INNER JOIN events e2 ON (
-            e1.kind = e2.kind OR
-            (e1.kind IN ('sms', 'whatsapp_message', 'notification') AND e2.kind IN ('sms', 'whatsapp_message', 'notification'))
-          )
+        INNER JOIN events e2 ON e1.kind = e2.kind
           AND e1.direction = e2.direction
           AND (
             e1.number = e2.number
@@ -426,6 +430,7 @@ class LocalDatabaseService {
                   SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e2.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10)
             )
           )
+          AND (e1.text IS NULL OR e2.text IS NULL OR e1.text = '' OR e2.text = '' OR e1.text = e2.text)
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
           AND ABS(e1.time - e2.time) <= 60000
@@ -446,15 +451,11 @@ class LocalDatabaseService {
             updates['text'] = text2;
           }
 
-          // Canonical UID preference: sms-$id- over sms_
-          if (removeUid.startsWith(RegExp(r'^sms-\d+-')) && !keepUid.startsWith(RegExp(r'^sms-\d+-'))) {
-            updates['uid'] = removeUid;
-          }
+          await db.delete('events', where: 'uid = ?', whereArgs: [removeUid]);
 
           if (updates.isNotEmpty) {
             await db.update('events', updates, where: 'uid = ?', whereArgs: [keepUid]);
           }
-          await db.delete('events', where: 'uid = ?', whereArgs: [removeUid]);
           removed++;
         }
       }
