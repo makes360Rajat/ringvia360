@@ -889,6 +889,7 @@ class MainActivity : FlutterActivity() {
 
                     // Fast O(1) in-memory contact resolution
                     val digits = number.replace(Regex("[^0-9]"), "")
+                    val key = if (digits.length >= 10) digits.takeLast(10) else number
                     val resolvedName = contactsMap[key] ?: contactsMap[number]
                         ?: if (cachedName.isNotEmpty() && cachedName != number && !cachedName.equals("unknown", ignoreCase = true) && !cachedName.equals("unknown caller", ignoreCase = true)) cachedName
                         else ""

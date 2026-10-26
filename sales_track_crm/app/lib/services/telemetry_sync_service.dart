@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sales_track_models.dart';
 import 'sales_track_api_service.dart';
 import 'local_database_service.dart';
+import '../main.dart';
 
 class TelemetrySyncService extends ChangeNotifier {
   static const MethodChannel _platform = MethodChannel('com.makes360.salestrack/platform');
@@ -280,7 +281,7 @@ class TelemetrySyncService extends ChangeNotifier {
         'manufacturer': 'Android',
         'model': 'Device',
         'os_version': '14',
-        'app_version': '1.8.5',
+        'app_version': '1.9.7',
       };
     }
 
@@ -358,9 +359,16 @@ class TelemetrySyncService extends ChangeNotifier {
   /// The CRM revoked or deleted this phone (or it was paired again on
   /// another phone): stop all syncing, forget the pairing and everything
   /// waiting to be sent, and go back to the pairing screen for a new code.
+  /// Only the CRM's own answer that this phone is no longer paired unpairs it
+  /// (revoked, deleted, paired again elsewhere). The app's local "not paired
+  /// yet", a feature switched off in the CRM (403), an inactive staff account
+  /// or a network error never does.
+  static bool _isPairingLost(SalesTrackApiResponse res) =>
+      res.statusCode == 401 && const {'device_revoked', 'invalid_token', 'device_mismatch'}.contains(res.error);
+
   Future<void> _handlePairingLost(String reason) async {
     if (!_isPaired) return;
-    _pairingLostMessage = reason == 'device_revoked'
+    _pairingLostMessage = (reason == 'device_revoked' || reason == 'staff_inactive')
         ? 'This phone was revoked in the CRM. Ask your administrator for a new pairing code.'
         : 'This phone is no longer registered in the CRM (deleted, or paired again elsewhere). Ask your administrator for a new pairing code.';
     _pendingQueue.clear();
@@ -376,6 +384,9 @@ class TelemetrySyncService extends ChangeNotifier {
       await _persistQueue();
     } catch (_) {}
     await unpair();
+    try {
+      rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    } catch (_) {}
     _statusMessage = _pairingLostMessage!;
     notifyListeners();
   }
@@ -385,6 +396,7 @@ class TelemetrySyncService extends ChangeNotifier {
     _device = null;
     _staff = null;
     _heartbeatTimer?.cancel();
+    _quickCheckTimer?.cancel();
     _periodicSyncTimer?.cancel();
     await api.clearCredentials();
     final prefs = await SharedPreferences.getInstance();
@@ -1259,6 +1271,10 @@ class TelemetrySyncService extends ChangeNotifier {
           _statusMessage = 'Synced $completedEvents items to CRM...';
           notifyListeners();
         } else {
+          if (_isPairingLost(res)) {
+            await _handlePairingLost(res.error ?? 'device_revoked');
+            return;
+          }
           serverSyncError = res.message ?? res.error ?? 'Server rejected sync';
           _statusMessage = 'Server: $serverSyncError (saved locally in SQLite)';
           keepSyncing = false;
@@ -1481,8 +1497,41 @@ class TelemetrySyncService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Timer? _periodicSyncTimer;
 
+  // A quick check with the CRM every minute while the app is on screen, so a
+  // phone revoked or deleted in the CRM unpairs within a minute.
+  Timer? _quickCheckTimer;
+  bool _foreground = true;
+
+  /// The home screen says when the app comes to the screen or leaves it.
+  void setForeground(bool value) {
+    _foreground = value;
+    if (value && _isPaired) {
+      sendHeartbeat();
+    }
+  }
+
   void _startHeartbeatLoop() {
     _heartbeatTimer?.cancel();
+    _quickCheckTimer?.cancel();
+
+    // The first heartbeat goes now, not after the first interval: the CRM
+    // shows this phone's health within seconds of pairing or opening the app.
+    Future.microtask(() async {
+      try {
+        await sendHeartbeat();
+      } catch (e) {
+        debugPrint('First heartbeat failed: $e');
+      }
+    });
+
+    _quickCheckTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      if (!_isPaired || !_foreground) return;
+      try {
+        // Light: the last known health, no new reads on the phone. A 401
+        // (revoked, deleted) unpairs through the API client's watch.
+        await api.sendHeartbeat(health: _buildHealthPayload());
+      } catch (_) {}
+    });
     _periodicSyncTimer?.cancel();
     final intervalMinutes = _config.syncMinutes > 0 ? _config.syncMinutes : 15;
     _heartbeatTimer = Timer.periodic(Duration(minutes: intervalMinutes), (_) async {
@@ -1493,8 +1542,8 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     });
 
-    // Background sync checker every 45 seconds: flushes pending queue and automatically senses new calls/SMS/WhatsApp
-    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 45), (_) async {
+    // Background sync checker: flushes pending queue, senses new calls, and continuously verifies CRM pairing status every 30s
+    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (_isPaired && !_isSyncing) {
         await refreshPendingCounts();
         if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
@@ -1511,6 +1560,9 @@ class TelemetrySyncService extends ChangeNotifier {
           await refreshPendingCounts();
           if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
             await syncNow();
+          } else {
+            // Heartbeat check: validates CRM connection and detects immediate device revocation or deletion
+            await sendHeartbeat();
           }
         }
       }
@@ -1550,7 +1602,7 @@ class TelemetrySyncService extends ChangeNotifier {
 
     final res = await api.sendHeartbeat(
       health: health,
-      appVersion: _deviceInfo['app_version']?.toString() ?? '1.9.2',
+      appVersion: _deviceInfo['app_version']?.toString() ?? '1.9.7',
       osVersion: _deviceInfo['os_version']?.toString() ?? '14',
       manufacturer: _deviceInfo['manufacturer']?.toString(),
       model: _deviceInfo['model']?.toString(),
@@ -1570,6 +1622,8 @@ class TelemetrySyncService extends ChangeNotifier {
         }
       }
       notifyListeners();
+    } else if (_isPairingLost(res)) {
+      await _handlePairingLost(res.error ?? 'device_revoked');
     }
   }
 
@@ -1630,6 +1684,8 @@ class TelemetrySyncService extends ChangeNotifier {
       _callLists.clear();
       _callLists.addAll(res.data!);
       notifyListeners();
+    } else if (_isPairingLost(res)) {
+      await _handlePairingLost(res.error ?? 'device_revoked');
     }
   }
 
@@ -1916,6 +1972,7 @@ class TelemetrySyncService extends ChangeNotifier {
   void dispose() {
     _eventSubscription?.cancel();
     _heartbeatTimer?.cancel();
+    _quickCheckTimer?.cancel();
     _audioPollTimer?.cancel();
     super.dispose();
   }

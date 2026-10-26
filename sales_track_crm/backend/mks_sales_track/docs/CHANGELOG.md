@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.7
+
+- Real-Time Device Revocation & Unpairing: Immediate detection of device revocation or deletion on the CRM; app promptly terminates pairing, clears session caches, and returns to the pairing screen with an alert banner.
+- Periodic Sync & Active Health Heartbeat: Reduced background sync interval to 30s with active heartbeat validation and health reporting to ensure device status is always up-to-date on the CRM.
+- Mobile Call Card UI Refinement: Unsaved phone calls strictly render "Un Saved" title on line 1, phone number on line 2, timestamp on line 3, and direction/duration on line 4 with clean green REC badge.
+- Migration `197_version_197.php` and schema revision 18 added for seamless in-place upgrade.
+
 ## 1.9.2
 
 - Pairing is by 6-digit code only: removed QR code display from device view and pairing response.

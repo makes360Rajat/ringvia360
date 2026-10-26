@@ -5,7 +5,7 @@ defined('BASEPATH') or exit('No direct script access allowed');
 /*
 Module Name: Sales Track
 Description: Mobile call tracking for sales teams on company phones: calls and their recordings, WhatsApp calls and SMS, sent in by the Sales Track app through a token secured API, matched to leads, customers and staff, with devices paired by a 6-digit code. Everything is reached from one Sales Track menu item and controlled from its own Settings page. No core file is modified.
-Version: 1.9.2
+Version: 1.9.7
 Requires at least: 3.0.0
 Author: Makes360
 Author URI: https://makes360.com
@@ -18,7 +18,7 @@ define('MKS_SALES_TRACK_MODULE_NAME', 'mks_sales_track');
  * number, this constant the ?v= cache buster. tooling/gates.php fails the
  * release when they differ.
  */
-define('MKS_SALES_TRACK_VERSION', '1.9.2');
+define('MKS_SALES_TRACK_VERSION', '1.9.7');
 
 /**
  * Bumped whenever the installer learns something new, so it re-runs on the next
@@ -39,8 +39,9 @@ define('MKS_SALES_TRACK_VERSION', '1.9.2');
  * 15: resilient direct-db pairing store synchronization, fallback expiration guard, and safe non-destructive pairing redemption.
  * 16: client sync reliability and unsaved contact identification standardization.
  * 17: numeric pairing code input, 3/4-tier call card UI, and contact title fallback harmonization.
+ * 18: immediate device revocation and unpairing detection, session teardown, and 1.9.7 release.
  */
-define('MKS_SALES_TRACK_SCHEMA_REV', '17');
+define('MKS_SALES_TRACK_SCHEMA_REV', '18');
 
 /** Every setting lives in this one autoloaded JSON option. */
 define('MKS_SALES_TRACK_OPTION', 'mks_sales_track_settings');

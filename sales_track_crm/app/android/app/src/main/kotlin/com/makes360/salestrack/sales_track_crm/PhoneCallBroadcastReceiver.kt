@@ -126,6 +126,7 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
 
                         val latestCallInfo = fetchLatestCallLogRecord(context, activeNum)
                         val finalPhone = latestCallInfo?.get("phoneNumber") as? String ?: (if (activeNum.isNotEmpty()) activeNum else "Unknown Caller")
+                        val savedContactName = ContactLookupHelper.resolveContactName(context, finalPhone)
                         val finalName = if (!savedContactName.isNullOrEmpty()) {
                             savedContactName
                         } else {

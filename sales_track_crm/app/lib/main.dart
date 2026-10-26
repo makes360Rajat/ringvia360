@@ -23,6 +23,8 @@ void main() async {
   runApp(const SalesTrackApp());
 }
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 class SalesTrackApp extends StatelessWidget {
   const SalesTrackApp({super.key});
 
@@ -33,6 +35,7 @@ class SalesTrackApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => TelemetrySyncService()),
       ],
       child: MaterialApp(
+        navigatorKey: rootNavigatorKey,
         title: 'Sales Track CRM',
         debugShowCheckedModeBanner: false,
         theme: SalesTrackTheme.themeData,

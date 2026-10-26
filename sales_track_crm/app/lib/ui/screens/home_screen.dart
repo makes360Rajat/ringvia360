@@ -64,8 +64,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (state == AppLifecycleState.resumed) {
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
-      // Ask the CRM at once: a phone revoked meanwhile unpairs right away.
-      widget.syncService.sendHeartbeat();
+      // Ask the CRM at once (a phone revoked meanwhile unpairs right away),
+      // then every minute while the app stays on screen.
+      widget.syncService.setForeground(true);
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
+      widget.syncService.setForeground(false);
     }
   }
 
@@ -85,6 +88,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   void _onServiceChanged() {
     if (!mounted) return;
+    if (!widget.syncService.isPaired) {
+      widget.onUnpaired();
+      return;
+    }
     final afterCall = widget.syncService.activeAfterCallEvent;
     if (afterCall != null && !_hasPromptedOutcome) {
       _hasPromptedOutcome = true;

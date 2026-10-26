@@ -542,6 +542,18 @@ class Mks_sales_track_api extends App_Controller
         $device = mks_st_device_by_token($token);
 
         if (!$device) {
+            $claimed = isset($_SERVER['HTTP_X_SALES_TRACK_DEVICE']) ? trim((string) $_SERVER['HTTP_X_SALES_TRACK_DEVICE']) : '';
+            if ($claimed === '') {
+                $body    = $this->mks_body();
+                $claimed = isset($body['device_uid']) && is_scalar($body['device_uid']) ? trim((string) $body['device_uid']) : '';
+            }
+            if ($claimed !== '') {
+                $CI = &get_instance();
+                $revokedDevice = $CI->db->where('device_uid', $claimed)->limit(1)->get(mks_st_devices_table())->row_array();
+                if ($revokedDevice && $revokedDevice['status'] === 'revoked') {
+                    $this->mks_fail(401, 'device_revoked');
+                }
+            }
             $this->mks_fail(401, 'invalid_token');
         }
 

@@ -137,15 +137,19 @@ class SalesTrackApiService {
   /// paired again on another phone. The sync service unpairs.
   void Function(String reason)? onPairingLost;
 
+  // The CRM's only answers that mean this phone is no longer paired: revoked,
+  // deleted (its token is unknown) or paired again on another phone. A 403
+  // (a feature switched off, an inactive staff account) or any other error
+  // never unpairs the phone.
   static const Set<String> _pairingLostErrors = {'device_revoked', 'invalid_token', 'device_mismatch'};
 
   void _watchAuth(http.Response response) {
     if (response.statusCode != 401 || onPairingLost == null || _token == null || _token!.isEmpty) return;
     try {
       final body = jsonDecode(response.body);
-      final error = body is Map ? body['error']?.toString() : null;
-      if (error != null && _pairingLostErrors.contains(error)) {
-        onPairingLost!(error);
+      final err = body is Map ? body['error']?.toString() : null;
+      if (err != null && _pairingLostErrors.contains(err)) {
+        onPairingLost!(err);
       }
     } catch (_) {}
   }
@@ -319,7 +323,7 @@ class SalesTrackApiService {
       final endpoint = '$apiBaseUrl/config';
       final payload = <String, dynamic>{
         'health': health,
-        'app_version': appVersion ?? '1.9.2',
+        'app_version': appVersion ?? '1.9.7',
         'os_version': osVersion ?? '14',
       };
       if (_token != null && _token!.isNotEmpty) {
