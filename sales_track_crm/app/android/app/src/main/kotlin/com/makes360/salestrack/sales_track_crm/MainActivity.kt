@@ -4,9 +4,12 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.media.MediaPlayer
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -132,14 +135,43 @@ class MainActivity : FlutterActivity() {
                             pm?.isIgnoringBatteryOptimizations(packageName) ?: false
                         } else true
 
+                        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                        val networkType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val activeNet = cm?.activeNetwork
+                            val caps = cm?.getNetworkCapabilities(activeNet)
+                            when {
+                                caps == null -> "none"
+                                caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                                caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+                                else -> "wifi"
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            val info = cm?.activeNetworkInfo
+                            @Suppress("DEPRECATION")
+                            when {
+                                info == null || !info.isConnected -> "none"
+                                info.type == ConnectivityManager.TYPE_WIFI -> "wifi"
+                                info.type == ConnectivityManager.TYPE_MOBILE -> "mobile"
+                                else -> "wifi"
+                            }
+                        }
+
+                        val bFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                        val bIntent = registerReceiver(null, bFilter)
+                        val bStatus = bIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                        val isCharging = bStatus == BatteryManager.BATTERY_STATUS_CHARGING || bStatus == BatteryManager.BATTERY_STATUS_FULL
+
                         val info = mapOf(
                             "uid" to deviceUid,
                             "platform" to "android",
                             "manufacturer" to Build.MANUFACTURER,
                             "model" to Build.MODEL,
                             "os_version" to Build.VERSION.RELEASE,
-                            "app_version" to "1.0.0",
+                            "app_version" to "1.9.2",
                             "batteryPercent" to batteryLevel,
+                            "charging" to isCharging,
+                            "network" to networkType,
                             "batteryUnrestricted" to isBatteryUnrestricted,
                             "sims" to listOf(
                                 mapOf("slot" to 1, "label" to "Primary SIM"),
@@ -857,10 +889,9 @@ class MainActivity : FlutterActivity() {
 
                     // Fast O(1) in-memory contact resolution
                     val digits = number.replace(Regex("[^0-9]"), "")
-                    val key = if (digits.length >= 10) digits.takeLast(10) else number
                     val resolvedName = contactsMap[key] ?: contactsMap[number]
-                        ?: if (cachedName.isNotEmpty() && cachedName != number) cachedName
-                        else (if (number.isNotEmpty()) number else "Unknown Caller")
+                        ?: if (cachedName.isNotEmpty() && cachedName != number && !cachedName.equals("unknown", ignoreCase = true) && !cachedName.equals("unknown caller", ignoreCase = true)) cachedName
+                        else ""
 
                     val dateIso = isoFormat.format(Date(dateMs))
 

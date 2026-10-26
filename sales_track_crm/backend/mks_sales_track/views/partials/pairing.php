@@ -3,14 +3,15 @@
 defined('BASEPATH') or exit('No direct script access allowed');
 
 /**
- * MKS Sales Track - the pairing panel: QR code, the 6-digit code, its expiry
+ * MKS Sales Track - the pairing panel: the 6-digit code, its expiry
  * and the wait for the phone. Shared by the Add Device window and the device
  * page; the script fills it and polls until the phone pairs.
  */
 ?>
 <div class="mks-sales-track-pairing">
-    <div class="mks-sales-track-qr mks-sales-track-pairing-qr"></div>
-    <p class="mks-sales-track-pair-or"><?= e(_l('mks_st_pair_or_type')); ?></p>
+    <p class="mks-sales-track-pair-instruction" style="font-size: 14px; color: var(--mks-st-ink-2); margin-bottom: 12px; font-weight: 500;">
+        <i class="fa-solid fa-mobile-screen" aria-hidden="true" style="margin-right: 6px; color: var(--mks-st-accent);"></i><?= e(_l('mks_st_pairing_code_instruction', 'Enter this 6-digit pairing code in your mobile app:')); ?>
+    </p>
     <div class="mks-sales-track-pair-code mks-sales-track-pairing-code"></div>
     <p class="mks-sales-track-pair-meta">
         <span class="mks-sales-track-pairing-site"></span>

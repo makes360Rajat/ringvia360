@@ -5,7 +5,7 @@ defined('BASEPATH') or exit('No direct script access allowed');
 /*
 Module Name: Sales Track
 Description: Mobile call tracking for sales teams on company phones: calls and their recordings, WhatsApp calls and SMS, sent in by the Sales Track app through a token secured API, matched to leads, customers and staff, with devices paired by a 6-digit code. Everything is reached from one Sales Track menu item and controlled from its own Settings page. No core file is modified.
-Version: 1.8.2
+Version: 1.9.2
 Requires at least: 3.0.0
 Author: Makes360
 Author URI: https://makes360.com
@@ -18,7 +18,7 @@ define('MKS_SALES_TRACK_MODULE_NAME', 'mks_sales_track');
  * number, this constant the ?v= cache buster. tooling/gates.php fails the
  * release when they differ.
  */
-define('MKS_SALES_TRACK_VERSION', '1.8.2');
+define('MKS_SALES_TRACK_VERSION', '1.9.2');
 
 /**
  * Bumped whenever the installer learns something new, so it re-runs on the next
@@ -34,8 +34,13 @@ define('MKS_SALES_TRACK_VERSION', '1.8.2');
  * 10: intelligent 120s call deduplication, recording auto-linking and multi-device match.
  * 11: full multi-kind intra-batch and natural window deduplication for calls, SMS, WhatsApp and notifications.
  * 12: comprehensive number-agnostic duplicate purge and clock-sync alignment for calls, SMS and WhatsApp.
+ * 13: comprehensive fetch and save/update API with events endpoint and enhanced field updates.
+ * 14: precise Android CallLog ID-based and direction-aware call deduplication so distinct historical and sequential calls are fully preserved.
+ * 15: resilient direct-db pairing store synchronization, fallback expiration guard, and safe non-destructive pairing redemption.
+ * 16: client sync reliability and unsaved contact identification standardization.
+ * 17: numeric pairing code input, 3/4-tier call card UI, and contact title fallback harmonization.
  */
-define('MKS_SALES_TRACK_SCHEMA_REV', '12');
+define('MKS_SALES_TRACK_SCHEMA_REV', '17');
 
 /** Every setting lives in this one autoloaded JSON option. */
 define('MKS_SALES_TRACK_OPTION', 'mks_sales_track_settings');
@@ -672,18 +677,34 @@ function mks_st_clean_number_list($text)
  */
 function mks_st_option_put($name, $value, $autoload = 1)
 {
-    if (!function_exists('option_exists') || !option_exists($name)) {
-        add_option($name, $value, $autoload ? 1 : 0);
+    $CI = &get_instance();
+    $table = db_prefix() . 'options';
+    $data  = ['value' => $value, 'autoload' => $autoload ? 1 : 0];
 
-        return;
+    // Direct DB check - never trust the in-memory cache for existence.
+    $exists = $CI->db->select('name')->where('name', $name)->get($table)->row();
+
+    if ($exists) {
+        $CI->db->where('name', $name)->update($table, $data);
+    } else {
+        $data['name'] = $name;
+        $CI->db->insert($table, $data);
+
+        // Guard against a race: if insert failed (duplicate), fall back to update.
+        if ($CI->db->affected_rows() === 0) {
+            unset($data['name']);
+            $CI->db->where('name', $name)->update($table, $data);
+        }
     }
 
-    $CI = &get_instance();
-    $CI->db->where('name', $name);
-    $CI->db->update(db_prefix() . 'options', [
-        'value'    => $value,
-        'autoload' => $autoload ? 1 : 0,
-    ]);
+    // Keep every Perfex cache layer consistent.
+    if (isset($CI->app_object_cache) && is_object($CI->app_object_cache)) {
+        $CI->app_object_cache->set('option-' . $name, $value);
+    }
+
+    if (isset($CI->app) && isset($CI->app->options) && is_array($CI->app->options)) {
+        $CI->app->options[$name] = $value;
+    }
 }
 
 /*

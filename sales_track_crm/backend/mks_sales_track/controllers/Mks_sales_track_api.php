@@ -60,6 +60,7 @@ class Mks_sales_track_api extends App_Controller
             'pair'      => ['methods' => ['POST'], 'handler' => 'mks_pair'],
             'config'    => ['methods' => ['GET', 'POST'], 'handler' => 'mks_config'],
             'sync'      => ['methods' => ['POST'], 'handler' => 'mks_sync'],
+            'events'    => ['methods' => ['GET', 'POST'], 'handler' => 'mks_events'],
             'recording' => ['methods' => ['POST'], 'handler' => 'mks_recording'],
             'outcome'   => ['methods' => ['POST'], 'handler' => 'mks_outcome'],
             'lists'     => ['methods' => ['GET', 'POST'], 'handler' => 'mks_lists'],
@@ -358,6 +359,11 @@ class Mks_sales_track_api extends App_Controller
             $this->mks_fail(500, 'store_failed');
         }
 
+        if (isset($body['health']) && is_array($body['health'])) {
+            mks_st_device_health_check($this->mksDevice, mks_st_clean_health($body['health']));
+            mks_st_device_report($this->mksDevice['id'], $body);
+        }
+
         mks_st_device_log_sync($this->mksDevice['id'], $result, $this->mksDevice);
 
         $config = mks_st_device_config($this->mksDevice);
@@ -365,6 +371,70 @@ class Mks_sales_track_api extends App_Controller
         $this->mks_send(200, array_merge(['success' => true], $result, [
             'config_version' => $config['version'],
         ]));
+    }
+
+    /**
+     * Fetch synced events or save events via POST.
+     *
+     * @return void
+     */
+    private function mks_events()
+    {
+        $this->mks_auth();
+        $this->mks_require_current_app();
+
+        if ($this->input->method() === 'post') {
+            $this->mks_sync();
+            return;
+        }
+
+        $kind   = $this->input->get_post('kind');
+        $limit  = min(500, max(1, (int) $this->input->get_post('limit') ?: 100));
+        $page   = max(1, (int) $this->input->get_post('page') ?: 1);
+        $offset = ($page - 1) * $limit;
+        $since  = $this->input->get_post('since');
+
+        $table   = mks_st_events_table();
+        $staffId = (int) $this->mksDevice['staff_id'];
+
+        $this->db->from($table)->where('staff_id', $staffId);
+
+        if (!empty($kind)) {
+            if ($kind === 'whatsapp') {
+                $this->db->where_in('kind', ['whatsapp_call', 'whatsapp_message']);
+            } elseif ($kind === 'sms') {
+                $this->db->where_in('kind', ['sms', 'notification']);
+            } else {
+                $this->db->where('kind', $kind);
+            }
+        }
+
+        if (!empty($since)) {
+            $sinceDate = is_numeric($since) ? date('Y-m-d H:i:s', (int) floor($since > 100000000000 ? $since / 1000 : $since)) : $since;
+            $this->db->where('occurred_at >=', $sinceDate);
+        }
+
+        $total = $this->db->count_all_results('', false);
+
+        $events = $this->db->order_by('occurred_at', 'desc')
+            ->limit($limit, $offset)
+            ->get()
+            ->result_array();
+
+        $formatted = [];
+        foreach ($events as $ev) {
+            $ev['time'] = (int) (strtotime($ev['occurred_at']) * 1000);
+            $formatted[] = $ev;
+        }
+
+        $this->mks_send(200, [
+            'success' => true,
+            'page'    => $page,
+            'pages'   => max(1, (int) ceil($total / $limit)),
+            'limit'   => $limit,
+            'total'   => $total,
+            'events'  => $formatted,
+        ]);
     }
 
     /**

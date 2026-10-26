@@ -20,8 +20,7 @@ class PairingScreen extends StatefulWidget {
 }
 
 class _PairingScreenState extends State<PairingScreen> {
-  final TextEditingController _urlController = TextEditingController(text: SalesTrackApiService.defaultServerUrl);
-  final TextEditingController _apiPathController = TextEditingController(text: SalesTrackApiService.defaultApiPath);
+  final TextEditingController _urlController = TextEditingController(text: 'https://crm.make360.in/mks_sales_track/api/v1/');
   final TextEditingController _codeController = TextEditingController();
 
   bool _isPinging = false;
@@ -33,11 +32,11 @@ class _PairingScreenState extends State<PairingScreen> {
   @override
   void initState() {
     super.initState();
+    // Arriving here because the CRM revoked or deleted this phone: say so.
     final currentUrl = widget.syncService.api.serverUrl;
     if (currentUrl.isNotEmpty) {
-      _urlController.text = currentUrl;
+      _urlController.text = SalesTrackApiService.normalizeServerUrl(currentUrl);
     }
-    _apiPathController.text = widget.syncService.api.apiPath;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _pingServer();
     });
@@ -46,7 +45,6 @@ class _PairingScreenState extends State<PairingScreen> {
   @override
   void dispose() {
     _urlController.dispose();
-    _apiPathController.dispose();
     _codeController.dispose();
     super.dispose();
   }
@@ -62,10 +60,7 @@ class _PairingScreenState extends State<PairingScreen> {
       _errorMessage = '';
     });
 
-    final res = await widget.syncService.api.ping(
-      url,
-      apiPath: _apiPathController.text,
-    );
+    final res = await widget.syncService.api.ping(url);
     if (mounted) {
       setState(() {
         _isPinging = false;
@@ -82,12 +77,16 @@ class _PairingScreenState extends State<PairingScreen> {
 
   Future<void> _pairDevice() async {
     final url = _urlController.text.trim();
-    final apiPath = _apiPathController.text.trim();
     final rawCode = _codeController.text.trim();
     final code = rawCode.replaceAll(RegExp(r'[\s-]+'), '');
 
-    if (url.isEmpty || apiPath.isEmpty || code.isEmpty) {
-      setState(() => _errorMessage = 'Please enter the CRM address, API path, and pairing code');
+    if (url.isEmpty || code.isEmpty) {
+      setState(() => _errorMessage = 'Please enter both CRM Server URL and pairing code');
+      return;
+    }
+
+    if (code.length < 6) {
+      setState(() => _errorMessage = 'The pairing code must be 6 digits. Check the code in your CRM.');
       return;
     }
 
@@ -97,11 +96,7 @@ class _PairingScreenState extends State<PairingScreen> {
     });
 
     try {
-      final res = await widget.syncService.pairWithCode(
-        serverUrl: url,
-        apiPath: apiPath,
-        code: code,
-      );
+      final res = await widget.syncService.pairWithCode(serverUrl: url, code: code);
 
       if (mounted) {
         setState(() => _isPairing = false);
@@ -125,11 +120,10 @@ class _PairingScreenState extends State<PairingScreen> {
   void _parseQrPayload(String text) {
     try {
       final json = jsonDecode(text.trim()) as Map<String, dynamic>;
-      // The QR's API address is split into the two editable fields.
+      // The CRM's QR carries the exact API address ("api"); it is right even
+      // for a CRM in a folder or behind index.php, so it wins over "url".
       if (json['api'] != null && json['api'].toString().isNotEmpty) {
-        final apiUrl = json['api'].toString();
-        _urlController.text = SalesTrackApiService.serverUrlFromApiUrl(apiUrl);
-        _apiPathController.text = SalesTrackApiService.apiPathFromApiUrl(apiUrl);
+        _urlController.text = json['api'].toString();
       } else if (json['url'] != null) {
         _urlController.text = json['url'].toString();
       }
@@ -206,6 +200,47 @@ class _PairingScreenState extends State<PairingScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 24),
+                // Where this phone stands: unpaired, and why when the CRM removed it.
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.45)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        margin: const EdgeInsets.only(top: 5),
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(color: Color(0xFFF59E0B), shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Status: Inactive (Unpaired)',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFFF59E0B)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              (widget.syncService.pairingLostMessage ?? '').isNotEmpty
+                                  ? widget.syncService.pairingLostMessage!
+                                  : 'This device is not paired with the CRM yet.',
+                              style: const TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 32),
 
                 // Card Container
@@ -219,9 +254,9 @@ class _PairingScreenState extends State<PairingScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Customer-specific CRM host.
+                      // Server URL field
                       const Text(
-                        'CRM Domain / Base URL',
+                        'CRM Server Address',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: SalesTrackTheme.textSecondary),
                       ),
                       const SizedBox(height: 8),
@@ -262,57 +297,51 @@ class _PairingScreenState extends State<PairingScreen> {
                           ],
                         ),
                       ],
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _apiPathController,
-                        keyboardType: TextInputType.url,
-                        enabled: !_isPairing,
-                        decoration: const InputDecoration(
-                          labelText: 'Sales Track API Path',
-                          hintText: '/mks_sales_track/api/v1',
-                          prefixIcon: Icon(Icons.account_tree_rounded, color: SalesTrackTheme.textMuted),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      const Text(
-                        'Usually unchanged. Edit only if your CRM administrator uses a custom module path.',
-                        style: TextStyle(fontSize: 11, color: SalesTrackTheme.textMuted, height: 1.35),
-                      ),
                       const SizedBox(height: 18),
 
                       // Pairing Code
                       const Text(
-                        '6-Digit Pairing Code or QR Secret',
+                        '6-Digit Pairing Code',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: SalesTrackTheme.textSecondary),
                       ),
                       const SizedBox(height: 8),
                       TextField(
                         controller: _codeController,
-                        keyboardType: TextInputType.text,
-                        textCapitalization: TextCapitalization.characters,
+                        // Digits only, six at most: the code from the CRM.
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(6),
+                        ],
                         textAlign: TextAlign.center,
                         enabled: !_isPairing,
                         style: const TextStyle(
-                          fontSize: 22,
-                          letterSpacing: 4,
+                          fontSize: 26,
+                          letterSpacing: 10,
                           fontWeight: FontWeight.bold,
                           color: SalesTrackTheme.primaryLight,
                         ),
                         decoration: InputDecoration(
                           hintText: '000000',
                           hintStyle: TextStyle(
-                            fontSize: 22,
-                            letterSpacing: 4,
+                            fontSize: 26,
+                            letterSpacing: 10,
                             color: SalesTrackTheme.textMuted.withOpacity(0.5),
                           ),
-                          prefixIcon: const Icon(Icons.qr_code_rounded, color: SalesTrackTheme.textMuted),
+                          prefixIcon: const Icon(Icons.pin_rounded, color: SalesTrackTheme.textMuted),
                           suffixIcon: IconButton(
                             icon: const Icon(Icons.content_paste_rounded, color: SalesTrackTheme.textMuted),
-                            tooltip: 'Paste Code / QR Payload',
+                            tooltip: 'Paste Code',
                             onPressed: () async {
                               final clip = await Clipboard.getData('text/plain');
                               if (clip != null && clip.text != null) {
-                                _parseQrPayload(clip.text!);
+                                final text = clip.text!.trim();
+                                if (text.startsWith('{')) {
+                                  _parseQrPayload(text);
+                                } else {
+                                  final digits = text.replaceAll(RegExp(r'\D'), '');
+                                  _codeController.text = digits.length > 6 ? digits.substring(0, 6) : digits;
+                                }
                               }
                             },
                           ),
@@ -320,7 +349,7 @@ class _PairingScreenState extends State<PairingScreen> {
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Obtain this code from your Perfex CRM under Sales Track > Devices > Add Device.',
+                        'Enter the 6-digit code from CRM under Sales Track > Devices > Add Device.',
                         style: TextStyle(fontSize: 12, color: SalesTrackTheme.textMuted),
                       ),
 

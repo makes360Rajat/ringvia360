@@ -241,8 +241,8 @@ $staffId = isset($m[1]) ? (int) $m[1] : 0;
 $added = admin_post('admin/mks_sales_track/device_save', ['name' => 'E2E Phone ' . $run, 'description' => 'end to end test', 'staff_id' => $staffId]);
 $device = isset($added['json']['id']) ? (int) $added['json']['id'] : 0;
 
-check($device > 0 && preg_match('/^\d{3} \d{3}$/', (string) $added['json']['code']) && strpos((string) $added['json']['qr'], 'data:image/svg+xml') === 0,
-    'Add Device creates a device waiting for its phone, with a 6-digit code and QR', substr($added['body'], 0, 200));
+check($device > 0 && preg_match('/^\d{3} \d{3}$/', (string) $added['json']['code']) && (string) $added['json']['qr'] === '',
+    'Add Device creates a device waiting for its phone, with a 6-digit code and no QR', substr($added['body'], 0, 200));
 
 $page = http('GET', $base . 'admin/mks_sales_track/device/' . $device);
 check(strpos($page['body'], 'data-code="' . $added['json']['code'] . '"') !== false, 'The device page shows its live code again');

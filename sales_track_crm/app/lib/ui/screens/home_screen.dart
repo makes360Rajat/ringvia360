@@ -64,6 +64,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (state == AppLifecycleState.resumed) {
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
+      // Ask the CRM at once: a phone revoked meanwhile unpairs right away.
+      widget.syncService.sendHeartbeat();
     }
   }
 
@@ -145,26 +147,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return '$hour:$min $ampm';
   }
 
-  String _formatCallSubtitle(dynamic call) {
-    String directionStr = 'Outgoing call';
-    if (call.direction == 'incoming') {
-      directionStr = 'Incoming call';
-    } else if (call.direction == 'missed') {
-      directionStr = 'Missed call';
-    } else if (call.direction == 'rejected') {
-      directionStr = 'Rejected call';
-    } else if (call.direction == 'blocked') {
-      directionStr = 'Blocked call';
-    }
-
-    if (call.duration <= 0) {
-      return directionStr;
-    }
-
-    final m = call.duration ~/ 60;
-    final s = call.duration % 60;
-    return '$directionStr, $m mins $s secs';
-  }
 
   String _formatExactDateTime(int ms) {
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
@@ -174,6 +156,32 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final min = d.minute.toString().padLeft(2, '0');
     final sec = d.second.toString().padLeft(2, '0');
     return '${d.day} ${months[d.month - 1]} ${d.year}, $hour:$min:$sec $ampm';
+  }
+
+  bool _isSavedContact(String? rawName, String? rawNumber) {
+    final name = (rawName ?? '').trim();
+    final number = (rawNumber ?? '').trim();
+    if (name.isEmpty) return false;
+    final lower = name.toLowerCase();
+    if (lower == 'unknown' ||
+        lower == 'unknown caller' ||
+        lower == 'unsaved' ||
+        lower == 'un saved' ||
+        lower == 'private number' ||
+        lower == 'no caller id') {
+      return false;
+    }
+    // If name matches the phone number (or digits only matching the number)
+    final nameDigits = name.replaceAll(RegExp(r'\D'), '');
+    final numDigits = number.replaceAll(RegExp(r'\D'), '');
+    if (name == number || (nameDigits.isNotEmpty && nameDigits == numDigits)) {
+      return false;
+    }
+    // If name contains no letters at all (only digits, spaces, plus, hyphens, etc.)
+    if (!RegExp(r'[a-zA-Z]').hasMatch(name)) {
+      return false;
+    }
+    return true;
   }
 
   void _promptPinForSensitiveAction(VoidCallback onAuthorized) {
@@ -310,6 +318,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Scanning phone storage for call audio recordings...')),
                 );
+              } else if (val == 'resync_all_history') {
+                service.forceResyncAll();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Re-syncing all historical calls & SMS to CRM...')),
+                );
               } else if (val == 'scan_history') {
                 service.syncAllLocalAndRemote();
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -340,6 +353,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     Icon(Icons.mic_rounded, color: SalesTrackTheme.primaryLight, size: 20),
                     SizedBox(width: 10),
                     Text('Scan Phone Audio Recordings', style: TextStyle(color: SalesTrackTheme.textPrimary)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'resync_all_history',
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_upload_rounded, color: SalesTrackTheme.primaryLight, size: 20),
+                    SizedBox(width: 10),
+                    Text('Upload All History to CRM', style: TextStyle(color: SalesTrackTheme.textPrimary)),
                   ],
                 ),
               ),
@@ -742,7 +765,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final q = activeFilter.toLowerCase();
       final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
       final qNorm = q.replaceAll(RegExp(r'\D'), '');
-      if (c.name.isNotEmpty && c.name.toLowerCase().contains(q)) return true;
+      final bool isSaved = _isSavedContact(c.name, c.number);
+      final String displayName = isSaved ? c.name : 'Un Saved';
+      if (displayName.toLowerCase().contains(q)) return true;
       if (c.number.toLowerCase().contains(q)) return true;
       if (qNorm.isNotEmpty && numNorm.endsWith(qNorm.length >= 10 ? qNorm.substring(qNorm.length - 10) : qNorm)) return true;
       return false;
@@ -755,7 +780,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ? filtered.first.number.replaceAll(RegExp(r'\D'), '').substring(filtered.first.number.replaceAll(RegExp(r'\D'), '').length - 10)
                 : filtered.first.number)));
 
-    final contactName = filtered.isNotEmpty ? (filtered.first.name.isNotEmpty ? filtered.first.name : filtered.first.number) : '';
+    final contactName = filtered.isNotEmpty
+        ? (_isSavedContact(filtered.first.name, filtered.first.number)
+            ? filtered.first.name
+            : 'Un Saved')
+        : '';
     final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
 
     // Group filtered calls by date header (e.g. Wednesday, 7 October)
@@ -1014,12 +1043,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                   children: [
                                     for (int callIdx = 0; callIdx < callsInGroup.length; callIdx++) ...[
                                       if (callIdx > 0)
-                                        const Divider(
+                                        Divider(
                                           height: 1,
                                           thickness: 0.8,
-                                          indent: 56,
-                                          endIndent: 16,
-                                          color: SalesTrackTheme.surfaceColor,
+                                          indent: 72,
+                                          endIndent: 14,
+                                          color: SalesTrackTheme.surfaceColor.withOpacity(0.5),
                                         ),
                                       _buildCallItem(service, callsInGroup[callIdx], isSingleContact),
                                     ],
@@ -1074,106 +1103,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               }
             });
           },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                // Direction Arrow
-                Icon(icon, color: iconColor, size: 22),
-                const SizedBox(width: 14),
-
-                // Time & Subtitle
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            _formatDialerTime(call.time),
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: SalesTrackTheme.textPrimary,
-                            ),
-                          ),
-                          if (!isSingleContact && (call.name.isNotEmpty || call.number.isNotEmpty)) ...[
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '• ${call.name.isNotEmpty ? call.name : call.number}',
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  color: SalesTrackTheme.textSecondary,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _formatCallSubtitle(call),
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          color: SalesTrackTheme.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // Disabled Grey Mic Icon as Visual Identification (per user request)
-                if (hasRec)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 8),
-                    child: Icon(
-                      Icons.mic_none_rounded,
-                      color: SalesTrackTheme.textMuted,
-                      size: 20,
-                    ),
-                  ),
-
-                // Sync Status Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: call.syncStatus == 'synced'
-                        ? const Color(0xFF10B981).withOpacity(0.15)
-                        : const Color(0xFFF59E0B).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: call.syncStatus == 'synced'
-                          ? const Color(0xFF10B981).withOpacity(0.4)
-                          : const Color(0xFFF59E0B).withOpacity(0.4),
-                      width: 0.8,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        call.syncStatus == 'synced' ? Icons.check_circle_rounded : Icons.schedule_rounded,
-                        size: 10,
-                        color: call.syncStatus == 'synced' ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        call.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
-                        style: TextStyle(
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                          color: call.syncStatus == 'synced' ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
+          child: _callCardBody(call, icon, iconColor, hasRec),
         ),
 
         // Expanded Details & Audio Player with Seekbar (when clicked)
@@ -1275,6 +1205,179 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
       ],
     );
+  }
+
+  /// One call as a card: the name saved on the phone (or "Un Saved") with its
+  /// SIM, the number, when it happened, and which way with the talk time;
+  /// the synced and recording badges sit on the right.
+  Widget _callCardBody(dynamic call, IconData icon, Color iconColor, bool hasRec) {
+    final String rawName = (call.name?.toString() ?? '').trim();
+    final String number = (call.number?.toString() ?? '').trim();
+    final bool isSaved = _isSavedContact(rawName, number);
+    final String title = isSaved ? rawName : 'Un Saved';
+    final bool synced = call.syncStatus == 'synced';
+    final int sim = call.sim is int ? call.sim as int : 0;
+    final int seconds = call.duration is int ? call.duration as int : 0;
+    final String direction = call.direction == 'incoming'
+        ? 'Incoming call'
+        : call.direction == 'outgoing'
+            ? 'Outgoing call'
+            : call.direction == 'rejected'
+                ? 'Rejected call'
+                : call.direction == 'missed'
+                    ? 'Missed call'
+                    : 'Call';
+    const green = Color(0xFF10B981);
+    const amber = Color(0xFFF59E0B);
+
+    Widget badge(String text, IconData glyph, Color color) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: color.withOpacity(0.45), width: 0.9),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(glyph, size: 11, color: color),
+            const SizedBox(width: 4),
+            Text(text, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.4, color: color)),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: iconColor.withOpacity(0.12),
+              border: Border.all(color: iconColor.withOpacity(0.35)),
+            ),
+            child: Icon(icon, color: iconColor, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: SalesTrackTheme.textPrimary),
+                      ),
+                    ),
+                    if (sim > 0) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF263040),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                        child: Text(
+                          'SIM $sim',
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF8B9CB0),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (number.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(number, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, color: SalesTrackTheme.textSecondary)),
+                ],
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(Icons.access_time_rounded, size: 13, color: SalesTrackTheme.textSecondary),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        'Call at ${_formatDialerTime(call.time as int)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: SalesTrackTheme.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: direction, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: iconColor)),
+                      TextSpan(
+                        text: ' \u2022 ${seconds > 0 ? _talkTime(seconds) : (call.direction == 'outgoing' ? 'Not connected' : '0 secs')}',
+                        style: const TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              badge(synced ? 'SYNCED' : 'PENDING', synced ? Icons.check_circle_rounded : Icons.schedule_rounded, synced ? green : amber),
+              if (hasRec) ...[
+                const SizedBox(height: 6),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.mic_rounded, size: 13, color: green),
+                      const SizedBox(width: 3),
+                      Text(
+                        'REC',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                          color: green,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// "2 secs", "1 mins 13 secs", "1 hr 4 mins", as the call cards read.
+  String _talkTime(int seconds) {
+    if (seconds < 60) return '$seconds secs';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    if (h > 0) return '$h hr $m mins';
+    return s > 0 ? '$m mins $s secs' : '$m mins';
   }
 
   Widget _buildInlineAudioPlayer(TelemetrySyncService service, dynamic call) {
@@ -2270,7 +2373,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           size: 20,
         ),
         title: Text(
-          call.name.isNotEmpty ? call.name : call.number,
+          _isSavedContact(call.name, call.number) ? call.name : 'Un Saved',
           style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: SalesTrackTheme.textPrimary),
         ),
         subtitle: Text(

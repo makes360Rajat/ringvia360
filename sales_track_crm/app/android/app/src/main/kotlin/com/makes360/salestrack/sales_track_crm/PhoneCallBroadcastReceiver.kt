@@ -126,12 +126,11 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
 
                         val latestCallInfo = fetchLatestCallLogRecord(context, activeNum)
                         val finalPhone = latestCallInfo?.get("phoneNumber") as? String ?: (if (activeNum.isNotEmpty()) activeNum else "Unknown Caller")
-                        val savedContactName = ContactLookupHelper.resolveContactName(context, finalPhone)
                         val finalName = if (!savedContactName.isNullOrEmpty()) {
                             savedContactName
                         } else {
                             val logName = latestCallInfo?.get("contactName") as? String
-                            if (!logName.isNullOrEmpty() && logName != finalPhone) logName else finalPhone
+                            if (!logName.isNullOrEmpty() && logName != finalPhone && !logName.equals("unknown", ignoreCase = true) && !logName.equals("unknown caller", ignoreCase = true)) logName else ""
                         }
                         val finalDuration = (latestCallInfo?.get("duration") as? Int) ?: duration
                         val finalDirection = (latestCallInfo?.get("direction") as? String) ?: direction

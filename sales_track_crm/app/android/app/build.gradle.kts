@@ -1,12 +1,3 @@
-import java.util.Properties
-
-val keystoreProperties = Properties()
-val keystorePropertiesFile = rootProject.file("key.properties")
-
-if (keystorePropertiesFile.exists()) {
-    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
-}
-
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -41,25 +32,9 @@ android {
 
     buildTypes {
         release {
-            // A signed release is enabled after android/key.properties is
-            // filled with the private keystore credentials. Until then,
-            // Gradle produces an unsigned release rather than silently using
-            // the debug certificate.
-            val signingValues = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
-            val hasReleaseCredentials = keystorePropertiesFile.exists()
-                && signingValues.all {
-                    val value = keystoreProperties.getProperty(it)?.trim()
-                    !value.isNullOrEmpty() && !value.startsWith("CHANGE_ME")
-                }
-                && rootProject.file(keystoreProperties.getProperty("storeFile")).exists()
-            if (hasReleaseCredentials) {
-                signingConfig = signingConfigs.create("release") {
-                    keyAlias = keystoreProperties["keyAlias"] as String
-                    keyPassword = keystoreProperties["keyPassword"] as String
-                    storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
-                    storePassword = keystoreProperties["storePassword"] as String
-                }
-            }
+            // TODO: Add your own signing config for the release build.
+            // Signing with the debug keys for now, so `flutter run --release` works.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }

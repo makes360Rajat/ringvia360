@@ -44,7 +44,7 @@ $mks_fact = function ($label, $value) {
             <div class="mks-sales-track-head">
                 <div class="mks-sales-track-head-main">
                     <span class="mks-sales-track-head-icon mks-sales-track-head-icon-devices">
-                        <i class="<?= $mks_bound ? 'fa-brands ' . ($device['platform'] === 'ios' ? 'fa-apple' : 'fa-android') : 'fa-solid fa-qrcode'; ?>" aria-hidden="true"></i>
+                        <i class="<?= $mks_bound ? 'fa-brands ' . ($device['platform'] === 'ios' ? 'fa-apple' : 'fa-android') : 'fa-solid fa-hashtag'; ?>" aria-hidden="true"></i>
                     </span>
                     <div>
                         <h4 class="mks-sales-track-title">
@@ -61,12 +61,12 @@ $mks_fact = function ($label, $value) {
                     </button>
                     <?php if ($state !== 'revoked' && $can_pair) { ?>
                     <button type="button" class="btn btn-default mks-sales-track-btn mks-sales-track-device-code" data-bound="<?= $mks_bound ? '1' : '0'; ?>">
-                        <i class="fa-solid fa-qrcode" aria-hidden="true"></i><?= e(_l($mks_bound ? 'mks_st_regenerate_code' : 'mks_st_new_code')); ?>
+                        <i class="fa-solid fa-hashtag" aria-hidden="true"></i><?= e(_l($mks_bound ? 'mks_st_regenerate_code' : 'mks_st_new_code')); ?>
                     </button>
                     <?php } ?>
                     <?php if ($state === 'revoked' && $can_pair) { ?>
                     <button type="button" class="btn btn-default mks-sales-track-btn mks-sales-track-device-code" data-bound="0">
-                        <i class="fa-solid fa-qrcode" aria-hidden="true"></i><?= e(_l('mks_st_pair_again')); ?>
+                        <i class="fa-solid fa-hashtag" aria-hidden="true"></i><?= e(_l('mks_st_pair_again')); ?>
                     </button>
                     <?php } ?>
                     <?php if (in_array($device['status'], ['active', 'paused'], true)) { ?>

@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.9.2
+
+- Pairing is by 6-digit code only: removed QR code display from device view and pairing response.
+- Replaced pairing QR icons with hashtag icon across device views.
+- Updated language strings and end-to-end tests for 6-digit code pairing.
+- Migration 192_version_192.php added for seamless in-place upgrade.
+
+## 1.9.0
+
+- Mobile Client Dialing & Sync Optimization: Resolved background thread lock and zero-data state by optimizing native call query batching, ensuring immediate local dialing history import and display.
+- Call Card UI Redesign: Standardized mobile call cards into a modern 3/4-tier layout:
+  - Line 1: Contact Title (saved contact name or standardized "Un Saved" label) with SIM slot badge.
+  - Line 2: Phone / Contact Number.
+  - Line 3: Real-time call timestamp indicator ("Call at [formatted time]").
+  - Line 4: Direction and duration details ("[Direction] - Talk time: [seconds/duration]").
+  - Badges: Right-aligned SYNCED / PENDING status and REC recording indicator.
+- Layout Overflow Guard: Added horizontal flex constraints with ellipsis text handling to prevent RenderFlex edge overflow on narrow mobile screens.
+- Numeric Pairing Input: Enforced numeric keyboard, digit-only filtering, and 6-digit limit on mobile pairing screen to ensure rapid, error-free device connection.
+- Standardized Unsaved Contact Fallback: Mobile sync and CRM ingestion fallback to "Un Saved" when contact name is unavailable in device phonebook, preventing raw numbers from polluting contact name fields.
+- Migration `190_version_190.php` and schema revision 17 added for automatic Perfex CRM database and options synchronization.
+
+## 1.8.7
+
+- Resilient Direct-DB Pairing Store Synchronization: `mks_st_pairing_load()` queries `tbloptions` directly, bypassing LiteSpeed, OPcache, and Perfex CRM in-memory option caches to prevent newly issued pairing codes from being missed or read from stale snapshots.
+- Expiration Fallback Guard: Enforced minimum 5-minute to 1440-minute duration bounds (`default 60 minutes`) in `mks_st_pairing_create()`, completely eliminating zero-second instant expiration bugs.
+- Safe Non-Destructive Code Redemption: `mks_st_pairing_redeem()` only deletes pairing codes from storage upon a confirmed, successful valid match. Expired or mismatched attempts no longer prematurely erase valid codes, preventing subsequent submissions from failing with false "That pairing code is not valid".
+- Clock-Skew Tolerance & Reverse Traversal: Added a 5-minute grace tolerance (`$entry['expires'] >= (time() - 300)`) and newest-first code scan to seamlessly handle minor device-server clock variations.
+- Explicit Cache Invalidation: `mks_st_option_put()` synchronizes `$CI->app_object_cache` and `$CI->app->options` simultaneously.
+- Migration `187_version_187.php` and schema revision 15 added for automatic Perfex CRM database synchronization.
+
+## 1.8.5
+
+- Enhanced API Save & Update: when events arrive, all fields (`duration`, `direction`, `contact_name`, `body`, `number`, `media`, `sim_slot`, `rel_type`, `lead_id`, `contact_id`) are accurately saved or updated on existing and natural-deduplicated records.
+- Added `events` API endpoint (`GET/POST /mks_sales_track/api/v1/events`): supports fetching synced telemetry events with filtering (`kind`, `since`, `limit`, `page`), total count, and pagination, as well as POST ingestion.
+- Redesigned WhatsApp table view to match Calls tab column alignment: Type, Contact, Staff, Time, Duration, Phone, Activity / Message, Outcome, Options.
+- Added dedicated Voice Call and Video Call badges in the Activity column for WhatsApp calls with zero or empty message text.
+- Suppressed redundant WhatsApp badges in contact cells within the WhatsApp tab to ensure clean, compact 2-line rendering identical to the Calls tab.
+- Added `185_version_185.php` cumulative migration for seamless Perfex CRM in-place module upgrade.
+
+## 1.8.4
+
+- Added native support for full WhatsApp message sync and display (`whatsapp_message` telemetry kind).
+- Unified WhatsApp view to display both WhatsApp Calls and WhatsApp Messages with contact name, phone/source, and expandable message content.
+- Enabled auto-permission check for WhatsApp message tracking under both `track_whatsapp_calls` and `track_sms` CRM configurations.
+- Offline-first delta synchronization optimizations with single-click manual sync controls on mobile app.
+- Fixed MySQL duplicate key 'device_uid' exception during database upgrade by deleting duplicates before merging and preserving primary row UID.
+- Migration `184_version_184.php` added for in-place Perfex CRM module update.
+
+## 1.8.3
+
+- Enhanced telemetry sync compatibility with local dev server and cloud endpoints.
+- Added comprehensive call audio recording ingestion and streaming endpoint.
+- Updated schema migrations to v1.8.3.
+
 ## 1.8.2
 
 - Resolved duplicate call entries on CRM by introducing intelligent 120s fuzzy-window deduplication for calls and WhatsApp calls.
