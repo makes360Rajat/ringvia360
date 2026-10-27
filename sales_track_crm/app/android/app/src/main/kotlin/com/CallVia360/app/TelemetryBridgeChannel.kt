@@ -1,11 +1,11 @@
-package com.makes360.salestrack.sales_track_crm
+package com.CallVia360.app
 
 import android.os.Handler
 import android.os.Looper
 import io.flutter.plugin.common.EventChannel
 
 object TelemetryBridgeChannel {
-    const val CHANNEL_NAME = "com.makes360.salestrack/telemetry_stream"
+    const val CHANNEL_NAME = "com.CallVia360.app/telemetry_stream"
     private var eventSink: EventChannel.EventSink? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 

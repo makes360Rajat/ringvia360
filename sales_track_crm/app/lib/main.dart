@@ -9,17 +9,6 @@ import 'ui/screens/setup_wizard_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // Set immersive status bar styling
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: SalesTrackTheme.cardBackground,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
-
   runApp(const SalesTrackApp());
 }
 
@@ -33,13 +22,34 @@ class SalesTrackApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => TelemetrySyncService()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
-      child: MaterialApp(
-        navigatorKey: rootNavigatorKey,
-        title: 'Sales Track CRM',
-        debugShowCheckedModeBanner: false,
-        theme: SalesTrackTheme.themeData,
-        home: const AppRootRouter(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          final isDark = themeProvider.isDark(context);
+          
+          // Dynamically adjust status bar and navigation bar styling based on current brightness
+          SystemChrome.setSystemUIOverlayStyle(
+            SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+              systemNavigationBarColor: isDark 
+                  ? SalesTrackTheme.darkColors.cardBackground 
+                  : SalesTrackTheme.lightColors.cardBackground,
+              systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+            ),
+          );
+
+          return MaterialApp(
+            navigatorKey: rootNavigatorKey,
+            title: 'CallVia360',
+            debugShowCheckedModeBanner: false,
+            theme: SalesTrackTheme.lightTheme,
+            darkTheme: SalesTrackTheme.darkTheme,
+            themeMode: themeProvider.themeMode,
+            home: const AppRootRouter(),
+          );
+        },
       ),
     );
   }
@@ -58,12 +68,30 @@ class _AppRootRouterState extends State<AppRootRouter> {
   @override
   Widget build(BuildContext context) {
     final syncService = context.watch<TelemetrySyncService>();
+    final colors = context.stColors;
 
     if (!syncService.isInitialized) {
-      return const Scaffold(
-        backgroundColor: SalesTrackTheme.darkBackground,
+      return Scaffold(
+        backgroundColor: colors.background,
         body: Center(
-          child: CircularProgressIndicator(color: SalesTrackTheme.primaryLight),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(
+                color: colors.primary,
+                strokeWidth: 3,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Initializing CallVia360...',
+                style: TextStyle(
+                  color: colors.textSecondary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }

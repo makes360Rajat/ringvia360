@@ -41,21 +41,21 @@ class _OutcomeModalState extends State<OutcomeModal> {
     super.dispose();
   }
 
-  Color _getToneColor(String tone) {
+  Color _getToneColor(String tone, SalesTrackColors colors) {
     switch (tone.toLowerCase()) {
       case 'green':
-        return SalesTrackTheme.success;
+        return colors.success;
       case 'amber':
       case 'orange':
-        return SalesTrackTheme.warning;
+        return colors.warning;
       case 'violet':
       case 'purple':
-        return SalesTrackTheme.secondaryLight;
+        return colors.secondaryLight;
       case 'rose':
       case 'red':
-        return SalesTrackTheme.danger;
+        return colors.danger;
       default:
-        return SalesTrackTheme.surfaceLight;
+        return colors.textSecondary;
     }
   }
 
@@ -97,6 +97,8 @@ class _OutcomeModalState extends State<OutcomeModal> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.stColors;
+    final isDark = context.isDarkMode;
     final config = widget.syncService.config;
 
     return SafeArea(
@@ -106,180 +108,289 @@ class _OutcomeModalState extends State<OutcomeModal> {
           bottom: MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 20,
           left: 20,
           right: 20,
-          top: 20,
+          top: 12,
         ),
-      decoration: const BoxDecoration(
-        color: SalesTrackTheme.cardBackground,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: SalesTrackTheme.primary.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.call_end_rounded, color: SalesTrackTheme.primary, size: 24),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'After-Call Outcome',
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: SalesTrackTheme.textPrimary),
-                      ),
-                      Text(
-                        '${widget.event.name.isNotEmpty ? widget.event.name : widget.event.number} • ${widget.event.duration}s talk',
-                        style: const TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    widget.syncService.dismissAfterCallPopup();
-                    Navigator.of(context).pop();
-                  },
-                  icon: const Icon(Icons.close_rounded, color: SalesTrackTheme.textMuted),
-                )
-              ],
-            ),
-            const SizedBox(height: 18),
-
-            // Outcome Chips
-            const Text('Outcome', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: SalesTrackTheme.textSecondary)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: config.outcomesList.map((outcome) {
-                final isSelected = _selectedOutcomeKey == outcome.key;
-                final toneColor = _getToneColor(outcome.tone);
-                return ChoiceChip(
-                  label: Text(outcome.label),
-                  selected: isSelected,
-                  selectedColor: toneColor.withOpacity(0.25),
-                  backgroundColor: SalesTrackTheme.surfaceColor,
-                  labelStyle: TextStyle(
-                    color: isSelected ? toneColor : SalesTrackTheme.textPrimary,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                  ),
-                  side: BorderSide(color: isSelected ? toneColor : Colors.transparent),
-                  onSelected: (val) {
-                    if (val) {
-                      setState(() {
-                        _selectedOutcomeKey = outcome.key;
-                        if (outcome.followUp && _followUpDate == null) {
-                          _followUpDate = DateTime.now().add(const Duration(days: 1));
-                        }
-                      });
-                    }
-                  },
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 16),
-
-            // Note Input
-            TextField(
-              controller: _noteController,
-              maxLines: 2,
-              decoration: InputDecoration(
-                hintText: config.outcomesNoteRequired ? 'Call note (required)...' : 'Add a note about this call...',
-                prefixIcon: const Icon(Icons.notes_rounded, color: SalesTrackTheme.textMuted),
-              ),
-            ),
-            const SizedBox(height: 14),
-
-            // Follow-up Date Picker
-            if (_selectedOutcomeKey != null && config.outcomesList.firstWhere((o) => o.key == _selectedOutcomeKey, orElse: () => config.outcomesList.first).followUp) ...[
-              InkWell(
-                onTap: () async {
-                  final pickedDate = await showDatePicker(
-                    context: context,
-                    initialDate: _followUpDate ?? DateTime.now().add(const Duration(days: 1)),
-                    firstDate: DateTime.now(),
-                    lastDate: DateTime.now().add(const Duration(days: 365)),
-                  );
-                  if (pickedDate != null && context.mounted) {
-                    final pickedTime = await showTimePicker(
-                      context: context,
-                      initialTime: const TimeOfDay(hour: 10, minute: 0),
-                    );
-                    if (pickedTime != null && mounted) {
-                      setState(() {
-                        _followUpDate = DateTime(
-                          pickedDate.year,
-                          pickedDate.month,
-                          pickedDate.day,
-                          pickedTime.hour,
-                          pickedTime.minute,
-                        );
-                      });
-                    }
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: SalesTrackTheme.surfaceColor,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.event_rounded, color: SalesTrackTheme.primaryLight, size: 20),
-                      const SizedBox(width: 10),
-                      Text(
-                        _followUpDate != null
-                            ? 'Follow-up: ${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year} ${_followUpDate!.hour.toString().padLeft(2, '0')}:${_followUpDate!.minute.toString().padLeft(2, '0')}'
-                            : 'Set Follow-up reminder',
-                        style: const TextStyle(color: SalesTrackTheme.textPrimary, fontSize: 14),
-                      ),
-                      const Spacer(),
-                      const Icon(Icons.arrow_forward_ios_rounded, color: SalesTrackTheme.textMuted, size: 14),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-            ],
-
-            // Create Lead Input (for unknown callers)
-            if (config.outcomesCreateLead) ...[
-              TextField(
-                controller: _leadNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Create CRM Lead (Optional)',
-                  hintText: 'Lead or company name',
-                  prefixIcon: Icon(Icons.person_add_rounded, color: SalesTrackTheme.textMuted),
-                ),
-              ),
-              const SizedBox(height: 18),
-            ],
-
-            // Submit Button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _isSubmitting ? null : _submit,
-                child: _isSubmitting
-                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Save Outcome'),
-              ),
+        decoration: BoxDecoration(
+          color: colors.cardBackground,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border.all(color: colors.border),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(isDark ? 0.35 : 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, -4),
             ),
           ],
         ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag Handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: colors.border,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: colors.primary.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.call_end_rounded, color: colors.primary, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Log Call Outcome',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: colors.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${widget.event.name.isNotEmpty ? widget.event.name : widget.event.number} • ${widget.event.duration}s talk',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      widget.syncService.dismissAfterCallPopup();
+                      Navigator.of(context).pop();
+                    },
+                    icon: Icon(Icons.close_rounded, color: colors.textMuted),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+
+              // Outcome Chips
+              Text(
+                'SELECT OUTCOME',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: colors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: config.outcomesList.map((outcome) {
+                  final isSelected = _selectedOutcomeKey == outcome.key;
+                  final toneColor = _getToneColor(outcome.tone, colors);
+                  return ChoiceChip(
+                    label: Text(outcome.label),
+                    selected: isSelected,
+                    selectedColor: toneColor.withOpacity(0.18),
+                    backgroundColor: colors.surfaceColor,
+                    labelStyle: TextStyle(
+                      color: isSelected ? toneColor : colors.textPrimary,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 13,
+                    ),
+                    side: BorderSide(
+                      color: isSelected ? toneColor : colors.border,
+                      width: isSelected ? 1.5 : 1.0,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    onSelected: (val) {
+                      if (val) {
+                        setState(() {
+                          _selectedOutcomeKey = outcome.key;
+                          if (outcome.followUp && _followUpDate == null) {
+                            _followUpDate = DateTime.now().add(const Duration(days: 1));
+                          }
+                        });
+                      }
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+
+              // Note Input
+              Text(
+                'CALL NOTE ${config.outcomesNoteRequired ? "(REQUIRED)" : "(OPTIONAL)"}',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: colors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _noteController,
+                maxLines: 2,
+                style: TextStyle(color: colors.textPrimary, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: config.outcomesNoteRequired
+                      ? 'Enter mandatory summary of the discussion...'
+                      : 'Add summary notes from this call...',
+                  prefixIcon: Icon(Icons.notes_rounded, color: colors.textMuted),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // Follow-up Date Picker
+              if (_selectedOutcomeKey != null &&
+                  config.outcomesList
+                      .firstWhere((o) => o.key == _selectedOutcomeKey,
+                          orElse: () => config.outcomesList.first)
+                      .followUp) ...[
+                Text(
+                  'FOLLOW-UP SCHEDULE',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: colors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                InkWell(
+                  onTap: () async {
+                    final pickedDate = await showDatePicker(
+                      context: context,
+                      initialDate: _followUpDate ?? DateTime.now().add(const Duration(days: 1)),
+                      firstDate: DateTime.now(),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (pickedDate != null && context.mounted) {
+                      final pickedTime = await showTimePicker(
+                        context: context,
+                        initialTime: const TimeOfDay(hour: 10, minute: 0),
+                      );
+                      if (pickedTime != null && mounted) {
+                        setState(() {
+                          _followUpDate = DateTime(
+                            pickedDate.year,
+                            pickedDate.month,
+                            pickedDate.day,
+                            pickedTime.hour,
+                            pickedTime.minute,
+                          );
+                        });
+                      }
+                    }
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                    decoration: BoxDecoration(
+                      color: colors.surfaceColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.event_rounded, color: colors.primary, size: 20),
+                        const SizedBox(width: 10),
+                        Text(
+                          _followUpDate != null
+                              ? 'Follow-up: ${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year} ${_followUpDate!.hour.toString().padLeft(2, '0')}:${_followUpDate!.minute.toString().padLeft(2, '0')}'
+                              : 'Set Follow-up reminder date & time',
+                          style: TextStyle(
+                            color: _followUpDate != null ? colors.textPrimary : colors.textMuted,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const Spacer(),
+                        Icon(Icons.calendar_month_rounded, color: colors.textMuted, size: 18),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
+
+              // Create Lead Input (for unknown callers)
+              if (config.outcomesCreateLead) ...[
+                Text(
+                  'CREATE NEW CRM LEAD (OPTIONAL)',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: colors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _leadNameController,
+                  style: TextStyle(color: colors.textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Lead person or company name',
+                    prefixIcon: Icon(Icons.person_add_rounded, color: colors.textMuted),
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ],
+
+              // Submit Button
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _isSubmitting ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: _isSubmitting
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.check_rounded, size: 20),
+                            SizedBox(width: 8),
+                            Text(
+                              'Save Call Outcome',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 }

@@ -174,10 +174,10 @@ void main() {
       expect(notifJson['text'], equals('Your balance is low'));
     });
 
-    test('SalesTrackApiService uses configured make360 base URL and normalizes path correctly', () {
-      expect(SalesTrackApiService.defaultServerUrl, equals('https://crm.make360.in/mks_sales_track/api/v1/'));
-      final api = SalesTrackApiService();
-      expect(api.apiBaseUrl, equals('https://crm.make360.in/mks_sales_track/api/v1'));
+    test('SalesTrackApiService normalizes server URL correctly', () {
+      expect(SalesTrackApiService.defaultServerUrl, equals(''));
+      expect(SalesTrackApiService.normalizeServerUrl('crm.example.com'), equals('https://crm.example.com'));
+      expect(SalesTrackApiService.normalizeServerUrl('https://crm.example.com/admin/'), equals('https://crm.example.com'));
     });
   });
 }

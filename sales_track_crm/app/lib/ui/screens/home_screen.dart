@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../models/sales_track_models.dart';
 import '../../services/app_lock_service.dart';
@@ -20,7 +21,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   bool _hasPromptedOutcome = false;
   final TextEditingController _searchController = TextEditingController();
@@ -28,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   String? _expandedCallUid;
   String? _selectedContactFilter;
   String _waFilter = 'all';
+  String _callTypeFilter = 'all'; // 'all', 'incoming', 'outgoing', 'missed', 'recordings'
 
   @override
   void initState() {
@@ -64,8 +67,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (state == AppLifecycleState.resumed) {
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
-      // Ask the CRM at once (a phone revoked meanwhile unpairs right away),
-      // then every minute while the app stays on screen.
       widget.syncService.setForeground(true);
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       widget.syncService.setForeground(false);
@@ -76,13 +77,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     BuildContext context,
     TelemetrySyncService service, {
     double top = 8,
-    double horizontal = 12,
+    double horizontal = 14,
   }) {
     return EdgeInsets.fromLTRB(
       horizontal,
       top,
       horizontal,
-      32.0,
+      36.0,
     );
   }
 
@@ -124,7 +125,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
     final now = DateTime.now();
     final isToday = d.year == now.year && d.month == now.month && d.day == now.day;
-    final timeStr = '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    final timeStr =
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
     if (isToday) return timeStr;
     return '${d.day}/${d.month} $timeStr';
   }
@@ -138,8 +140,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (diffDays == 0) return 'Today';
     if (diffDays == 1) return 'Yesterday';
 
-    const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const weekdays = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday'
+    ];
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December'
+    ];
 
     final weekday = weekdays[date.weekday - 1];
     final month = months[date.month - 1];
@@ -154,10 +177,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return '$hour:$min $ampm';
   }
 
-
   String _formatExactDateTime(int ms) {
     final d = DateTime.fromMillisecondsSinceEpoch(ms);
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
     final hour = d.hour % 12 == 0 ? 12 : d.hour % 12;
     final ampm = d.hour >= 12 ? 'PM' : 'AM';
     final min = d.minute.toString().padLeft(2, '0');
@@ -178,13 +213,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         lower == 'no caller id') {
       return false;
     }
-    // If name matches the phone number (or digits only matching the number)
     final nameDigits = name.replaceAll(RegExp(r'\D'), '');
     final numDigits = number.replaceAll(RegExp(r'\D'), '');
     if (name == number || (nameDigits.isNotEmpty && nameDigits == numDigits)) {
       return false;
     }
-    // If name contains no letters at all (only digits, spaces, plus, hyphens, etc.)
     if (!RegExp(r'[a-zA-Z]').hasMatch(name)) {
       return false;
     }
@@ -201,44 +234,142 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final pinController = TextEditingController();
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: SalesTrackTheme.cardBackground,
-        title: const Text('App Lock - Enter PIN', style: TextStyle(color: SalesTrackTheme.textPrimary)),
-        content: TextField(
-          controller: pinController,
-          keyboardType: TextInputType.number,
-          obscureText: true,
-          autofocus: true,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 24, letterSpacing: 8, color: SalesTrackTheme.primaryLight),
-          decoration: const InputDecoration(hintText: '••••'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: SalesTrackTheme.textMuted)),
+      builder: (ctx) {
+        final colors = ctx.stColors;
+        return AlertDialog(
+          backgroundColor: colors.cardBackground,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.border),
           ),
-          ElevatedButton(
-            onPressed: () {
-              final pin = pinController.text.trim();
-              if (AppLockService.verifyPin(pin: pin, config: config)) {
-                Navigator.pop(ctx);
-                onAuthorized();
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Incorrect PIN')),
-                );
-              }
-            },
-            child: const Text('Unlock'),
+          title: Text(
+            'App Lock - Enter PIN',
+            style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.bold),
           ),
-        ],
-      ),
+          content: TextField(
+            controller: pinController,
+            keyboardType: TextInputType.number,
+            obscureText: true,
+            autofocus: true,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 26,
+              letterSpacing: 8,
+              color: colors.primary,
+              fontWeight: FontWeight.bold,
+            ),
+            decoration: InputDecoration(
+              hintText: '••••',
+              fillColor: colors.surfaceColor,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Cancel', style: TextStyle(color: colors.textMuted)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final pin = pinController.text.trim();
+                if (AppLockService.verifyPin(pin: pin, config: config)) {
+                  Navigator.pop(ctx);
+                  onAuthorized();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Incorrect PIN')),
+                  );
+                }
+              },
+              child: const Text('Unlock'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showThemeSelectionDialog(BuildContext context) {
+    final themeProvider = context.read<ThemeProvider>();
+    final colors = context.stColors;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          backgroundColor: colors.cardBackground,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.border),
+          ),
+          title: Text(
+            'Appearance & Theme',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: colors.textPrimary,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.system,
+                groupValue: themeProvider.themeMode,
+                title: Text('Follow System', style: TextStyle(color: colors.textPrimary)),
+                subtitle: Text('Adapts to phone OS settings', style: TextStyle(color: colors.textSecondary, fontSize: 12)),
+                activeColor: colors.primary,
+                onChanged: (val) {
+                  if (val != null) {
+                    themeProvider.setThemeMode(val);
+                    Navigator.pop(ctx);
+                  }
+                },
+              ),
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.light,
+                groupValue: themeProvider.themeMode,
+                title: Text('Light Mode', style: TextStyle(color: colors.textPrimary)),
+                subtitle: Text('Crisp white clean canvas', style: TextStyle(color: colors.textSecondary, fontSize: 12)),
+                activeColor: colors.primary,
+                onChanged: (val) {
+                  if (val != null) {
+                    themeProvider.setThemeMode(val);
+                    Navigator.pop(ctx);
+                  }
+                },
+              ),
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.dark,
+                groupValue: themeProvider.themeMode,
+                title: Text('Dark Mode', style: TextStyle(color: colors.textPrimary)),
+                subtitle: Text('Obsidian slate night theme', style: TextStyle(color: colors.textSecondary, fontSize: 12)),
+                activeColor: colors.primary,
+                onChanged: (val) {
+                  if (val != null) {
+                    themeProvider.setThemeMode(val);
+                    Navigator.pop(ctx);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Done', style: TextStyle(color: colors.primary, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.stColors;
+    final isDark = context.isDarkMode;
+    final themeProvider = context.watch<ThemeProvider>();
+
     final service = widget.syncService;
     final device = service.device;
     final staff = service.staff;
@@ -246,11 +377,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     final totalCalls = service.calls.length;
     final connectedCalls = service.calls.where((c) => c.duration > 0).length;
     final totalTalkSeconds = service.calls.fold<int>(0, (sum, c) => sum + c.duration);
-    final whatsappCallsCount = service.whatsappEvents.where((e) => e.kind == 'whatsapp_call').length;
+    final whatsappCallsCount =
+        service.whatsappEvents.where((e) => e.kind == 'whatsapp_call').length;
     final smsCount = service.smsList.length;
 
     return Scaffold(
+      backgroundColor: colors.background,
       appBar: AppBar(
+        backgroundColor: colors.cardBackground,
+        elevation: 0,
         title: Row(
           children: [
             Container(
@@ -258,54 +393,88 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               height: 10,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: service.isPaired ? SalesTrackTheme.primary : SalesTrackTheme.warning,
+                color: service.isPaired ? colors.primary : colors.warning,
                 boxShadow: [
                   BoxShadow(
-                    color: (service.isPaired ? SalesTrackTheme.primary : SalesTrackTheme.warning).withOpacity(0.5),
+                    color: (service.isPaired ? colors.primary : colors.warning)
+                        .withOpacity(0.55),
                     blurRadius: 6,
                   ),
                 ],
               ),
             ),
             const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  device?.name ?? 'Sales Phone',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                Text(
-                  staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
-                  style: const TextStyle(fontSize: 12, color: SalesTrackTheme.textSecondary),
-                ),
-              ],
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    device?.name ?? 'Sales Phone',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: colors.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
         actions: [
+          // Theme Toggle Action Button
+          IconButton(
+            icon: Icon(
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              color: colors.textPrimary,
+              size: 20,
+            ),
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            onPressed: () => themeProvider.toggleTheme(context),
+          ),
+
+          // Real-time Sync Action Button
           IconButton(
             icon: service.isSyncing
-                ? const SizedBox(
+                ? SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(SalesTrackTheme.primaryLight),
+                      valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
                     ),
                   )
-                : const Icon(
+                : Icon(
                     Icons.sync_rounded,
-                    color: SalesTrackTheme.textPrimary,
+                    color: colors.textPrimary,
+                    size: 22,
                   ),
             tooltip: service.isSyncing ? 'Syncing with CRM...' : 'Sync Phone & Server',
             onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
           ),
+
+          // Popup Menu
           PopupMenuButton<String>(
-            color: SalesTrackTheme.cardBackground,
-            icon: const Icon(Icons.more_vert_rounded),
+            color: colors.cardBackground,
+            icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: colors.border),
+            ),
             onSelected: (val) {
-              if (val == 'permissions') {
+              if (val == 'theme_mode') {
+                _showThemeSelectionDialog(context);
+              } else if (val == 'permissions') {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -318,22 +487,30 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               } else if (val == 'clear_and_rescan') {
                 service.clearLocalDataAndRescan();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Cleared local cache. Rescanning calls & recordings from phone...')),
+                  const SnackBar(
+                    content: Text('Cleared local cache. Rescanning calls & recordings from phone...'),
+                  ),
                 );
               } else if (val == 'scan_recordings') {
                 service.scanLocalRecordings();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Scanning phone storage for call audio recordings...')),
+                  const SnackBar(
+                    content: Text('Scanning phone storage for call audio recordings...'),
+                  ),
                 );
               } else if (val == 'resync_all_history') {
                 service.forceResyncAll();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Re-syncing all historical calls & SMS to CRM...')),
+                  const SnackBar(
+                    content: Text('Re-syncing all historical calls & SMS to CRM...'),
+                  ),
                 );
               } else if (val == 'scan_history') {
                 service.syncAllLocalAndRemote();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Scanning phone call history, SMS & syncing...')),
+                  const SnackBar(
+                    content: Text('Scanning phone call history, SMS & syncing...'),
+                  ),
                 );
               } else if (val == 'unpair') {
                 _promptPinForSensitiveAction(() {
@@ -343,63 +520,77 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               }
             },
             itemBuilder: (ctx) => [
-              const PopupMenuItem(
+              PopupMenuItem(
+                value: 'theme_mode',
+                child: Row(
+                  children: [
+                    Icon(
+                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                      color: colors.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Text('Theme: ${isDark ? "Dark" : "Light"}', style: TextStyle(color: colors.textPrimary)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
                 value: 'clear_and_rescan',
                 child: Row(
                   children: [
-                    Icon(Icons.cleaning_services_rounded, color: SalesTrackTheme.warning, size: 20),
-                    SizedBox(width: 10),
-                    Text('Clear Local Data & Re-scan', style: TextStyle(color: SalesTrackTheme.textPrimary)),
+                    Icon(Icons.cleaning_services_rounded, color: colors.warning, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Clear Local Data & Re-scan', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'scan_recordings',
                 child: Row(
                   children: [
-                    Icon(Icons.mic_rounded, color: SalesTrackTheme.primaryLight, size: 20),
-                    SizedBox(width: 10),
-                    Text('Scan Phone Audio Recordings', style: TextStyle(color: SalesTrackTheme.textPrimary)),
+                    Icon(Icons.mic_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Scan Phone Audio Recordings', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'resync_all_history',
                 child: Row(
                   children: [
-                    Icon(Icons.cloud_upload_rounded, color: SalesTrackTheme.primaryLight, size: 20),
-                    SizedBox(width: 10),
-                    Text('Upload All History to CRM', style: TextStyle(color: SalesTrackTheme.textPrimary)),
+                    Icon(Icons.cloud_upload_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Upload All History to CRM', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'scan_history',
                 child: Row(
                   children: [
-                    Icon(Icons.history_toggle_off_rounded, color: SalesTrackTheme.primaryLight, size: 20),
-                    SizedBox(width: 10),
-                    Text('Scan Phone History & Sync', style: TextStyle(color: SalesTrackTheme.textPrimary)),
+                    Icon(Icons.history_toggle_off_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Scan Phone History & Sync', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'permissions',
                 child: Row(
                   children: [
-                    Icon(Icons.security_rounded, color: SalesTrackTheme.secondaryLight, size: 20),
-                    SizedBox(width: 10),
-                    Text('Check Permissions (7 Checks)', style: TextStyle(color: SalesTrackTheme.textPrimary)),
+                    Icon(Icons.security_rounded, color: colors.secondaryLight, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Check Permissions (7 Checks)', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'unpair',
                 child: Row(
                   children: [
-                    Icon(Icons.link_off_rounded, color: SalesTrackTheme.danger, size: 20),
-                    SizedBox(width: 10),
-                    Text('Unpair Device', style: TextStyle(color: SalesTrackTheme.danger)),
+                    Icon(Icons.link_off_rounded, color: colors.danger, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Unpair Device', style: TextStyle(color: colors.danger)),
                   ],
                 ),
               ),
@@ -409,9 +600,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         bottom: TabBar(
           controller: _tabController,
           isScrollable: true,
-          indicatorColor: SalesTrackTheme.primary,
-          labelColor: SalesTrackTheme.primaryLight,
-          unselectedLabelColor: SalesTrackTheme.textSecondary,
+          indicatorColor: colors.primary,
+          indicatorWeight: 3,
+          labelColor: colors.primary,
+          unselectedLabelColor: colors.textSecondary,
+          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
           tabs: [
             Tab(text: 'Calls ($totalCalls)'),
             Tab(text: 'WhatsApp (${service.whatsappEvents.length})'),
@@ -424,11 +618,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   const Text('Pending Sync'),
                   const SizedBox(width: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                     decoration: BoxDecoration(
                       color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                          ? const Color(0xFFF59E0B)
-                          : SalesTrackTheme.surfaceColor,
+                          ? colors.warning
+                          : colors.surfaceColor,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Text(
@@ -438,7 +632,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         fontWeight: FontWeight.bold,
                         color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
                             ? Colors.black
-                            : SalesTrackTheme.textMuted,
+                            : colors.textMuted,
                       ),
                     ),
                   ),
@@ -454,9 +648,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         bottom: true,
         child: Column(
           children: [
-            // Live Real-Time Sync Progress Banner (when syncing)
-            if (service.isSyncing)
-              _buildSyncProgressBanner(service),
+            // Live Real-Time Sync Progress Banner
+            if (service.isSyncing) _buildSyncProgressBanner(service),
 
             // Proactive Permission Warning Banner
             _buildPermissionAlertBanner(service),
@@ -487,7 +680,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             ),
 
             // Floating Audio Player bar
-            if (service.isPlayingAudio || service.activeAudioPath != null) _buildAudioPlayerBar(service),
+            if (service.isPlayingAudio || service.activeAudioPath != null)
+              _buildAudioPlayerBar(service),
           ],
         ),
       ),
@@ -495,17 +689,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildSyncProgressBanner(TelemetrySyncService service) {
+    final colors = context.stColors;
     final percent = (service.syncProgress * 100).toInt().clamp(0, 100);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        border: const Border(
-          bottom: BorderSide(color: SalesTrackTheme.primary, width: 2),
+        color: colors.cardBackground,
+        border: Border(
+          bottom: BorderSide(color: colors.primary, width: 2),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withOpacity(context.isDarkMode ? 0.25 : 0.04),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -516,12 +712,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         children: [
           Row(
             children: [
-              const SizedBox(
+              SizedBox(
                 width: 14,
                 height: 14,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(SalesTrackTheme.primaryLight),
+                  valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
                 ),
               ),
               const SizedBox(width: 10),
@@ -529,21 +725,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 child: Text(
                   service.syncProgressMessage.isNotEmpty
                       ? service.syncProgressMessage
-                      : 'Syncing telemetry & recordings with Perfex CRM...',
-                  style: const TextStyle(
+                      : 'Syncing telemetry & recordings with CRM...',
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: SalesTrackTheme.primaryLight,
+                    color: colors.primary,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Text(
                 '$percent%',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: SalesTrackTheme.primaryLight,
+                  color: colors.primary,
                 ),
               ),
             ],
@@ -554,8 +750,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             child: LinearProgressIndicator(
               value: service.syncProgress > 0 ? service.syncProgress : null,
               minHeight: 4,
-              backgroundColor: SalesTrackTheme.surfaceColor,
-              valueColor: const AlwaysStoppedAnimation<Color>(SalesTrackTheme.primaryLight),
+              backgroundColor: colors.surfaceColor,
+              valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
             ),
           ),
         ],
@@ -564,6 +760,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildPermissionAlertBanner(TelemetrySyncService service) {
+    final colors = context.stColors;
     final missing = service.missingPermissionNames;
     if (missing.isEmpty) {
       return const SizedBox.shrink();
@@ -580,32 +777,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         );
       },
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        margin: const EdgeInsets.fromLTRB(12, 10, 12, 2),
+        margin: const EdgeInsets.fromLTRB(14, 10, 14, 2),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: SalesTrackTheme.warning.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: SalesTrackTheme.warning.withOpacity(0.4)),
+          color: colors.warning.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.warning.withOpacity(0.35)),
         ),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: SalesTrackTheme.warning, size: 24),
+            Icon(Icons.warning_amber_rounded, color: colors.warning, size: 24),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${missing.length} System ${missing.length == 1 ? "Permission" : "Permissions"} Needed',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                    '${missing.length} Telemetry ${missing.length == 1 ? "Permission" : "Permissions"} Needed',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: colors.warning,
+                    ),
                   ),
                   Text(
                     'Missing: ${missing.join(", ")}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+                    style: TextStyle(fontSize: 11, color: colors.textSecondary),
                   ),
                 ],
               ),
@@ -624,11 +825,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 );
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: SalesTrackTheme.warning,
+                backgroundColor: colors.warning,
                 foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
               child: const Text('Fix', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
             ),
@@ -646,11 +850,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     required int pendingQueue,
     required String statusMsg,
   }) {
+    final colors = context.stColors;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: SalesTrackTheme.cardBackground,
-        border: Border(bottom: BorderSide(color: SalesTrackTheme.surfaceColor)),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.cardBackground,
+        border: Border(bottom: BorderSide(color: colors.border)),
       ),
       child: Column(
         children: [
@@ -660,35 +866,35 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 'Calls',
                 '$totalCalls',
                 Icons.call_rounded,
-                SalesTrackTheme.primaryLight,
+                colors.primary,
                 onTap: () => _tabController.animateTo(0),
               ),
               _buildMiniKpi(
                 'Connected',
                 '$connectedCalls',
                 Icons.call_made_rounded,
-                SalesTrackTheme.success,
+                colors.success,
                 onTap: () => _tabController.animateTo(0),
               ),
               _buildMiniKpi(
                 'Talk Time',
                 _formatDuration(talkSeconds),
                 Icons.timer_rounded,
-                SalesTrackTheme.secondaryLight,
+                colors.secondary,
                 onTap: () => _tabController.animateTo(0),
               ),
               _buildMiniKpi(
                 'WhatsApp',
                 '$waCalls',
                 Icons.chat_bubble_rounded,
-                SalesTrackTheme.whatsappGreen,
+                colors.whatsappGreen,
                 onTap: () => _tabController.animateTo(1),
               ),
               _buildMiniKpi(
                 'Queue',
                 '$pendingQueue',
                 Icons.cloud_upload_rounded,
-                pendingQueue > 0 ? SalesTrackTheme.warning : SalesTrackTheme.textMuted,
+                pendingQueue > 0 ? colors.warning : colors.textMuted,
                 onTap: () => _tabController.animateTo(4),
               ),
             ],
@@ -696,12 +902,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.info_outline_rounded, size: 14, color: SalesTrackTheme.textMuted),
+              Icon(Icons.info_outline_rounded, size: 14, color: colors.textMuted),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   statusMsg,
-                  style: const TextStyle(fontSize: 12, color: SalesTrackTheme.textSecondary),
+                  style: TextStyle(fontSize: 12, color: colors.textSecondary),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -712,27 +918,62 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildMiniKpi(String label, String value, IconData icon, Color color, {VoidCallback? onTap}) {
+  Widget _buildMiniKpi(
+    String label,
+    String value,
+    IconData icon,
+    Color color, {
+    VoidCallback? onTap,
+  }) {
+    final colors = context.stColors;
+    final isDark = context.isDarkMode;
+
     return Expanded(
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            margin: const EdgeInsets.symmetric(horizontal: 3),
+            margin: const EdgeInsets.symmetric(horizontal: 2.5),
             decoration: BoxDecoration(
-              color: SalesTrackTheme.surfaceColor.withOpacity(0.5),
-              borderRadius: BorderRadius.circular(10),
+              color: colors.surfaceColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? colors.surfaceLight.withOpacity(0.3) : colors.border,
+                width: 0.8,
+              ),
             ),
             child: Column(
               children: [
-                Icon(icon, size: 16, color: color),
-                const SizedBox(height: 4),
-                Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)),
+                Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, size: 15, color: color),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: color,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(label, style: const TextStyle(fontSize: 10, color: SalesTrackTheme.textMuted), overflow: TextOverflow.ellipsis),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: colors.textMuted,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -743,12 +984,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // 1. CALLS TAB
   Widget _buildCallsTab(TelemetrySyncService service) {
+    final colors = context.stColors;
+
     if (service.calls.isEmpty) {
       if (!service.hasCallLogPermission) {
         return _buildEmptyState(
           icon: Icons.security_rounded,
           title: 'Call Log Permission Required',
-          subtitle: 'Please grant Call Log and Storage permissions to read your phone call history and sense live incoming & outgoing calls.',
+          subtitle:
+              'Please grant Call Log and Storage permissions to read your phone call history and sense live incoming & outgoing calls.',
           actionLabel: 'Grant Call Log Permission',
           onAction: () => service.requestAllPermissions(),
         );
@@ -756,18 +1000,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       return _buildEmptyState(
         icon: Icons.history_rounded,
         title: 'No Calls Loaded From Phone',
-        subtitle: 'Tap below to read call history from your device local storage and sync to CRM server.',
+        subtitle:
+            'Tap below to read call history from your device local storage and sync to CRM server.',
         actionLabel: 'Scan Phone Call History',
         onAction: () => service.syncAllLocalAndRemote(),
       );
     }
 
-    // Determine active contact filter or search query
     final activeFilter = (_selectedContactFilter != null && _selectedContactFilter!.isNotEmpty)
         ? _selectedContactFilter!
         : _searchQuery;
 
     final filtered = service.calls.where((c) {
+      if (_callTypeFilter == 'incoming' && c.direction != 'incoming') return false;
+      if (_callTypeFilter == 'outgoing' && c.direction != 'outgoing') return false;
+      if (_callTypeFilter == 'missed' && c.direction != 'missed' && c.direction != 'rejected') {
+        return false;
+      }
+      if (_callTypeFilter == 'recordings' &&
+          !c.recording &&
+          (c.recordingPath == null || c.recordingPath!.isEmpty)) {
+        return false;
+      }
+
       if (activeFilter.isEmpty) return true;
       final q = activeFilter.toLowerCase();
       final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
@@ -776,16 +1031,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final String displayName = isSaved ? c.name : 'Un Saved';
       if (displayName.toLowerCase().contains(q)) return true;
       if (c.number.toLowerCase().contains(q)) return true;
-      if (qNorm.isNotEmpty && numNorm.endsWith(qNorm.length >= 10 ? qNorm.substring(qNorm.length - 10) : qNorm)) return true;
+      if (qNorm.isNotEmpty &&
+          numNorm.endsWith(
+              qNorm.length >= 10 ? qNorm.substring(qNorm.length - 10) : qNorm)) {
+        return true;
+      }
       return false;
-    }).toList()..sort((a, b) => b.time.compareTo(a.time));
+    }).toList()
+      ..sort((a, b) => b.time.compareTo(a.time));
 
-    // Determine if viewing a specific contact
-    final bool isSingleContact = activeFilter.isNotEmpty && filtered.isNotEmpty &&
-        filtered.every((c) => (c.name.isNotEmpty && c.name.toLowerCase() == filtered.first.name.toLowerCase()) ||
-            (c.number.replaceAll(RegExp(r'\D'), '').endsWith(filtered.first.number.replaceAll(RegExp(r'\D'), '').length >= 10
-                ? filtered.first.number.replaceAll(RegExp(r'\D'), '').substring(filtered.first.number.replaceAll(RegExp(r'\D'), '').length - 10)
-                : filtered.first.number)));
+    final bool isSingleContact = activeFilter.isNotEmpty &&
+        filtered.isNotEmpty &&
+        filtered.every((c) =>
+            (c.name.isNotEmpty && c.name.toLowerCase() == filtered.first.name.toLowerCase()) ||
+            (c.number.replaceAll(RegExp(r'\D'), '').endsWith(
+                filtered.first.number.replaceAll(RegExp(r'\D'), '').length >= 10
+                    ? filtered.first.number
+                        .replaceAll(RegExp(r'\D'), '')
+                        .substring(filtered.first.number.replaceAll(RegExp(r'\D'), '').length - 10)
+                    : filtered.first.number)));
 
     final contactName = filtered.isNotEmpty
         ? (_isSavedContact(filtered.first.name, filtered.first.number)
@@ -794,7 +1058,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         : '';
     final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
 
-    // Group filtered calls by date header (e.g. Wednesday, 7 October)
     final Map<String, List<dynamic>> grouped = {};
     for (final call in filtered) {
       final header = _formatDialerDateHeader(DateTime.fromMillisecondsSinceEpoch(call.time));
@@ -803,9 +1066,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     return Column(
       children: [
-        // Calls Sync Actions & Status Bar
+        // Calls Sync Actions Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           child: Row(
             children: [
               ElevatedButton.icon(
@@ -813,11 +1076,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: const Icon(Icons.cloud_upload_rounded, size: 15),
                 label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: SalesTrackTheme.primary,
+                  backgroundColor: colors.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -826,11 +1090,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: const Icon(Icons.refresh_rounded, size: 15),
                 label: const Text('Resync All', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: SalesTrackTheme.textSecondary,
-                  side: BorderSide(color: SalesTrackTheme.surfaceColor.withOpacity(0.9)),
+                  foregroundColor: colors.textSecondary,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const Spacer(),
@@ -838,18 +1103,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF59E0B).withOpacity(0.15),
+                    color: colors.warning.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                    border: Border.all(color: colors.warning.withOpacity(0.35)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.schedule_rounded, size: 12, color: Color(0xFFF59E0B)),
+                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
                       const SizedBox(width: 4),
                       Text(
                         '${service.pendingCallsCount} Pending',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
                       ),
                     ],
                   ),
@@ -858,18 +1123,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withOpacity(0.15),
+                    color: colors.success.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                    border: Border.all(color: colors.success.withOpacity(0.35)),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF10B981)),
-                      SizedBox(width: 4),
+                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
+                      const SizedBox(width: 4),
                       Text(
                         'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
                       ),
                     ],
                   ),
@@ -878,20 +1143,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ),
 
-        // Clean Search Bar (top recording button removed as requested)
+        // Modern Rounded Search Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 6, 14, 6),
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
           child: Container(
             height: 42,
             decoration: BoxDecoration(
-              color: SalesTrackTheme.surfaceColor,
+              color: colors.surfaceColor,
               borderRadius: BorderRadius.circular(21),
-              border: Border.all(color: SalesTrackTheme.surfaceColor.withOpacity(0.8)),
+              border: Border.all(color: colors.border),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               children: [
-                const Icon(Icons.search_rounded, size: 20, color: SalesTrackTheme.textMuted),
+                Icon(Icons.search_rounded, size: 20, color: colors.textMuted),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -902,13 +1167,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         _selectedContactFilter = null;
                       });
                     },
-                    style: const TextStyle(fontSize: 14, color: SalesTrackTheme.textPrimary),
-                    decoration: const InputDecoration(
-                      hintText: 'Search contact or phone number...',
-                      hintStyle: TextStyle(fontSize: 13, color: SalesTrackTheme.textMuted),
+                    style: TextStyle(fontSize: 13.5, color: colors.textPrimary),
+                    decoration: InputDecoration(
+                      hintText: 'Search contact name or phone number...',
+                      hintStyle: TextStyle(fontSize: 13, color: colors.textMuted),
                       border: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      focusedBorder: InputBorder.none,
                       isDense: true,
                       contentPadding: EdgeInsets.zero,
+                      fillColor: Colors.transparent,
                     ),
                   ),
                 ),
@@ -926,27 +1194,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         _expandedCallUid = null;
                       });
                     },
-                    child: const Icon(Icons.close_rounded, size: 18, color: SalesTrackTheme.textMuted),
+                    child: Icon(Icons.close_rounded, size: 18, color: colors.textMuted),
                   ),
               ],
             ),
           ),
         ),
 
-        // Contact Header Card if single contact filtered (matching Samsung OneUI dialer)
+        // Quick Filter Chips row
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: Row(
+            children: [
+              _buildCallFilterChip('all', 'All Calls (${service.calls.length})'),
+              const SizedBox(width: 6),
+              _buildCallFilterChip('incoming', 'Incoming'),
+              const SizedBox(width: 6),
+              _buildCallFilterChip('outgoing', 'Outgoing'),
+              const SizedBox(width: 6),
+              _buildCallFilterChip('missed', 'Missed'),
+              const SizedBox(width: 6),
+              _buildCallFilterChip('recordings', 'Has Audio'),
+            ],
+          ),
+        ),
+
+        // Contact Header Card if single contact filtered
         if (isSingleContact)
           Container(
             margin: const EdgeInsets.fromLTRB(14, 6, 14, 10),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: SalesTrackTheme.cardBackground,
+              color: colors.cardBackground,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: SalesTrackTheme.surfaceColor),
+              border: Border.all(color: colors.border),
             ),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded, color: SalesTrackTheme.textPrimary, size: 22),
+                  icon: Icon(Icons.arrow_back_rounded, color: colors.textPrimary, size: 22),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   onPressed: () {
@@ -964,33 +1251,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
                 const SizedBox(width: 12),
                 CircleAvatar(
-                  radius: 22,
-                  backgroundColor: const Color(0xFF26A69A),
+                  radius: 20,
+                  backgroundColor: colors.primary,
                   child: Text(
                     contactName.isNotEmpty ? contactName[0].toUpperCase() : 'C',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         contactName,
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: SalesTrackTheme.textPrimary),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: colors.textPrimary,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         contactNumber,
-                        style: const TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary),
+                        style: TextStyle(fontSize: 13, color: colors.textSecondary),
                       ),
                     ],
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.info_outline_rounded, color: SalesTrackTheme.textMuted),
-                  onPressed: () {},
                 ),
               ],
             ),
@@ -1001,13 +1288,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           child: filtered.isEmpty
               ? Center(
                   child: Text(
-                    'No calls found for "$activeFilter"',
-                    style: const TextStyle(color: SalesTrackTheme.textMuted),
+                    'No calls found matching filter',
+                    style: TextStyle(color: colors.textMuted, fontSize: 14),
                   ),
                 )
               : RefreshIndicator(
-                  color: SalesTrackTheme.primary,
-                  backgroundColor: SalesTrackTheme.cardBackground,
+                  color: colors.primary,
+                  backgroundColor: colors.cardBackground,
                   onRefresh: () async {
                     if (service.hasCallLogPermission) {
                       await service.syncDeviceCallLogs();
@@ -1027,20 +1314,33 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         children: [
                           Padding(
                             padding: const EdgeInsets.only(left: 4, top: 12, bottom: 6),
-                            child: Text(
-                              dateHeader,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: SalesTrackTheme.textSecondary,
-                              ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.calendar_today_rounded, size: 12, color: colors.textMuted),
+                                const SizedBox(width: 6),
+                                Text(
+                                  dateHeader,
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: colors.textSecondary,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                           Container(
                             decoration: BoxDecoration(
-                              color: SalesTrackTheme.cardBackground,
+                              color: colors.cardBackground,
                               borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: SalesTrackTheme.surfaceColor),
+                              border: Border.all(color: colors.border),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(context.isDarkMode ? 0.2 : 0.03),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(18),
@@ -1048,16 +1348,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                 color: Colors.transparent,
                                 child: Column(
                                   children: [
-                                    for (int callIdx = 0; callIdx < callsInGroup.length; callIdx++) ...[
+                                    for (int callIdx = 0;
+                                        callIdx < callsInGroup.length;
+                                        callIdx++) ...[
                                       if (callIdx > 0)
                                         Divider(
                                           height: 1,
                                           thickness: 0.8,
                                           indent: 72,
                                           endIndent: 14,
-                                          color: SalesTrackTheme.surfaceColor.withOpacity(0.5),
+                                          color: colors.border,
                                         ),
-                                      _buildCallItem(service, callsInGroup[callIdx], isSingleContact),
+                                      _buildCallItem(
+                                          service, callsInGroup[callIdx], isSingleContact),
                                     ],
                                   ],
                                 ),
@@ -1074,7 +1377,31 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  Widget _buildCallFilterChip(String key, String label) {
+    final colors = context.stColors;
+    final isSelected = _callTypeFilter == key;
+
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      onSelected: (_) => setState(() => _callTypeFilter = key),
+      selectedColor: colors.primary.withOpacity(0.18),
+      checkmarkColor: colors.primary,
+      backgroundColor: colors.surfaceColor,
+      side: BorderSide(
+        color: isSelected ? colors.primary : colors.border,
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      labelStyle: TextStyle(
+        fontSize: 11.5,
+        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+        color: isSelected ? colors.primary : colors.textSecondary,
+      ),
+    );
+  }
+
   Widget _buildCallItem(TelemetrySyncService service, dynamic call, bool isSingleContact) {
+    final colors = context.stColors;
     final isIncoming = call.direction == 'incoming';
     final isMissed = call.direction == 'missed' || call.direction == 'rejected';
 
@@ -1082,16 +1409,17 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         ? Icons.call_missed_rounded
         : (isIncoming ? Icons.call_received_rounded : Icons.call_made_rounded);
     final iconColor = isMissed
-        ? SalesTrackTheme.danger
-        : (isIncoming ? const Color(0xFF3B82F6) : const Color(0xFF10B981));
+        ? colors.danger
+        : (isIncoming ? colors.info : colors.primary);
 
-    final hasRec = call.recording || (call.recordingPath != null && call.recordingPath!.isNotEmpty);
+    final hasRec =
+        call.recording || (call.recordingPath != null && call.recordingPath!.isNotEmpty);
     final isExpanded = _expandedCallUid == call.uid;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Main Call Row (tappable to expand/collapse)
+        // Main Call Row
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
@@ -1113,47 +1441,56 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           child: _callCardBody(call, icon, iconColor, hasRec),
         ),
 
-        // Expanded Details & Audio Player with Seekbar (when clicked)
+        // Expanded Details & Audio Player
         if (isExpanded)
           Container(
             margin: const EdgeInsets.fromLTRB(14, 0, 14, 12),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: SalesTrackTheme.surfaceColor.withOpacity(0.5),
+              color: colors.surfaceColor,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: SalesTrackTheme.surfaceColor),
+              border: Border.all(color: colors.border),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Call Information details
                 Row(
                   children: [
-                    const Icon(Icons.phone_outlined, size: 14, color: SalesTrackTheme.textMuted),
+                    Icon(Icons.phone_outlined, size: 14, color: colors.textMuted),
                     const SizedBox(width: 6),
                     Text(
                       call.number,
-                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: SalesTrackTheme.textPrimary),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: colors.textPrimary,
+                      ),
                     ),
                     const Spacer(),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: SalesTrackTheme.primary.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(4),
+                        color: colors.primary.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(
                         'SIM ${call.sim}',
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: SalesTrackTheme.primaryLight),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: colors.primary,
+                        ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Row(
                       children: [
                         Icon(
-                          call.syncStatus == 'synced' ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                          call.syncStatus == 'synced'
+                              ? Icons.check_circle_rounded
+                              : Icons.schedule_rounded,
                           size: 13,
-                          color: call.syncStatus == 'synced' ? SalesTrackTheme.success : SalesTrackTheme.warning,
+                          color: call.syncStatus == 'synced' ? colors.success : colors.warning,
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -1161,7 +1498,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: call.syncStatus == 'synced' ? SalesTrackTheme.success : SalesTrackTheme.warning,
+                            color: call.syncStatus == 'synced' ? colors.success : colors.warning,
                           ),
                         ),
                       ],
@@ -1170,11 +1507,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Exact Time: ${_formatExactDateTime(call.time)}',
-                  style: const TextStyle(fontSize: 11.5, color: SalesTrackTheme.textSecondary),
+                  'Exact Time: ${_formatExactDateTime(call.time as int)}',
+                  style: TextStyle(fontSize: 11.5, color: colors.textSecondary),
                 ),
 
-                // Tap to see all history for this contact
                 if (!isSingleContact && (call.name.isNotEmpty || call.number.isNotEmpty)) ...[
                   const SizedBox(height: 8),
                   InkWell(
@@ -1190,11 +1526,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.history_rounded, size: 14, color: SalesTrackTheme.primaryLight),
+                          Icon(Icons.history_rounded, size: 14, color: colors.primary),
                           const SizedBox(width: 4),
                           Text(
                             'View all call history for ${call.name.isNotEmpty ? call.name : call.number}',
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SalesTrackTheme.primaryLight),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: colors.primary,
+                            ),
                           ),
                         ],
                       ),
@@ -1214,10 +1554,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// One call as a card: the name saved on the phone (or "Un Saved") with its
-  /// SIM, the number, when it happened, and which way with the talk time;
-  /// the synced and recording badges sit on the right.
   Widget _callCardBody(dynamic call, IconData icon, Color iconColor, bool hasRec) {
+    final colors = context.stColors;
     final String rawName = (call.name?.toString() ?? '').trim();
     final String number = (call.number?.toString() ?? '').trim();
     final bool isSaved = _isSavedContact(rawName, number);
@@ -1234,8 +1572,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 : call.direction == 'missed'
                     ? 'Missed call'
                     : 'Call';
-    const green = Color(0xFF10B981);
-    const amber = Color(0xFFF59E0B);
 
     Widget badge(String text, IconData glyph, Color color) {
       return Container(
@@ -1243,31 +1579,39 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         decoration: BoxDecoration(
           color: color.withOpacity(0.12),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.45), width: 0.9),
+          border: Border.all(color: color.withOpacity(0.4), width: 0.9),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(glyph, size: 11, color: color),
             const SizedBox(width: 4),
-            Text(text, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, letterSpacing: 0.4, color: color)),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 9.5,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+                color: color,
+              ),
+            ),
           ],
         ),
       );
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            width: 46,
-            height: 46,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(14),
               color: iconColor.withOpacity(0.12),
-              border: Border.all(color: iconColor.withOpacity(0.35)),
+              border: Border.all(color: iconColor.withOpacity(0.3)),
             ),
             child: Icon(icon, color: iconColor, size: 22),
           ),
@@ -1283,23 +1627,28 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: SalesTrackTheme.textPrimary),
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                        ),
                       ),
                     ),
                     if (sim > 0) ...[
                       const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF263040),
+                          color: colors.surfaceColor,
                           borderRadius: BorderRadius.circular(5),
+                          border: Border.all(color: colors.border),
                         ),
                         child: Text(
                           'SIM $sim',
-                          style: const TextStyle(
-                            fontSize: 10.5,
+                          style: TextStyle(
+                            fontSize: 10,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF8B9CB0),
+                            color: colors.textSecondary,
                           ),
                         ),
                       ),
@@ -1307,32 +1656,49 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ],
                 ),
                 if (number.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(number, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 13.5, color: SalesTrackTheme.textSecondary)),
+                  const SizedBox(height: 2),
+                  Text(
+                    number,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                  ),
                 ],
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 Row(
                   children: [
-                    const Icon(Icons.access_time_rounded, size: 13, color: SalesTrackTheme.textSecondary),
+                    Icon(Icons.access_time_rounded, size: 13, color: colors.textMuted),
                     const SizedBox(width: 5),
                     Flexible(
                       child: Text(
                         'Call at ${_formatDialerTime(call.time as int)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: SalesTrackTheme.textSecondary),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: colors.textSecondary,
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text.rich(
                   TextSpan(
                     children: [
-                      TextSpan(text: direction, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: iconColor)),
                       TextSpan(
-                        text: ' \u2022 ${seconds > 0 ? _talkTime(seconds) : (call.direction == 'outgoing' ? 'Not connected' : '0 secs')}',
-                        style: const TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary),
+                        text: direction,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: iconColor,
+                        ),
+                      ),
+                      TextSpan(
+                        text:
+                            ' \u2022 ${seconds > 0 ? _talkTime(seconds) : (call.direction == 'outgoing' ? 'Not connected' : '0 secs')}',
+                        style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                       ),
                     ],
                   ),
@@ -1347,7 +1713,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              badge(synced ? 'SYNCED' : 'PENDING', synced ? Icons.check_circle_rounded : Icons.schedule_rounded, synced ? green : amber),
+              badge(
+                synced ? 'SYNCED' : 'PENDING',
+                synced ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                synced ? colors.success : colors.warning,
+              ),
               if (hasRec) ...[
                 const SizedBox(height: 6),
                 Padding(
@@ -1355,15 +1725,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.mic_rounded, size: 13, color: green),
+                      Icon(Icons.mic_rounded, size: 13, color: colors.primary),
                       const SizedBox(width: 3),
                       Text(
                         'REC',
                         style: TextStyle(
-                          fontSize: 10.5,
+                          fontSize: 10,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.5,
-                          color: green,
+                          color: colors.primary,
                         ),
                       ),
                     ],
@@ -1377,7 +1747,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  /// "2 secs", "1 mins 13 secs", "1 hr 4 mins", as the call cards read.
   String _talkTime(int seconds) {
     if (seconds < 60) return '$seconds secs';
     final h = seconds ~/ 3600;
@@ -1388,6 +1757,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildInlineAudioPlayer(TelemetrySyncService service, dynamic call) {
+    final colors = context.stColors;
     final isThisPlaying = service.isPlayingAudio && service.activeAudioPath == call.recordingPath;
     final isThisActive = service.activeAudioPath == call.recordingPath;
 
@@ -1396,49 +1766,58 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         : (call.duration > 0 ? call.duration * 1000 : 60000);
 
     final currentPosMs = isThisActive ? service.audioCurrentPosMs : 0;
-    final progress = (totalDurationMs > 0) ? (currentPosMs / totalDurationMs).clamp(0.0, 1.0) : 0.0;
+    final progress =
+        (totalDurationMs > 0) ? (currentPosMs / totalDurationMs).clamp(0.0, 1.0) : 0.0;
 
     final currentSec = currentPosMs ~/ 1000;
     final totalSec = totalDurationMs ~/ 1000;
 
-    final currentStr = '${currentSec ~/ 60}:${(currentSec % 60).toString().padLeft(2, '0')}';
+    final currentStr =
+        '${currentSec ~/ 60}:${(currentSec % 60).toString().padLeft(2, '0')}';
     final totalStr = '${totalSec ~/ 60}:${(totalSec % 60).toString().padLeft(2, '0')}';
 
     final fileName = call.recordingPath!.split('/').last;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: SalesTrackTheme.cardBackground,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: SalesTrackTheme.primary.withOpacity(0.3)),
+        color: colors.cardBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: colors.primary.withOpacity(0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.audiotrack_rounded, size: 15, color: SalesTrackTheme.primaryLight),
+              Icon(Icons.audiotrack_rounded, size: 16, color: colors.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
                   fileName,
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: SalesTrackTheme.textPrimary),
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: colors.textPrimary,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Text(
                 '$currentStr / $totalStr',
-                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SalesTrackTheme.primaryLight),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: colors.primary,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 4),
           Row(
             children: [
-              // Play / Pause circular button
               Material(
-                color: SalesTrackTheme.primary,
+                color: colors.primary,
                 shape: const CircleBorder(),
                 clipBehavior: Clip.antiAlias,
                 child: IconButton(
@@ -1461,17 +1840,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ),
               ),
               const SizedBox(width: 6),
-
-              // Running Seekbar Slider
               Expanded(
                 child: SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 3,
                     thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
                     overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
-                    activeTrackColor: SalesTrackTheme.primaryLight,
-                    inactiveTrackColor: SalesTrackTheme.surfaceColor,
-                    thumbColor: Colors.white,
+                    activeTrackColor: colors.primary,
+                    inactiveTrackColor: colors.surfaceColor,
+                    thumbColor: colors.primary,
                   ),
                   child: Slider(
                     value: progress,
@@ -1493,13 +1870,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // 2. WHATSAPP TAB (Personal & Business accounts)
+  // 2. WHATSAPP TAB
   Widget _buildWhatsAppTab(TelemetrySyncService service) {
+    final colors = context.stColors;
+
     if (service.whatsappEvents.isEmpty) {
       return _buildEmptyState(
         icon: Icons.chat_rounded,
         title: 'No WhatsApp Activity Sensed',
-        subtitle: 'Ensure Notification Access is enabled to sense calls and chats from WhatsApp and WhatsApp Business.',
+        subtitle:
+            'Ensure Notification Access is enabled to sense calls and chats from WhatsApp and WhatsApp Business.',
         actionLabel: 'Enable Notification Access',
         onAction: () => service.openNotificationListenerSettings(),
       );
@@ -1513,7 +1893,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (_waFilter == 'messages') return ev.kind == 'whatsapp_message';
       if (_waFilter == 'calls') return ev.kind == 'whatsapp_call';
       return true;
-    }).toList()..sort((a, b) => b.time.compareTo(a.time));
+    }).toList()
+      ..sort((a, b) => b.time.compareTo(a.time));
 
     return Column(
       children: [
@@ -1522,25 +1903,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             margin: const EdgeInsets.fromLTRB(14, 8, 14, 6),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: SalesTrackTheme.whatsappGreen.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: SalesTrackTheme.whatsappGreen.withOpacity(0.4)),
+              color: colors.whatsappGreen.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.whatsappGreen.withOpacity(0.35)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.mark_chat_unread_rounded, color: SalesTrackTheme.whatsappGreen, size: 24),
+                Icon(Icons.mark_chat_unread_rounded, color: colors.whatsappGreen, size: 24),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'WhatsApp Call Access Required',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: colors.whatsappGreen,
+                        ),
                       ),
                       Text(
                         'Enable Notification Access to sense live WhatsApp & WhatsApp Business calls.',
-                        style: TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+                        style: TextStyle(fontSize: 11, color: colors.textSecondary),
                       ),
                     ],
                   ),
@@ -1548,20 +1933,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ElevatedButton(
                   onPressed: () => service.openNotificationListenerSettings(),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: SalesTrackTheme.whatsappGreen,
+                    backgroundColor: colors.whatsappGreen,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   child: const Text('Enable', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
               ],
             ),
           ),
+
         // WhatsApp Sync Actions Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           child: Row(
             children: [
               ElevatedButton.icon(
@@ -1569,11 +1956,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: const Icon(Icons.cloud_upload_rounded, size: 15),
                 label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: SalesTrackTheme.whatsappGreen,
+                  backgroundColor: colors.whatsappGreen,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1582,11 +1970,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: const Icon(Icons.refresh_rounded, size: 15),
                 label: const Text('Resync All', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: SalesTrackTheme.textSecondary,
-                  side: BorderSide(color: SalesTrackTheme.surfaceColor.withOpacity(0.9)),
+                  foregroundColor: colors.textSecondary,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const Spacer(),
@@ -1594,18 +1983,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF59E0B).withOpacity(0.15),
+                    color: colors.warning.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                    border: Border.all(color: colors.warning.withOpacity(0.35)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.schedule_rounded, size: 12, color: Color(0xFFF59E0B)),
+                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
                       const SizedBox(width: 4),
                       Text(
                         '${service.pendingWhatsAppCount} Pending',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
                       ),
                     ],
                   ),
@@ -1614,18 +2003,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withOpacity(0.15),
+                    color: colors.success.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                    border: Border.all(color: colors.success.withOpacity(0.35)),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF10B981)),
-                      SizedBox(width: 4),
+                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
+                      const SizedBox(width: 4),
                       Text(
                         'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
                       ),
                     ],
                   ),
@@ -1644,38 +2033,47 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 label: Text('All (${service.whatsappEvents.length})'),
                 selected: _waFilter == 'all',
                 onSelected: (_) => setState(() => _waFilter = 'all'),
-                selectedColor: SalesTrackTheme.whatsappGreen.withOpacity(0.25),
-                checkmarkColor: SalesTrackTheme.whatsappGreen,
+                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                checkmarkColor: colors.whatsappGreen,
+                backgroundColor: colors.surfaceColor,
+                side: BorderSide(color: _waFilter == 'all' ? colors.whatsappGreen : colors.border),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 labelStyle: TextStyle(
-                  fontSize: 11,
+                  fontSize: 11.5,
                   fontWeight: _waFilter == 'all' ? FontWeight.bold : FontWeight.normal,
-                  color: _waFilter == 'all' ? SalesTrackTheme.whatsappGreen : SalesTrackTheme.textSecondary,
+                  color: _waFilter == 'all' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
               const SizedBox(width: 6),
               FilterChip(
-                label: Text('WhatsApp Messages ($messageCount)'),
+                label: Text('Messages ($messageCount)'),
                 selected: _waFilter == 'messages',
                 onSelected: (_) => setState(() => _waFilter = 'messages'),
-                selectedColor: SalesTrackTheme.whatsappGreen.withOpacity(0.25),
-                checkmarkColor: SalesTrackTheme.whatsappGreen,
+                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                checkmarkColor: colors.whatsappGreen,
+                backgroundColor: colors.surfaceColor,
+                side: BorderSide(color: _waFilter == 'messages' ? colors.whatsappGreen : colors.border),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 labelStyle: TextStyle(
-                  fontSize: 11,
+                  fontSize: 11.5,
                   fontWeight: _waFilter == 'messages' ? FontWeight.bold : FontWeight.normal,
-                  color: _waFilter == 'messages' ? SalesTrackTheme.whatsappGreen : SalesTrackTheme.textSecondary,
+                  color: _waFilter == 'messages' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
               const SizedBox(width: 6),
               FilterChip(
-                label: Text('WhatsApp Calls ($callCount)'),
+                label: Text('Calls ($callCount)'),
                 selected: _waFilter == 'calls',
                 onSelected: (_) => setState(() => _waFilter = 'calls'),
-                selectedColor: SalesTrackTheme.whatsappGreen.withOpacity(0.25),
-                checkmarkColor: SalesTrackTheme.whatsappGreen,
+                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                checkmarkColor: colors.whatsappGreen,
+                backgroundColor: colors.surfaceColor,
+                side: BorderSide(color: _waFilter == 'calls' ? colors.whatsappGreen : colors.border),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 labelStyle: TextStyle(
-                  fontSize: 11,
+                  fontSize: 11.5,
                   fontWeight: _waFilter == 'calls' ? FontWeight.bold : FontWeight.normal,
-                  color: _waFilter == 'calls' ? SalesTrackTheme.whatsappGreen : SalesTrackTheme.textSecondary,
+                  color: _waFilter == 'calls' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
             ],
@@ -1695,7 +2093,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                                 ? Icons.phone_missed_rounded
                                 : Icons.chat_rounded,
                         size: 44,
-                        color: SalesTrackTheme.textMuted,
+                        color: colors.textMuted,
                       ),
                       const SizedBox(height: 10),
                       Text(
@@ -1704,109 +2102,129 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             : _waFilter == 'calls'
                                 ? 'No WhatsApp Calls recorded'
                                 : 'No WhatsApp Activity recorded',
-                        style: const TextStyle(fontSize: 14, color: SalesTrackTheme.textSecondary),
+                        style: TextStyle(fontSize: 14, color: colors.textSecondary),
                       ),
                     ],
                   ),
                 )
               : RefreshIndicator(
-              color: SalesTrackTheme.whatsappGreen,
-              backgroundColor: SalesTrackTheme.cardBackground,
-              onRefresh: () async {
-                await service.syncActiveWhatsAppNotifications();
-                await service.syncWhatsAppOnly();
-              },
-              child: ListView.builder(
-                padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
-                itemCount: filteredList.length,
-                itemBuilder: (ctx, idx) {
-                  final ev = filteredList[idx];
-                  final isBusiness = ev.app == 'com.whatsapp.w4b';
-                  final isCall = ev.kind == 'whatsapp_call';
+                  color: colors.whatsappGreen,
+                  backgroundColor: colors.cardBackground,
+                  onRefresh: () async {
+                    await service.syncActiveWhatsAppNotifications();
+                    await service.syncWhatsAppOnly();
+                  },
+                  child: ListView.builder(
+                    padding: _getTabContentPadding(context, service, horizontal: 14, top: 8),
+                    itemCount: filteredList.length,
+                    itemBuilder: (ctx, idx) {
+                      final ev = filteredList[idx];
+                      final isBusiness = ev.app == 'com.whatsapp.w4b';
+                      final isCall = ev.kind == 'whatsapp_call';
 
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: (isBusiness ? SalesTrackTheme.whatsappBusiness : SalesTrackTheme.whatsappGreen).withOpacity(0.2),
-                      child: Icon(
-                        isCall ? (ev.media == 'video' ? Icons.videocam_rounded : Icons.phone_rounded) : Icons.chat_rounded,
-                        color: isBusiness ? SalesTrackTheme.whatsappBusiness : SalesTrackTheme.whatsappGreen,
-                        size: 20,
-                      ),
-                    ),
-                    title: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            ev.name.isNotEmpty ? ev.name : 'WhatsApp Contact',
-                            style: const TextStyle(fontWeight: FontWeight.w600, color: SalesTrackTheme.textPrimary),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: isBusiness ? SalesTrackTheme.whatsappBusiness.withOpacity(0.25) : SalesTrackTheme.whatsappGreen.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            isBusiness ? 'BUSINESS' : 'PERSONAL',
-                            style: TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                              color: isBusiness ? Colors.tealAccent : SalesTrackTheme.whatsappGreen,
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: (isBusiness
+                                    ? colors.whatsappBusiness
+                                    : colors.whatsappGreen)
+                                .withOpacity(0.15),
+                            child: Icon(
+                              isCall
+                                  ? (ev.media == 'video'
+                                      ? Icons.videocam_rounded
+                                      : Icons.phone_rounded)
+                                  : Icons.chat_rounded,
+                              color: isBusiness
+                                  ? colors.whatsappBusiness
+                                  : colors.whatsappGreen,
+                              size: 20,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    subtitle: Text(
-                      isCall ? 'WhatsApp Call (${_formatDuration(ev.duration)})' : (ev.text ?? 'Message'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: SalesTrackTheme.textSecondary),
-                    ),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          _formatTime(ev.time),
-                          style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textMuted),
-                        ),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: ev.syncStatus == 'synced'
-                                ? const Color(0xFF10B981).withOpacity(0.15)
-                                : const Color(0xFFF59E0B).withOpacity(0.15),
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(
-                              color: ev.syncStatus == 'synced'
-                                  ? const Color(0xFF10B981).withOpacity(0.3)
-                                  : const Color(0xFFF59E0B).withOpacity(0.3),
-                              width: 0.8,
-                            ),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  ev.name.isNotEmpty ? ev.name : 'WhatsApp Contact',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14.5,
+                                    color: colors.textPrimary,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: (isBusiness
+                                          ? colors.whatsappBusiness
+                                          : colors.whatsappGreen)
+                                      .withOpacity(0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  isBusiness ? 'BUSINESS' : 'PERSONAL',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    color: isBusiness
+                                        ? colors.whatsappBusiness
+                                        : colors.whatsappGreen,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          child: Text(
-                            ev.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
-                            style: TextStyle(
-                              fontSize: 8.5,
-                              fontWeight: FontWeight.bold,
-                              color: ev.syncStatus == 'synced'
-                                  ? const Color(0xFF10B981)
-                                  : const Color(0xFFF59E0B),
-                            ),
+                          subtitle: Text(
+                            isCall
+                                ? 'WhatsApp Call (${_formatDuration(ev.duration)})'
+                                : (ev.text ?? 'Message'),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                          ),
+                          trailing: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                _formatTime(ev.time),
+                                style: TextStyle(fontSize: 11, color: colors.textMuted),
+                              ),
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: ev.syncStatus == 'synced'
+                                      ? colors.success.withOpacity(0.12)
+                                      : colors.warning.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: ev.syncStatus == 'synced'
+                                        ? colors.success.withOpacity(0.3)
+                                        : colors.warning.withOpacity(0.3),
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: Text(
+                                  ev.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
+                                  style: TextStyle(
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: ev.syncStatus == 'synced'
+                                        ? colors.success
+                                        : colors.warning,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      );
+                    },
                   ),
-                );
-              },
-            ),
-          ),
+                ),
         ),
       ],
     );
@@ -1814,6 +2232,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // 3. SMS TAB
   Widget _buildSmsTab(TelemetrySyncService service) {
+    final colors = context.stColors;
+
     if (service.smsList.isEmpty) {
       if (!service.hasSmsPermission) {
         return _buildEmptyState(
@@ -1840,7 +2260,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       children: [
         // SMS Sync Actions Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           child: Row(
             children: [
               ElevatedButton.icon(
@@ -1848,11 +2268,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: const Icon(Icons.cloud_upload_rounded, size: 15),
                 label: const Text('Sync SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: SalesTrackTheme.secondary,
+                  backgroundColor: colors.secondary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1861,11 +2282,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 icon: const Icon(Icons.refresh_rounded, size: 15),
                 label: const Text('Resync All', style: TextStyle(fontSize: 12)),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: SalesTrackTheme.textSecondary,
-                  side: BorderSide(color: SalesTrackTheme.surfaceColor.withOpacity(0.9)),
+                  foregroundColor: colors.textSecondary,
+                  side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const Spacer(),
@@ -1873,18 +2295,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF59E0B).withOpacity(0.15),
+                    color: colors.warning.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                    border: Border.all(color: colors.warning.withOpacity(0.35)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.schedule_rounded, size: 12, color: Color(0xFFF59E0B)),
+                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
                       const SizedBox(width: 4),
                       Text(
                         '${service.pendingSmsCount} Pending',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
                       ),
                     ],
                   ),
@@ -1893,18 +2315,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withOpacity(0.15),
+                    color: colors.success.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                    border: Border.all(color: colors.success.withOpacity(0.35)),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF10B981)),
-                      SizedBox(width: 4),
+                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
+                      const SizedBox(width: 4),
                       Text(
                         'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
                       ),
                     ],
                   ),
@@ -1915,8 +2337,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
         Expanded(
           child: RefreshIndicator(
-            color: SalesTrackTheme.secondary,
-            backgroundColor: SalesTrackTheme.cardBackground,
+            color: colors.secondary,
+            backgroundColor: colors.cardBackground,
             onRefresh: () async {
               if (service.hasSmsPermission) {
                 await service.syncDeviceSms();
@@ -1924,7 +2346,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               await service.syncSmsOnly();
             },
             child: ListView.builder(
-              padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
+              padding: _getTabContentPadding(context, service, horizontal: 14, top: 8),
               itemCount: sortedSms.length,
               itemBuilder: (ctx, idx) {
                 final sms = sortedSms[idx];
@@ -1932,18 +2354,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: SalesTrackTheme.secondary.withOpacity(0.15),
-                      child: const Icon(Icons.sms_rounded, color: SalesTrackTheme.secondaryLight, size: 20),
+                      backgroundColor: colors.secondary.withOpacity(0.15),
+                      child: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
                     ),
                     title: Text(
                       sms.name.isNotEmpty ? sms.name : sms.number,
-                      style: const TextStyle(fontWeight: FontWeight.w600, color: SalesTrackTheme.textPrimary),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14.5,
+                        color: colors.textPrimary,
+                      ),
                     ),
                     subtitle: Text(
                       sms.text ?? '',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: SalesTrackTheme.textSecondary),
+                      style: TextStyle(fontSize: 12, color: colors.textSecondary),
                     ),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -1951,20 +2377,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       children: [
                         Text(
                           _formatTime(sms.time),
-                          style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textMuted),
+                          style: TextStyle(fontSize: 11, color: colors.textMuted),
                         ),
                         const SizedBox(height: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: sms.syncStatus == 'synced'
-                                ? const Color(0xFF10B981).withOpacity(0.15)
-                                : const Color(0xFFF59E0B).withOpacity(0.15),
+                                ? colors.success.withOpacity(0.12)
+                                : colors.warning.withOpacity(0.12),
                             borderRadius: BorderRadius.circular(4),
                             border: Border.all(
                               color: sms.syncStatus == 'synced'
-                                  ? const Color(0xFF10B981).withOpacity(0.3)
-                                  : const Color(0xFFF59E0B).withOpacity(0.3),
+                                  ? colors.success.withOpacity(0.3)
+                                  : colors.warning.withOpacity(0.3),
                               width: 0.8,
                             ),
                           ),
@@ -1974,8 +2400,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                               fontSize: 8.5,
                               fontWeight: FontWeight.bold,
                               color: sms.syncStatus == 'synced'
-                                  ? const Color(0xFF10B981)
-                                  : const Color(0xFFF59E0B),
+                                  ? colors.success
+                                  : colors.warning,
                             ),
                           ),
                         ),
@@ -1993,12 +2419,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // 4. RECORDINGS TAB
   Widget _buildRecordingsTab(TelemetrySyncService service) {
+    final colors = context.stColors;
+
     if (service.localRecordings.isEmpty) {
       if (!service.hasRecordingsFolderPermission) {
         return _buildEmptyState(
           icon: Icons.folder_special_rounded,
           title: 'Recordings Folder Access Required',
-          subtitle: 'Grant All Files Access so the app can locate and upload call audio recordings saved by your phone.',
+          subtitle:
+              'Grant All Files Access so the app can locate and upload call audio recordings saved by your phone.',
           actionLabel: 'Grant Folder Access',
           onAction: () => service.openAllFilesSettings(),
         );
@@ -2006,7 +2435,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       return _buildEmptyState(
         icon: Icons.music_off_rounded,
         title: 'No Call Audio Recordings Found',
-        subtitle: 'Recordings saved by Samsung, Xiaomi, or other dialers will be scanned automatically.',
+        subtitle:
+            'Recordings saved by Samsung, Xiaomi, or other dialers will be scanned automatically.',
         actionLabel: 'Scan Device Storage',
         onAction: () => service.scanLocalRecordings(),
       );
@@ -2026,25 +2456,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             margin: const EdgeInsets.fromLTRB(14, 8, 14, 6),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: SalesTrackTheme.warning.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: SalesTrackTheme.warning.withOpacity(0.4)),
+              color: colors.warning.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.warning.withOpacity(0.35)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.folder_special_rounded, color: SalesTrackTheme.warning, size: 24),
+                Icon(Icons.folder_special_rounded, color: colors.warning, size: 24),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         'Recordings Folder Access Required',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: colors.warning,
+                        ),
                       ),
                       Text(
                         'Grant All Files Access to locate and upload call audio recordings.',
-                        style: TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+                        style: TextStyle(fontSize: 11, color: colors.textSecondary),
                       ),
                     ],
                   ),
@@ -2052,20 +2486,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 ElevatedButton(
                   onPressed: () => service.openAllFilesSettings(),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: SalesTrackTheme.warning,
+                    backgroundColor: colors.warning,
                     foregroundColor: Colors.black,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   child: const Text('Grant', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
               ],
             ),
           ),
+
         // Recordings Upload Actions Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 2),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
@@ -2076,11 +2512,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   icon: const Icon(Icons.cloud_upload_rounded, size: 15),
                   label: const Text('Upload Recordings', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: SalesTrackTheme.primary,
+                    backgroundColor: colors.primary,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2089,11 +2526,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   icon: const Icon(Icons.refresh_rounded, size: 15),
                   label: const Text('Rescan Files', style: TextStyle(fontSize: 12)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: SalesTrackTheme.textSecondary,
-                    side: BorderSide(color: SalesTrackTheme.surfaceColor.withOpacity(0.9)),
+                    foregroundColor: colors.textSecondary,
+                    side: BorderSide(color: colors.border),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2101,18 +2539,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF59E0B).withOpacity(0.15),
+                      color: colors.warning.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3)),
+                      border: Border.all(color: colors.warning.withOpacity(0.35)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.cloud_upload_outlined, size: 12, color: Color(0xFFF59E0B)),
+                        Icon(Icons.cloud_upload_outlined, size: 12, color: colors.warning),
                         const SizedBox(width: 4),
                         Text(
                           '${service.pendingRecordingsCount} Pending Upload',
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFF59E0B)),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
                         ),
                       ],
                     ),
@@ -2121,18 +2559,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withOpacity(0.15),
+                      color: colors.success.withOpacity(0.12),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                      border: Border.all(color: colors.success.withOpacity(0.35)),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.check_circle_rounded, size: 12, color: Color(0xFF10B981)),
-                        SizedBox(width: 4),
+                        Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
+                        const SizedBox(width: 4),
                         Text(
                           'All Uploaded',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
                         ),
                       ],
                     ),
@@ -2144,14 +2582,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
         Expanded(
           child: RefreshIndicator(
-            color: SalesTrackTheme.primary,
-            backgroundColor: SalesTrackTheme.cardBackground,
+            color: colors.primary,
+            backgroundColor: colors.cardBackground,
             onRefresh: () async {
               await service.scanLocalRecordings();
               await service.syncRecordingsOnly();
             },
             child: ListView.builder(
-              padding: _getTabContentPadding(context, service, horizontal: 12, top: 8),
+              padding: _getTabContentPadding(context, service, horizontal: 14, top: 8),
               itemCount: sortedRecs.length,
               itemBuilder: (ctx, idx) {
                 final rec = sortedRecs[idx];
@@ -2159,18 +2597,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 final name = rec['fileName']?.toString() ?? 'Call Recording';
                 final isCurrent = service.activeAudioPath == path;
 
-                // Check if matching call is synced
-                final matchingCall = service.calls.where((c) => c.recordingPath == path).firstOrNull;
+                final matchingCall = service.calls
+                    .where((c) => c.recordingPath == path)
+                    .firstOrNull;
                 final isUploaded = matchingCall?.recordingSyncStatus == 'synced';
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: isCurrent ? SalesTrackTheme.primary : SalesTrackTheme.surfaceColor,
+                      backgroundColor:
+                          isCurrent ? colors.primary : colors.surfaceColor,
                       child: Icon(
-                        isCurrent && service.isPlayingAudio ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                        color: Colors.white,
+                        isCurrent && service.isPlayingAudio
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: isCurrent ? Colors.white : colors.textPrimary,
                         size: 22,
                       ),
                     ),
@@ -2179,21 +2621,25 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                         Expanded(
                           child: Text(
                             name,
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, color: SalesTrackTheme.textPrimary),
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13.5,
+                              color: colors.textPrimary,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: isUploaded
-                                ? const Color(0xFF10B981).withOpacity(0.15)
-                                : const Color(0xFFF59E0B).withOpacity(0.15),
+                                ? colors.success.withOpacity(0.12)
+                                : colors.warning.withOpacity(0.12),
                             borderRadius: BorderRadius.circular(4),
                             border: Border.all(
                               color: isUploaded
-                                  ? const Color(0xFF10B981).withOpacity(0.3)
-                                  : const Color(0xFFF59E0B).withOpacity(0.3),
+                                  ? colors.success.withOpacity(0.3)
+                                  : colors.warning.withOpacity(0.3),
                               width: 0.8,
                             ),
                           ),
@@ -2202,7 +2648,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                             style: TextStyle(
                               fontSize: 8.5,
                               fontWeight: FontWeight.bold,
-                              color: isUploaded ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                              color: isUploaded ? colors.success : colors.warning,
                             ),
                           ),
                         ),
@@ -2210,13 +2656,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     ),
                     subtitle: Text(
                       path,
-                      style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textMuted),
+                      style: TextStyle(fontSize: 11, color: colors.textMuted),
                       overflow: TextOverflow.ellipsis,
                     ),
                     trailing: IconButton(
                       icon: Icon(
-                        isCurrent && service.isPlayingAudio ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                        color: SalesTrackTheme.primary,
+                        isCurrent && service.isPlayingAudio
+                            ? Icons.pause_circle_filled_rounded
+                            : Icons.play_circle_fill_rounded,
+                        color: colors.primary,
                         size: 32,
                       ),
                       onPressed: () {
@@ -2241,34 +2689,64 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   // 5. DEDICATED PENDING SYNC TAB
   Widget _buildPendingTab(TelemetrySyncService service) {
-    final pendingCalls = service.calls.where((c) => c.syncStatus != 'synced').toList();
-    final pendingWhatsApp = service.whatsappEvents.where((e) => e.syncStatus != 'synced').toList();
-    final pendingSms = service.smsList.where((s) => s.syncStatus != 'synced').toList();
-    final pendingRecordings = service.calls.where((c) => (c.recording || (c.recordingPath != null && c.recordingPath!.isNotEmpty)) && c.recordingSyncStatus != 'synced').toList();
+    final colors = context.stColors;
 
-    final totalPending = pendingCalls.length + pendingWhatsApp.length + pendingSms.length + pendingRecordings.length;
+    final pendingCalls = service.calls.where((c) => c.syncStatus != 'synced').toList();
+    final pendingWhatsApp =
+        service.whatsappEvents.where((e) => e.syncStatus != 'synced').toList();
+    final pendingSms = service.smsList.where((s) => s.syncStatus != 'synced').toList();
+    final pendingRecordings = service.calls
+        .where((c) =>
+            (c.recording || (c.recordingPath != null && c.recordingPath!.isNotEmpty)) &&
+            c.recordingSyncStatus != 'synced')
+        .toList();
+
+    final totalPending = pendingCalls.length +
+        pendingWhatsApp.length +
+        pendingSms.length +
+        pendingRecordings.length;
 
     return Column(
       children: [
         // Pending Summary & Master Sync Action Header
         Container(
-          margin: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+          margin: const EdgeInsets.fromLTRB(14, 10, 14, 6),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: SalesTrackTheme.cardBackground,
+            color: colors.cardBackground,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: totalPending > 0 ? const Color(0xFFF59E0B).withOpacity(0.4) : SalesTrackTheme.surfaceColor,
+              color: totalPending > 0 ? colors.warning.withOpacity(0.35) : colors.border,
             ),
           ),
           child: Column(
             children: [
               Row(
                 children: [
-                  _buildMiniKpi('Calls', '${pendingCalls.length}', Icons.call_rounded, pendingCalls.isNotEmpty ? const Color(0xFFF59E0B) : SalesTrackTheme.textMuted),
-                  _buildMiniKpi('WhatsApp', '${pendingWhatsApp.length}', Icons.chat_rounded, pendingWhatsApp.isNotEmpty ? const Color(0xFFF59E0B) : SalesTrackTheme.textMuted),
-                  _buildMiniKpi('SMS', '${pendingSms.length}', Icons.sms_rounded, pendingSms.isNotEmpty ? const Color(0xFFF59E0B) : SalesTrackTheme.textMuted),
-                  _buildMiniKpi('Audio', '${pendingRecordings.length}', Icons.mic_rounded, pendingRecordings.isNotEmpty ? const Color(0xFFF59E0B) : SalesTrackTheme.textMuted),
+                  _buildMiniKpi(
+                    'Calls',
+                    '${pendingCalls.length}',
+                    Icons.call_rounded,
+                    pendingCalls.isNotEmpty ? colors.warning : colors.textMuted,
+                  ),
+                  _buildMiniKpi(
+                    'WhatsApp',
+                    '${pendingWhatsApp.length}',
+                    Icons.chat_rounded,
+                    pendingWhatsApp.isNotEmpty ? colors.warning : colors.textMuted,
+                  ),
+                  _buildMiniKpi(
+                    'SMS',
+                    '${pendingSms.length}',
+                    Icons.sms_rounded,
+                    pendingSms.isNotEmpty ? colors.warning : colors.textMuted,
+                  ),
+                  _buildMiniKpi(
+                    'Audio',
+                    '${pendingRecordings.length}',
+                    Icons.mic_rounded,
+                    pendingRecordings.isNotEmpty ? colors.warning : colors.textMuted,
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
@@ -2279,13 +2757,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       onPressed: service.isSyncing ? null : () => service.syncNow(),
                       icon: const Icon(Icons.cloud_upload_rounded, size: 18),
                       label: Text(
-                        totalPending > 0 ? 'Sync All Pending ($totalPending)' : 'Sync Now',
+                        totalPending > 0
+                            ? 'Sync All Pending ($totalPending)'
+                            : 'Sync Now',
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: SalesTrackTheme.primary,
+                        backgroundColor: colors.primary,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                     ),
                   ),
@@ -2295,9 +2776,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     icon: const Icon(Icons.refresh_rounded, size: 16),
                     label: const Text('Resync All History', style: TextStyle(fontSize: 12)),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: SalesTrackTheme.textSecondary,
-                      side: BorderSide(color: SalesTrackTheme.surfaceColor),
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      foregroundColor: colors.textSecondary,
+                      side: BorderSide(color: colors.border),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                 ],
@@ -2312,36 +2794,53 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ? _buildEmptyState(
                   icon: Icons.cloud_done_rounded,
                   title: 'All Local Telemetry Synced',
-                  subtitle: 'All phone calls, WhatsApp events, SMS messages, and voice recordings are backed up on Perfex CRM server.',
+                  subtitle:
+                      'All phone calls, WhatsApp events, SMS messages, and voice recordings are backed up on CRM server.',
                   actionLabel: 'Force Re-scan All Phone Data',
                   onAction: () => service.clearLocalDataAndRescan(),
                 )
               : RefreshIndicator(
-                  color: const Color(0xFFF59E0B),
-                  backgroundColor: SalesTrackTheme.cardBackground,
+                  color: colors.warning,
+                  backgroundColor: colors.cardBackground,
                   onRefresh: () async {
                     await service.syncNow();
                   },
                   child: ListView(
-                    padding: _getTabContentPadding(context, service, horizontal: 12, top: 4),
+                    padding: _getTabContentPadding(context, service, horizontal: 14, top: 4),
                     children: [
                       if (pendingRecordings.isNotEmpty) ...[
-                        _buildPendingSectionHeader('Call Audio Recordings (${pendingRecordings.length})', Icons.mic_rounded, const Color(0xFFF59E0B)),
+                        _buildPendingSectionHeader(
+                          'Call Audio Recordings (${pendingRecordings.length})',
+                          Icons.mic_rounded,
+                          colors.warning,
+                        ),
                         for (final rec in pendingRecordings)
                           _buildPendingRecordingCard(service, rec),
                       ],
                       if (pendingCalls.isNotEmpty) ...[
-                        _buildPendingSectionHeader('Phone Calls (${pendingCalls.length})', Icons.phone_rounded, SalesTrackTheme.primaryLight),
+                        _buildPendingSectionHeader(
+                          'Phone Calls (${pendingCalls.length})',
+                          Icons.phone_rounded,
+                          colors.primary,
+                        ),
                         for (final call in pendingCalls)
                           _buildPendingCallCard(service, call),
                       ],
                       if (pendingWhatsApp.isNotEmpty) ...[
-                        _buildPendingSectionHeader('WhatsApp Events (${pendingWhatsApp.length})', Icons.chat_rounded, SalesTrackTheme.whatsappGreen),
+                        _buildPendingSectionHeader(
+                          'WhatsApp Events (${pendingWhatsApp.length})',
+                          Icons.chat_rounded,
+                          colors.whatsappGreen,
+                        ),
                         for (final wa in pendingWhatsApp)
                           _buildPendingWhatsAppCard(service, wa),
                       ],
                       if (pendingSms.isNotEmpty) ...[
-                        _buildPendingSectionHeader('Carrier SMS (${pendingSms.length})', Icons.sms_rounded, SalesTrackTheme.secondaryLight),
+                        _buildPendingSectionHeader(
+                          'Carrier SMS (${pendingSms.length})',
+                          Icons.sms_rounded,
+                          colors.secondary,
+                        ),
                         for (final sms in pendingSms)
                           _buildPendingSmsCard(service, sms),
                       ],
@@ -2370,31 +2869,40 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildPendingCallCard(TelemetrySyncService service, dynamic call) {
+    final colors = context.stColors;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 6),
       child: ListTile(
         dense: true,
         leading: Icon(
-          call.direction == 'incoming' ? Icons.call_received_rounded : Icons.call_made_rounded,
-          color: call.direction == 'incoming' ? const Color(0xFF3B82F6) : const Color(0xFF10B981),
+          call.direction == 'incoming'
+              ? Icons.call_received_rounded
+              : Icons.call_made_rounded,
+          color: call.direction == 'incoming' ? colors.info : colors.primary,
           size: 20,
         ),
         title: Text(
           _isSavedContact(call.name, call.number) ? call.name : 'Un Saved',
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: SalesTrackTheme.textPrimary),
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13.5,
+            color: colors.textPrimary,
+          ),
         ),
         subtitle: Text(
-          '${call.number} • ${_formatDialerTime(call.time)} • ${_formatDuration(call.duration)}',
-          style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+          '${call.number} • ${_formatDialerTime(call.time as int)} • ${_formatDuration(call.duration as int)}',
+          style: TextStyle(fontSize: 11, color: colors.textSecondary),
         ),
         trailing: ElevatedButton(
           onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
           style: ElevatedButton.styleFrom(
-            backgroundColor: SalesTrackTheme.primary,
+            backgroundColor: colors.primary,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: const Text('Sync', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
         ),
@@ -2403,29 +2911,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildPendingWhatsAppCard(TelemetrySyncService service, dynamic wa) {
+    final colors = context.stColors;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 6),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.chat_rounded, color: SalesTrackTheme.whatsappGreen, size: 20),
+        leading: Icon(Icons.chat_rounded, color: colors.whatsappGreen, size: 20),
         title: Text(
           wa.name.isNotEmpty ? wa.name : 'WhatsApp Contact',
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: SalesTrackTheme.textPrimary),
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13.5,
+            color: colors.textPrimary,
+          ),
         ),
         subtitle: Text(
-          '${wa.text ?? "WhatsApp message"} • ${_formatDialerTime(wa.time)}',
+          '${wa.text ?? "WhatsApp message"} • ${_formatDialerTime(wa.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+          style: TextStyle(fontSize: 11, color: colors.textSecondary),
         ),
         trailing: ElevatedButton(
           onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
           style: ElevatedButton.styleFrom(
-            backgroundColor: SalesTrackTheme.whatsappGreen,
+            backgroundColor: colors.whatsappGreen,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: const Text('Sync', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
         ),
@@ -2434,29 +2949,36 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildPendingSmsCard(TelemetrySyncService service, dynamic sms) {
+    final colors = context.stColors;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 6),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.sms_rounded, color: SalesTrackTheme.secondaryLight, size: 20),
+        leading: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
         title: Text(
           sms.name.isNotEmpty ? sms.name : sms.number,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: SalesTrackTheme.textPrimary),
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13.5,
+            color: colors.textPrimary,
+          ),
         ),
         subtitle: Text(
-          '${sms.text ?? "SMS"} • ${_formatDialerTime(sms.time)}',
+          '${sms.text ?? "SMS"} • ${_formatDialerTime(sms.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+          style: TextStyle(fontSize: 11, color: colors.textSecondary),
         ),
         trailing: ElevatedButton(
           onPressed: service.isSyncing ? null : () => service.syncSmsOnly(),
           style: ElevatedButton.styleFrom(
-            backgroundColor: SalesTrackTheme.secondary,
+            backgroundColor: colors.secondary,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: const Text('Sync', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
         ),
@@ -2465,30 +2987,37 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildPendingRecordingCard(TelemetrySyncService service, dynamic rec) {
+    final colors = context.stColors;
     final fileName = rec.recordingPath?.split('/').last ?? 'Audio file';
+
     return Card(
       margin: const EdgeInsets.only(bottom: 6),
       child: ListTile(
         dense: true,
-        leading: const Icon(Icons.mic_rounded, color: Color(0xFFF59E0B), size: 20),
+        leading: Icon(Icons.mic_rounded, color: colors.warning, size: 20),
         title: Text(
           rec.name.isNotEmpty ? rec.name : rec.number,
-          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: SalesTrackTheme.textPrimary),
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13.5,
+            color: colors.textPrimary,
+          ),
         ),
         subtitle: Text(
-          '$fileName • ${_formatDialerTime(rec.time)}',
+          '$fileName • ${_formatDialerTime(rec.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textSecondary),
+          style: TextStyle(fontSize: 11, color: colors.textSecondary),
         ),
         trailing: ElevatedButton(
           onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
           style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFFF59E0B),
+            backgroundColor: colors.warning,
             foregroundColor: Colors.black,
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
           child: const Text('Upload', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
         ),
@@ -2496,32 +3025,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // 5. CALL LISTS TAB
+  // 6. CALL LISTS TAB
   Widget _buildCallListsTab(TelemetrySyncService service) {
+    final colors = context.stColors;
+
     if (service.callLists.isEmpty) {
       return _buildEmptyState(
         icon: Icons.playlist_remove_rounded,
         title: 'No Active Call Lists',
-        subtitle: 'Call lists created in Perfex CRM for your staff account will appear here.',
+        subtitle: 'Call lists created in CRM for your staff account will appear here.',
         actionLabel: 'Refresh Lists',
         onAction: () => service.fetchCallLists(),
       );
     }
 
     return ListView.builder(
-      padding: _getTabContentPadding(context, service, horizontal: 12, top: 12),
+      padding: _getTabContentPadding(context, service, horizontal: 14, top: 12),
       itemCount: service.callLists.length,
       itemBuilder: (ctx, idx) {
         final list = service.callLists[idx];
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           child: ExpansionTile(
-            title: Text(list.name, style: const TextStyle(fontWeight: FontWeight.bold, color: SalesTrackTheme.textPrimary)),
-            subtitle: Text('Due: ${list.due.isNotEmpty ? list.due : "No deadline"} • ${list.items.length} leads', style: const TextStyle(color: SalesTrackTheme.textMuted, fontSize: 12)),
+            title: Text(
+              list.name,
+              style: TextStyle(fontWeight: FontWeight.bold, color: colors.textPrimary),
+            ),
+            subtitle: Text(
+              'Due: ${list.due.isNotEmpty ? list.due : "No deadline"} • ${list.items.length} leads',
+              style: TextStyle(color: colors.textMuted, fontSize: 12),
+            ),
             children: list.items.map((lead) {
               return ListTile(
-                title: Text(lead.name, style: const TextStyle(fontWeight: FontWeight.w500, color: SalesTrackTheme.textPrimary)),
-                subtitle: Text('${lead.number} • ${lead.status}'),
+                title: Text(
+                  lead.name,
+                  style: TextStyle(fontWeight: FontWeight.w600, color: colors.textPrimary),
+                ),
+                subtitle: Text(
+                  '${lead.number} • ${lead.status}',
+                  style: TextStyle(color: colors.textSecondary, fontSize: 12),
+                ),
                 trailing: ElevatedButton(
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -2529,7 +3072,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     );
                   },
                   style: ElevatedButton.styleFrom(
+                    backgroundColor: colors.primary,
+                    foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
@@ -2555,20 +3101,54 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     String? actionLabel,
     VoidCallback? onAction,
   }) {
+    final colors = context.stColors;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, size: 54, color: SalesTrackTheme.textMuted.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: SalesTrackTheme.textPrimary)),
+            Container(
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                color: colors.surfaceColor,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 48, color: colors.textMuted),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+                color: colors.textPrimary,
+              ),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 8),
-            Text(subtitle, textAlign: TextAlign.center, style: const TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary)),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 13,
+                color: colors.textSecondary,
+                height: 1.4,
+              ),
+            ),
             if (actionLabel != null && onAction != null) ...[
               const SizedBox(height: 20),
-              ElevatedButton(onPressed: onAction, child: Text(actionLabel)),
+              ElevatedButton(
+                onPressed: onAction,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text(actionLabel, style: const TextStyle(fontWeight: FontWeight.w700)),
+              ),
             ],
           ],
         ),
@@ -2577,6 +3157,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildAudioPlayerBar(TelemetrySyncService service) {
+    final colors = context.stColors;
+    final isDark = context.isDarkMode;
+
     final currentSec = service.audioCurrentPosMs ~/ 1000;
     final totalSec = service.audioDurationMs ~/ 1000;
     final progress = (service.audioDurationMs > 0)
@@ -2586,12 +3169,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: SalesTrackTheme.cardBackground,
-        border: const Border(top: BorderSide(color: SalesTrackTheme.primary, width: 2)),
+        color: colors.cardBackground,
+        border: Border(top: BorderSide(color: colors.primary, width: 2)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.4),
-            blurRadius: 10,
+            color: Colors.black.withOpacity(isDark ? 0.35 : 0.08),
+            blurRadius: 12,
             offset: const Offset(0, -4),
           ),
         ],
@@ -2600,9 +3183,11 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         children: [
           IconButton(
             icon: Icon(
-              service.isPlayingAudio ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-              color: SalesTrackTheme.primary,
-              size: 36,
+              service.isPlayingAudio
+                  ? Icons.pause_circle_filled_rounded
+                  : Icons.play_circle_fill_rounded,
+              color: colors.primary,
+              size: 38,
             ),
             onPressed: () {
               if (service.isPlayingAudio) {
@@ -2620,16 +3205,20 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               children: [
                 Text(
                   service.activeAudioPath?.split('/').last ?? 'Audio Player',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: SalesTrackTheme.textPrimary),
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: colors.textPrimary,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                     trackHeight: 3,
-                    activeTrackColor: SalesTrackTheme.primary,
-                    inactiveTrackColor: SalesTrackTheme.surfaceColor,
-                    thumbColor: SalesTrackTheme.primary,
+                    activeTrackColor: colors.primary,
+                    inactiveTrackColor: colors.surfaceColor,
+                    thumbColor: colors.primary,
                   ),
                   child: Slider(
                     value: progress,
@@ -2641,12 +3230,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ],
             ),
           ),
+          const SizedBox(width: 8),
           Text(
             '${_formatDuration(currentSec)} / ${_formatDuration(totalSec)}',
-            style: const TextStyle(fontSize: 11, color: SalesTrackTheme.textMuted),
+            style: TextStyle(fontSize: 11, color: colors.textMuted),
           ),
           IconButton(
-            icon: const Icon(Icons.close_rounded, color: SalesTrackTheme.textMuted, size: 20),
+            icon: Icon(Icons.close_rounded, color: colors.textMuted, size: 20),
             onPressed: () => service.stopRecording(),
           ),
         ],

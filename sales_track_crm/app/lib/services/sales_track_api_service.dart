@@ -27,7 +27,7 @@ class SalesTrackApiService {
   static const String _prefDeviceUid = 'mks_device_uid';
   static const String _prefCookies = 'mks_session_cookies';
 
-  static const String defaultServerUrl = 'https://crm.make360.in/mks_sales_track/api/v1/';
+  static const String defaultServerUrl = '';
 
   String _serverUrl = defaultServerUrl;
   String? _token;
@@ -39,15 +39,20 @@ class SalesTrackApiService {
   String? get deviceUid => _deviceUid;
   bool get isPaired => _token != null && _token!.isNotEmpty;
 
-  String get apiBaseUrl => '${normalizeServerUrl(_serverUrl)}/mks_sales_track/api/v1';
+  String get apiBaseUrl {
+    final normalized = normalizeServerUrl(_serverUrl);
+    return normalized.isEmpty ? '' : '$normalized/mks_sales_track/api/v1';
+  }
 
   /// The CRM's own address from whatever was typed, pasted or scanned:
-  /// "crm.make360.in", "https://crm.make360.in/admin/mks_sales_track/devices"
-  /// and "https://crm.make360.in/mks_sales_track/api/v1/" all become
-  /// "https://crm.make360.in". A CRM in a folder or behind index.php keeps it.
+  /// e.g. "https://crm.yourcompany.com", "https://crm.yourcompany.com/admin/mks_sales_track/devices"
+  /// and "https://crm.yourcompany.com/mks_sales_track/api/v1/" all become
+  /// "https://crm.yourcompany.com". A CRM in a folder or behind index.php keeps it.
   static String normalizeServerUrl(String input) {
     var url = input.trim().replaceAll(RegExp(r'\s+'), '');
-    if (url.isEmpty) return url;
+    if (url.isEmpty || url == 'https://' || url == 'http://') return '';
+    // Fix accidental duplicate protocol prefixes e.g. https://https://
+    url = url.replaceAll(RegExp(r'^(https?://)+', caseSensitive: false), 'https://');
     if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(url)) {
       if (url.startsWith('localhost') ||
           url.startsWith('10.') ||
@@ -64,6 +69,9 @@ class SalesTrackApiService {
     url = url.replaceFirst(RegExp(r'(/mks_sales_track/api/v1|/admin)(/.*)?$', caseSensitive: false), '');
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
+    }
+    if (url == 'https:/' || url == 'https:' || url == 'http:/' || url == 'http:') {
+      return '';
     }
     return url;
   }
@@ -91,7 +99,15 @@ class SalesTrackApiService {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    _serverUrl = prefs.getString(_prefServerUrl) ?? defaultServerUrl;
+    final savedUrl = prefs.getString(_prefServerUrl);
+    if (savedUrl != null && savedUrl.isNotEmpty && !savedUrl.contains('crm.make360.in')) {
+      _serverUrl = savedUrl;
+    } else {
+      _serverUrl = defaultServerUrl;
+      if (savedUrl != null && savedUrl.contains('crm.make360.in')) {
+        await prefs.remove(_prefServerUrl);
+      }
+    }
     _token = prefs.getString(_prefToken);
     _deviceUid = prefs.getString(_prefDeviceUid);
     _sessionCookies = prefs.getString(_prefCookies);

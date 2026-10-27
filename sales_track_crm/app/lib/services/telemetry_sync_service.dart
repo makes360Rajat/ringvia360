@@ -9,8 +9,8 @@ import 'local_database_service.dart';
 import '../main.dart';
 
 class TelemetrySyncService extends ChangeNotifier {
-  static const MethodChannel _platform = MethodChannel('com.makes360.salestrack/platform');
-  static const EventChannel _telemetryChannel = EventChannel('com.makes360.salestrack/telemetry_stream');
+  static const MethodChannel _platform = MethodChannel('com.CallVia360.app/platform');
+  static const EventChannel _telemetryChannel = EventChannel('com.CallVia360.app/telemetry_stream');
 
   final SalesTrackApiService api = SalesTrackApiService();
 

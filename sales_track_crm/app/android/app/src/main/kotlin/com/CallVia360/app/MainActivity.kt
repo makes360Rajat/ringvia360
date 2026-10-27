@@ -1,4 +1,4 @@
-package com.makes360.salestrack.sales_track_crm
+package com.CallVia360.app
 
 import android.Manifest
 import android.content.ComponentName
@@ -46,7 +46,7 @@ data class LocalRecordingItem(
 class MainActivity : FlutterActivity() {
 
     companion object {
-        const val METHOD_CHANNEL = "com.makes360.salestrack/platform"
+        const val METHOD_CHANNEL = "com.CallVia360.app/platform"
         private const val PERMISSIONS_REQUEST_CODE = 1001
 
         private var mediaPlayer: MediaPlayer? = null
