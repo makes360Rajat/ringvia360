@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sales_track_crm/models/sales_track_models.dart';
 import 'package:sales_track_crm/services/app_lock_service.dart';
+import 'package:sales_track_crm/services/sales_track_api_service.dart';
 
 void main() {
   group('Sales Track Backend Compatibility Tests', () {
@@ -171,6 +172,21 @@ void main() {
       expect(notifJson['kind'], equals('notification'));
       expect(notifJson['app'], equals('com.airtel.thanks'));
       expect(notifJson['text'], equals('Your balance is low'));
+    });
+
+    test('SalesTrackApiService keeps CRM host and API path independently configurable', () {
+      expect(SalesTrackApiService.defaultServerUrl, equals('https://crm.make360.in'));
+      expect(SalesTrackApiService.defaultApiPath, equals('/mks_sales_track/api/v1'));
+      final api = SalesTrackApiService();
+      expect(api.apiBaseUrl, equals('https://crm.make360.in/mks_sales_track/api/v1'));
+      expect(
+        SalesTrackApiService.serverUrlFromApiUrl('https://crm.example.com/crm/mks_sales_track/api/v1/'),
+        equals('https://crm.example.com/crm'),
+      );
+      expect(
+        SalesTrackApiService.apiPathFromApiUrl('https://crm.example.com/crm/mks_sales_track/api/v1/'),
+        equals('/mks_sales_track/api/v1'),
+      );
     });
   });
 }

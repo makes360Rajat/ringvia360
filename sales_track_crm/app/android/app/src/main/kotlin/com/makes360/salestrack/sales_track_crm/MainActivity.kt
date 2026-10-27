@@ -81,6 +81,17 @@ class MainActivity : FlutterActivity() {
         }.start()
     }
 
+    // SMS Observer for real-time sensing of outgoing AND incoming SMS messages
+    private var smsObserver: ContentObserver? = null
+    private var lastObservedSmsId: String = ""
+    private var lastObservedSmsDate: Long = 0L
+
+    private val checkLatestSmsRunnable = Runnable {
+        Thread {
+            processLatestSmsChange()
+        }.start()
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -352,13 +363,15 @@ class MainActivity : FlutterActivity() {
             }
         }
 
-        // Initialize CallLogObserver immediately
+        // Initialize CallLogObserver and SmsObserver immediately
         registerCallLogObserver()
+        registerSmsObserver()
     }
 
     override fun onResume() {
         super.onResume()
         registerCallLogObserver()
+        registerSmsObserver()
         val status = checkAllPermissions()
         TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
             "type" to "permissions_updated",
@@ -370,6 +383,7 @@ class MainActivity : FlutterActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSIONS_REQUEST_CODE) {
             registerCallLogObserver()
+            registerSmsObserver()
             val status = checkAllPermissions()
             TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
                 "type" to "permissions_updated",
@@ -385,6 +399,12 @@ class MainActivity : FlutterActivity() {
                 contentResolver.unregisterContentObserver(it)
             } catch (_: Exception) {}
             callLogObserver = null
+        }
+        smsObserver?.let {
+            try {
+                contentResolver.unregisterContentObserver(it)
+            } catch (_: Exception) {}
+            smsObserver = null
         }
         stopNativeAudio()
     }
@@ -413,6 +433,114 @@ class MainActivity : FlutterActivity() {
                 true,
                 callLogObserver!!
             )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // -------------------------------------------------------------
+    // Real-Time System SMS ContentObserver (Detects 100% Incoming & Outgoing SMS)
+    // -------------------------------------------------------------
+    private fun registerSmsObserver() {
+        if (smsObserver != null) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+
+        smsObserver = object : ContentObserver(observerHandler) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                super.onChange(selfChange, uri)
+                // Debounce 1.0s to allow SMS provider to fully write the message body and status
+                observerHandler.removeCallbacks(checkLatestSmsRunnable)
+                observerHandler.postDelayed(checkLatestSmsRunnable, 1000)
+            }
+        }
+
+        try {
+            contentResolver.registerContentObserver(
+                Telephony.Sms.CONTENT_URI,
+                true,
+                smsObserver!!
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun processLatestSmsChange() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+
+        try {
+            val projection = arrayOf(
+                Telephony.Sms._ID,
+                Telephony.Sms.ADDRESS,
+                Telephony.Sms.BODY,
+                Telephony.Sms.DATE,
+                Telephony.Sms.TYPE
+            )
+
+            val cursor = contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                projection,
+                null,
+                null,
+                "${Telephony.Sms.DATE} DESC"
+            ) ?: return
+
+            var rawId = ""
+            var address = ""
+            var body = ""
+            var dateMs = 0L
+            var type = Telephony.Sms.MESSAGE_TYPE_INBOX
+
+            cursor.use {
+                val idIdx = it.getColumnIndex(Telephony.Sms._ID)
+                val addrIdx = it.getColumnIndex(Telephony.Sms.ADDRESS)
+                val bodyIdx = it.getColumnIndex(Telephony.Sms.BODY)
+                val dateIdx = it.getColumnIndex(Telephony.Sms.DATE)
+                val typeIdx = it.getColumnIndex(Telephony.Sms.TYPE)
+
+                if (it.moveToFirst()) {
+                    rawId = if (idIdx >= 0) it.getString(idIdx) ?: "" else ""
+                    address = if (addrIdx >= 0) it.getString(addrIdx) ?: "" else ""
+                    body = if (bodyIdx >= 0) it.getString(bodyIdx) ?: "" else ""
+                    dateMs = if (dateIdx >= 0) it.getLong(dateIdx) else System.currentTimeMillis()
+                    type = if (typeIdx >= 0) it.getInt(typeIdx) else Telephony.Sms.MESSAGE_TYPE_INBOX
+                } else {
+                    return
+                }
+            }
+
+            if (rawId.isEmpty()) return
+            if (rawId == lastObservedSmsId && dateMs == lastObservedSmsDate) {
+                return
+            }
+            lastObservedSmsId = rawId
+            lastObservedSmsDate = dateMs
+
+            val resolvedName = ContactLookupHelper.resolveContactName(this, address)
+            val direction = if (type == Telephony.Sms.MESSAGE_TYPE_INBOX) "incoming" else "outgoing"
+
+            val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            val timestamp = isoFormat.format(Date(dateMs))
+
+            val event = mapOf(
+                "type" to "sms",
+                "uid" to "sms-$rawId-$dateMs",
+                "kind" to "sms",
+                "direction" to direction,
+                "number" to address,
+                "name" to (resolvedName ?: address),
+                "sim" to 1,
+                "text" to body,
+                "time" to dateMs,
+                "timestamp" to timestamp,
+                "source" to "auto"
+            )
+
+            TelemetryBridgeChannel.sendTelemetryEvent(event)
         } catch (e: Exception) {
             e.printStackTrace()
         }

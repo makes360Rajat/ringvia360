@@ -1,17 +1,29 @@
-# sales_track_crm
+# Sales Track CRM
 
-A new Flutter project.
+A Flutter/Dart mobile companion for sales-call tracking. It pairs with a Sales
+Track backend, guides first-time setup, records call outcomes, and keeps local
+telemetry ready to sync when connectivity is available.
 
-## Getting Started
+## Run
 
-This project is a starting point for a Flutter application.
+```bash
+flutter pub get
+flutter run
+```
 
-A few resources to get you started if this is your first Flutter project:
+## Verify
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+```bash
+flutter test
+```
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Included capabilities
+
+- Secure device pairing and first-run setup
+- Call outcome capture and contact lookup
+- Local SQLite storage for offline resilience
+- Background telemetry synchronization
+- Optional application lock protection
+
+The application source is in `lib/`; Android, iOS, web, macOS, Linux, and
+Windows runners are included.

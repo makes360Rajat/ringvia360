@@ -37,6 +37,7 @@ class TelemetrySyncService extends ChangeNotifier {
   int get pendingSmsCount => _pendingSmsCount;
   int get pendingWhatsAppCount => _pendingWhatsAppCount;
   int get pendingRecordingsCount => _pendingRecordingsCount;
+  int get pendingEventsCount => _pendingCallsCount + _pendingSmsCount + _pendingWhatsAppCount;
 
   CrmDevice? get device => _device;
   CrmStaff? get staff => _staff;
@@ -115,6 +116,7 @@ class TelemetrySyncService extends ChangeNotifier {
   // Sync Queue (Offline persistent queue)
   final List<SalesTrackEvent> _pendingQueue = [];
   final Set<String> _pendingUids = {};
+  bool _syncPendingAgain = false;
   List<SalesTrackEvent> get pendingQueue => List.unmodifiable(_pendingQueue);
   int get pendingQueueCount => _pendingQueue.length;
 
@@ -251,14 +253,33 @@ class TelemetrySyncService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Future<SalesTrackApiResponse<Map<String, dynamic>>> pairWithCode({
     required String serverUrl,
+    required String apiPath,
     required String code,
   }) async {
     _statusMessage = 'Connecting to CRM...';
     notifyListeners();
 
     await fetchPlatformDeviceInfo();
+    if (_deviceInfo.isEmpty || _deviceInfo['uid'] == null || (_deviceInfo['uid'] as String).isEmpty) {
+      final prefs = await SharedPreferences.getInstance();
+      var uid = prefs.getString('mks_device_uid');
+      if (uid == null || uid.isEmpty) {
+        uid = 'dev-${DateTime.now().millisecondsSinceEpoch}';
+        await prefs.setString('mks_device_uid', uid);
+      }
+      _deviceInfo = {
+        'uid': uid,
+        'platform': defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
+        'manufacturer': 'Android',
+        'model': 'Device',
+        'os_version': '14',
+        'app_version': '1.8.5',
+      };
+    }
+
     final res = await api.pair(
       serverUrl: serverUrl,
+      apiPath: apiPath,
       code: code,
       deviceInfo: _deviceInfo,
     );
@@ -269,26 +290,46 @@ class TelemetrySyncService extends ChangeNotifier {
       final s = res.data!['staff'];
       final c = res.data!['config'];
 
-      if (d is Map<String, dynamic>) _device = CrmDevice.fromJson(d);
-      if (s is Map<String, dynamic>) _staff = CrmStaff.fromJson(s);
-      if (c is Map<String, dynamic>) _config = SalesTrackConfig.fromJson(c);
+      // The phone is paired once the token is saved: nothing read below may
+      // turn that into a failure on screen.
+      try {
+        if (d is Map<String, dynamic>) _device = CrmDevice.fromJson(d);
+        if (s is Map<String, dynamic>) _staff = CrmStaff.fromJson(s);
+        if (c is Map<String, dynamic>) _config = SalesTrackConfig.fromJson(c);
+      } catch (e) {
+        debugPrint('Paired, but the CRM settings could not be read yet: $e');
+      }
 
       await _persistMeta();
       _startHeartbeatLoop();
       _statusMessage = 'Paired with ${_device?.name ?? "CRM"}';
+      notifyListeners();
 
-      // Load calls from phone storage and sync
-      await syncDeviceCallLogs();
-      await syncDeviceSms();
-      await scanLocalRecordings();
-      await fetchCallLists();
-      await syncNow();
+      // Reading the call log, SMS and recordings and sending them can take
+      // minutes on a busy phone: it runs in the background, so the pairing
+      // screen finishes at once and the code is never left half used.
+      unawaited(_firstImport());
+      return res;
     } else {
       _statusMessage = res.message ?? 'Pairing failed';
     }
 
     notifyListeners();
     return res;
+  }
+
+  /// The first import after pairing: every step on its own, so one that
+  /// fails does not stop the others; the regular sync catches up later.
+  Future<void> _firstImport() async {
+    final steps = <Future<void> Function()>[syncDeviceCallLogs, syncDeviceSms, scanLocalRecordings, fetchCallLists, syncNow];
+    for (final step in steps) {
+      try {
+        await step();
+      } catch (e) {
+        debugPrint('First import step failed: $e');
+      }
+    }
+    notifyListeners();
   }
 
   Future<void> unpair() async {
@@ -470,13 +511,18 @@ class TelemetrySyncService extends ChangeNotifier {
       syncNow();
     } else if (type == 'whatsapp_message') {
       final uid = raw['uid']?.toString() ?? 'wamsg-${DateTime.now().millisecondsSinceEpoch}';
+      String number = raw['number']?.toString() ?? '';
+      String name = raw['sender']?.toString() ?? raw['name']?.toString() ?? 'WhatsApp Contact';
+      if (number.isEmpty && RegExp(r'^\+?[0-9\s\-()]{7,}$').hasMatch(name)) {
+        number = name;
+      }
       final event = SalesTrackEvent(
         uid: uid,
         kind: 'whatsapp_message',
         time: (raw['time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
         direction: 'incoming',
-        number: raw['number']?.toString() ?? '',
-        name: raw['sender']?.toString() ?? 'WhatsApp Contact',
+        number: number,
+        name: name,
         app: raw['packageName']?.toString() ?? 'com.whatsapp',
         text: raw['text']?.toString() ?? '',
         source: 'auto',
@@ -667,6 +713,9 @@ class TelemetrySyncService extends ChangeNotifier {
     if (aMatch != null && bMatch != null && aMatch.group(1) == bMatch.group(1)) {
       return true;
     }
+    if (a.text != null && b.text != null && a.text!.isNotEmpty && b.text!.isNotEmpty && a.text != b.text) {
+      return false;
+    }
     if (a.direction == b.direction &&
         numbersMatch(a.number, b.number) &&
         (a.time - b.time).abs() <= 60000) {
@@ -708,8 +757,10 @@ class TelemetrySyncService extends ChangeNotifier {
           if (timeNumIndex.containsKey(k)) {
             final candIdx = timeNumIndex[k]!;
             if ((result[candIdx].time - sms.time).abs() <= 60000) {
-              existingIdx = candIdx;
-              break;
+              if (result[candIdx].text == null || sms.text == null || result[candIdx].text!.isEmpty || sms.text!.isEmpty || result[candIdx].text == sms.text) {
+                existingIdx = candIdx;
+                break;
+              }
             }
           }
         }
@@ -743,8 +794,13 @@ class TelemetrySyncService extends ChangeNotifier {
 
   static bool isSameWhatsApp(SalesTrackEvent a, SalesTrackEvent b) {
     if (a.uid.isNotEmpty && b.uid.isNotEmpty && a.uid == b.uid) return true;
-    if (a.kind == b.kind &&
-        (a.time - b.time).abs() <= 60000 &&
+    if (a.kind != b.kind) return false;
+    if (a.kind == 'whatsapp_message') {
+      if (a.text != null && b.text != null && a.text!.isNotEmpty && b.text!.isNotEmpty && a.text != b.text) {
+        return false;
+      }
+    }
+    if ((a.time - b.time).abs() <= 60000 &&
         (a.name == b.name || numbersMatch(a.number, b.number))) {
       return true;
     }
@@ -876,6 +932,9 @@ class TelemetrySyncService extends ChangeNotifier {
 
         _statusMessage = 'Fetched ${_calls.length} calls from dialer ($newCount new)';
         notifyListeners();
+        if (_isPaired && (_pendingQueue.isNotEmpty || _pendingCallsCount > 0)) {
+          syncNow();
+        }
       }
     } catch (e) {
       debugPrint('Error fetching historical call logs: $e');
@@ -909,6 +968,9 @@ class TelemetrySyncService extends ChangeNotifier {
         await _persistQueue();
         await refreshPendingCounts();
         notifyListeners();
+        if (_isPaired && (_pendingQueue.isNotEmpty || _pendingSmsCount > 0)) {
+          syncNow();
+        }
       }
     } catch (e) {
       debugPrint('Error fetching historical SMS: $e');
@@ -944,6 +1006,9 @@ class TelemetrySyncService extends ChangeNotifier {
           await _persistQueue();
           await refreshPendingCounts();
           notifyListeners();
+          if (_isPaired && (_pendingQueue.isNotEmpty || _pendingWhatsAppCount > 0)) {
+            syncNow();
+          }
         }
       }
     } catch (e) {
@@ -1033,7 +1098,11 @@ class TelemetrySyncService extends ChangeNotifier {
 
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
-    if ((event.kind == 'sms' || event.kind == 'whatsapp_message' || event.kind == 'notification') && !_config.trackingSms) return;
+    if (event.kind == 'whatsapp_message') {
+      if (!_config.trackingWhatsappCalls && !_config.trackingSms) return;
+    } else if ((event.kind == 'sms' || event.kind == 'notification') && !_config.trackingSms) {
+      return;
+    }
 
     // Strict deduplication: Do not re-enqueue if already synced
     if (event.syncStatus == 'synced') return;
@@ -1045,29 +1114,9 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> syncNow({String? targetKind, bool uploadRecordings = true, bool alreadyMarkedSyncing = false}) async {
-    if (!_isPaired || (_isSyncing && !alreadyMarkedSyncing)) return;
-
-    // Refresh pending queue from SQLite for target kind
-    final pendingDb = await LocalDatabaseService.instance.getPendingEvents(kind: targetKind, limit: 500);
-    for (final p in pendingDb) {
-      if (!_pendingUids.contains(p.uid)) {
-        _pendingQueue.add(p);
-        _pendingUids.add(p.uid);
-      }
-    }
-
-    final pendingRecs = uploadRecordings
-        ? await LocalDatabaseService.instance.getPendingRecordings(limit: 50)
-        : <SalesTrackEvent>[];
-
-    if (_pendingQueue.isEmpty && pendingRecs.isEmpty) {
-      _syncProgress = 1.0;
-      _statusMessage = 'Up to date (Device and CRM synced)';
-      await refreshPendingCounts();
-      if (!alreadyMarkedSyncing) {
-        _isSyncing = false;
-      }
-      notifyListeners();
+    if (!_isPaired) return;
+    if (_isSyncing && !alreadyMarkedSyncing) {
+      _syncPendingAgain = true;
       return;
     }
 
@@ -1080,25 +1129,27 @@ class TelemetrySyncService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      bool isMatchKind(SalesTrackEvent e, String? target) {
-        if (target == null) return true;
-        if (target == 'sms') {
-          return e.kind == 'sms' || e.kind == 'whatsapp_message' || e.kind == 'notification';
-        }
-        return e.kind == target;
-      }
-
-      int totalEventsToSync = (targetKind != null)
-          ? _pendingQueue.where((e) => isMatchKind(e, targetKind)).length
-          : _pendingQueue.length;
+      final batchSize = _config.batchSize > 0 ? _config.batchSize : 100;
       int completedEvents = 0;
-      int maxBatches = 20;
 
-      while (_pendingQueue.isNotEmpty && maxBatches > 0) {
-        maxBatches--;
-        final batch = (targetKind != null)
-            ? _pendingQueue.where((e) => isMatchKind(e, targetKind)).take(_config.batchSize).toList()
-            : _pendingQueue.take(_config.batchSize).toList();
+      // Query database pending count to compute progress
+      final pendingCounts = await LocalDatabaseService.instance.getPendingCounts();
+      final totalEventsToSync = targetKind == 'call'
+          ? pendingCounts['pendingCalls']!
+          : (targetKind == 'whatsapp'
+              ? pendingCounts['pendingWhatsApp']!
+              : (targetKind == 'sms'
+                  ? pendingCounts['pendingSms']!
+                  : pendingCounts['pendingTotal']!));
+
+      // Loop and upload all pending events in batches directly from SQLite
+      bool keepSyncing = true;
+      String? serverSyncError;
+      while (keepSyncing) {
+        final batch = await LocalDatabaseService.instance.getPendingEvents(
+          kind: targetKind,
+          limit: batchSize,
+        );
 
         if (batch.isEmpty) break;
 
@@ -1114,6 +1165,10 @@ class TelemetrySyncService extends ChangeNotifier {
           final rejected = (res.data!['rejected'] as List? ?? []).map((r) => r['uid']?.toString()).whereType<String>().toList();
 
           final finishedUids = {...stored, ...duplicate, ...skipped, ...rejected}.toList();
+          if (finishedUids.isEmpty) {
+            finishedUids.addAll(batch.map((e) => e.uid));
+          }
+
           _pendingQueue.removeWhere((e) => finishedUids.contains(e.uid));
           _pendingUids.removeWhere((u) => finishedUids.contains(u));
 
@@ -1137,35 +1192,41 @@ class TelemetrySyncService extends ChangeNotifier {
 
           completedEvents += finishedUids.length;
           _syncProgress = (completedEvents / (totalEventsToSync > 0 ? totalEventsToSync : 1) * 0.7).clamp(0.05, 0.7);
-          _statusMessage = 'Synced $completedEvents items (${_pendingQueue.length} pending)...';
+          _statusMessage = 'Synced $completedEvents items to CRM...';
           notifyListeners();
         } else {
-          _statusMessage = 'Server: ${res.message ?? res.error ?? "Failed"} (saved locally)';
+          serverSyncError = res.message ?? res.error ?? 'Server rejected sync';
+          _statusMessage = 'Server: $serverSyncError (saved locally in SQLite)';
+          keepSyncing = false;
           break;
         }
       }
 
-      // Upload remaining audio recordings if enabled
+      // Upload audio recordings if enabled
       if (uploadRecordings && _config.trackingRecordings) {
-        final recsToUpload = await LocalDatabaseService.instance.getPendingRecordings(limit: 30);
-        for (int i = 0; i < recsToUpload.length; i++) {
-          final rec = recsToUpload[i];
-          if (rec.recordingPath != null && rec.recordingPath!.isNotEmpty) {
-            _syncProgressMessage = 'Uploading audio recording (${i + 1}/${recsToUpload.length})...';
-            _syncProgress = (0.7 + ((i + 1) / recsToUpload.length) * 0.25).clamp(0.7, 0.95);
-            notifyListeners();
+        bool recsSuccess = true;
+        while (recsSuccess) {
+          final recsToUpload = await LocalDatabaseService.instance.getPendingRecordings(limit: 10);
+          if (recsToUpload.isEmpty) break;
+          for (int i = 0; i < recsToUpload.length; i++) {
+            final rec = recsToUpload[i];
+            if (rec.recordingPath != null && rec.recordingPath!.isNotEmpty) {
+              _syncProgressMessage = 'Uploading audio recording (${rec.name.isNotEmpty ? rec.name : rec.number})...';
+              _syncProgress = 0.85;
+              notifyListeners();
 
-            var upRes = await api.uploadRecording(uid: rec.uid, audioFilePath: rec.recordingPath!);
-            if (!upRes.success && upRes.statusCode == 404) {
-              // Ensure call event exists in CRM first, then retry upload
-              await api.syncEvents([rec]);
-              upRes = await api.uploadRecording(uid: rec.uid, audioFilePath: rec.recordingPath!);
-            }
+              var upRes = await api.uploadRecording(uid: rec.uid, audioFilePath: rec.recordingPath!);
+              if (!upRes.success && upRes.statusCode == 404) {
+                await api.syncEvents([rec]);
+                upRes = await api.uploadRecording(uid: rec.uid, audioFilePath: rec.recordingPath!);
+              }
 
-            if (upRes.success || upRes.data?['already'] == true) {
-              await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
-            } else {
-              await LocalDatabaseService.instance.markRecordingFailed(rec.uid);
+              if (upRes.success || upRes.data?['already'] == true) {
+                await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+              } else {
+                await LocalDatabaseService.instance.markRecordingFailed(rec.uid);
+                recsSuccess = false;
+              }
             }
           }
         }
@@ -1182,6 +1243,11 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       await LocalDatabaseService.instance.cleanupDuplicates();
+      final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 5000);
+      _pendingQueue.clear();
+      _pendingQueue.addAll(pendingFromDb);
+      _pendingUids.clear();
+      _pendingUids.addAll(pendingFromDb.map((e) => e.uid).where((u) => u.isNotEmpty));
       await _persistCalls();
       await _persistSms();
       await _persistWhatsApp();
@@ -1191,19 +1257,29 @@ class TelemetrySyncService extends ChangeNotifier {
       _lastSyncTime = DateTime.now();
       _syncProgress = 1.0;
       _syncProgressMessage = 'Sync Complete';
-      if (_pendingQueue.isEmpty && _pendingRecordingsCount == 0) {
+      if (pendingEventsCount == 0 && _pendingRecordingsCount == 0) {
         _statusMessage = 'Up to date (All data synced with CRM)';
+      } else if (serverSyncError != null) {
+        if (serverSyncError.toLowerCase().contains('token') || serverSyncError.toLowerCase().contains('pair')) {
+          _statusMessage = 'Device token expired. Pair again. ($pendingEventsCount queued in offline DB)';
+        } else {
+          _statusMessage = 'Server: $serverSyncError ($pendingEventsCount events, $_pendingRecordingsCount recs pending)';
+        }
       } else {
-        _statusMessage = 'Sync finished (${_pendingQueue.length} events, $_pendingRecordingsCount recs pending)';
+        _statusMessage = 'Sync finished ($pendingEventsCount events, $_pendingRecordingsCount recs pending)';
       }
     } catch (e) {
-      _statusMessage = 'Offline: Saved in local SQLite database (${_pendingQueue.length} pending)';
+      _statusMessage = 'Offline: Saved in local SQLite database ($pendingEventsCount pending)';
       _syncProgressMessage = 'Offline - saved locally';
     } finally {
       if (!alreadyMarkedSyncing) {
         _isSyncing = false;
       }
       notifyListeners();
+      if (_syncPendingAgain) {
+        _syncPendingAgain = false;
+        Future.microtask(() => syncNow(targetKind: targetKind, uploadRecordings: uploadRecordings));
+      }
     }
   }
 
@@ -1233,7 +1309,7 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> syncWhatsAppOnly() async {
     await syncActiveWhatsAppNotifications();
-    await syncNow(targetKind: 'whatsapp_call', uploadRecordings: false);
+    await syncNow(targetKind: 'whatsapp', uploadRecordings: false);
   }
 
   Future<void> syncSmsOnly() async {
@@ -1299,7 +1375,7 @@ class TelemetrySyncService extends ChangeNotifier {
         c.syncStatus = 'pending';
       }
     }
-    if (kind == null || kind == 'whatsapp_call') {
+    if (kind == null || kind == 'whatsapp' || kind == 'whatsapp_call' || kind == 'whatsapp_message') {
       for (final w in _whatsappEvents) {
         w.syncStatus = 'pending';
       }
@@ -1311,7 +1387,7 @@ class TelemetrySyncService extends ChangeNotifier {
     }
 
     _pendingQueue.clear();
-    final allPending = await LocalDatabaseService.instance.getPendingEvents(kind: kind, limit: 1000);
+    final allPending = await LocalDatabaseService.instance.getPendingEvents(kind: kind, limit: 50000);
     _pendingQueue.addAll(allPending);
 
     await _persistCalls();
@@ -1596,7 +1672,7 @@ class TelemetrySyncService extends ChangeNotifier {
     // 1. Try loading from SQLite first (Offline-First source of truth)
     try {
       final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call');
-      final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp_call');
+      final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp');
       final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms');
 
       if (dbCalls.isNotEmpty || dbWa.isNotEmpty || dbSms.isNotEmpty) {

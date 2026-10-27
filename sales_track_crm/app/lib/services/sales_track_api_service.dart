@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -22,45 +23,134 @@ class SalesTrackApiResponse<T> {
 
 class SalesTrackApiService {
   static const String _prefServerUrl = 'mks_server_url';
+  static const String _prefApiPath = 'mks_api_path';
   static const String _prefToken = 'mks_device_token';
   static const String _prefDeviceUid = 'mks_device_uid';
   static const String _prefCookies = 'mks_session_cookies';
 
-  String _serverUrl = 'https://crm.make360.in';
+  /// The install-specific CRM host. Each customer enters this during pairing.
+  static const String defaultServerUrl = 'https://crm.make360.in';
+  /// The Sales Track module route. This is normally identical for every CRM,
+  /// but is editable for installations that use a custom module route.
+  static const String defaultApiPath = '/mks_sales_track/api/v1';
+
+  String _serverUrl = defaultServerUrl;
+  String _apiPath = defaultApiPath;
   String? _token;
   String? _deviceUid;
   String? _sessionCookies;
 
   String get serverUrl => _serverUrl;
+  String get apiPath => _apiPath;
   String? get token => _token;
   String? get deviceUid => _deviceUid;
   bool get isPaired => _token != null && _token!.isNotEmpty;
 
-  String get apiBaseUrl {
-    var url = _serverUrl.trim();
-    if (url.endsWith('/')) {
+  String get apiBaseUrl => '${normalizeServerUrl(_serverUrl)}${normalizeApiPath(_apiPath)}';
+
+  /// The CRM's own address from whatever was typed, pasted or scanned:
+  /// "crm.make360.in", "https://crm.make360.in/admin/mks_sales_track/devices"
+  /// and "https://crm.make360.in/mks_sales_track/api/v1/" all become
+  /// "https://crm.make360.in". A CRM in a folder or behind index.php keeps it.
+  static String normalizeServerUrl(String input) {
+    var url = input.trim().replaceAll(RegExp(r'\s+'), '');
+    if (url.isEmpty) return url;
+    if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(url)) {
+      url = 'https://$url';
+    }
+    url = url.replaceFirst(RegExp(r'[?#].*$'), '');
+    url = url.replaceFirst(RegExp(r'(/mks_sales_track/api/v1|/admin)(/.*)?$', caseSensitive: false), '');
+    while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
-    if (url.endsWith('/mks_sales_track/api/v1')) {
-      return url;
+    return url;
+  }
+
+  /// Makes an API route safe to append to a CRM host.
+  static String normalizeApiPath(String input) {
+    var path = input.trim().replaceAll(RegExp(r'\s+'), '');
+    if (path.isEmpty) return defaultApiPath;
+    final uri = Uri.tryParse(path);
+    if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+      path = uri.path;
     }
-    return '$url/mks_sales_track/api/v1';
+    path = path.replaceFirst(RegExp(r'[?#].*$'), '');
+    if (!path.startsWith('/')) path = '/$path';
+    while (path.length > 1 && path.endsWith('/')) {
+      path = path.substring(0, path.length - 1);
+    }
+    return path.isEmpty || path == '/' ? defaultApiPath : path;
+  }
+
+  /// Splits a QR/API URL into the CRM host and its module route.
+  static String serverUrlFromApiUrl(String input) {
+    final normalized = input.trim().replaceAll(RegExp(r'\s+'), '');
+    final candidate = RegExp(r'^https?://', caseSensitive: false).hasMatch(normalized)
+        ? normalized
+        : 'https://$normalized';
+    final uri = Uri.tryParse(candidate);
+    if (uri == null || uri.host.isEmpty) return normalizeServerUrl(input);
+    const standardPath = '/mks_sales_track/api/v1';
+    final index = uri.path.toLowerCase().indexOf(standardPath);
+    final crmPrefix = index >= 0 ? uri.path.substring(0, index) : '';
+    return normalizeServerUrl('${uri.scheme}://${uri.authority}$crmPrefix');
+  }
+
+  static String apiPathFromApiUrl(String input) {
+    final normalized = input.trim().replaceAll(RegExp(r'\s+'), '');
+    final candidate = RegExp(r'^https?://', caseSensitive: false).hasMatch(normalized)
+        ? normalized
+        : 'https://$normalized';
+    final uri = Uri.tryParse(candidate);
+    if (uri == null || uri.host.isEmpty) return defaultApiPath;
+    const standardPath = '/mks_sales_track/api/v1';
+    final index = uri.path.toLowerCase().indexOf(standardPath);
+    return normalizeApiPath(index >= 0 ? uri.path.substring(index) : uri.path);
+  }
+
+  /// What a failed pairing means, in words a rep can act on.
+  static String pairingMessage(int status, String? error, String? message) {
+    switch (error) {
+      case 'invalid_code':
+        return 'That code is not right, or it was already used. Get a new code from the device in the CRM (Devices > the phone > New Code).';
+      case 'code_expired':
+        return 'That code has expired. Open the device in the CRM and get a new code.';
+      case 'too_many_attempts':
+        return 'Too many wrong codes. Wait a few minutes, then try again.';
+      case 'api_disabled':
+        return 'App connections are switched off in the CRM (Sales Track > Settings > Devices And App).';
+      case 'module_disabled':
+      case 'module_incomplete':
+        return 'Sales Track is switched off or still updating in the CRM. Try again in a minute.';
+      case 'invalid_device':
+        return 'The CRM could not read this phone\'s details. Update the app and try again.';
+    }
+    if (message != null && message.isNotEmpty) return message;
+    return 'Pairing failed (HTTP $status).';
   }
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    _serverUrl = prefs.getString(_prefServerUrl) ?? 'https://crm.make360.in';
+    final savedServerUrl = prefs.getString(_prefServerUrl) ?? defaultServerUrl;
+    final savedApiPath = prefs.getString(_prefApiPath);
+    // Upgrade existing devices that stored one combined API address.
+    _serverUrl = serverUrlFromApiUrl(savedServerUrl);
+    _apiPath = savedApiPath == null
+        ? apiPathFromApiUrl(savedServerUrl)
+        : normalizeApiPath(savedApiPath);
     _token = prefs.getString(_prefToken);
     _deviceUid = prefs.getString(_prefDeviceUid);
     _sessionCookies = prefs.getString(_prefCookies);
   }
 
-  Future<void> saveCredentials({required String serverUrl, required String token, required String deviceUid}) async {
-    _serverUrl = serverUrl;
+  Future<void> saveCredentials({required String serverUrl, required String apiPath, required String token, required String deviceUid}) async {
+    _serverUrl = normalizeServerUrl(serverUrl);
+    _apiPath = normalizeApiPath(apiPath);
     _token = token;
     _deviceUid = deviceUid;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefServerUrl, serverUrl);
+    await prefs.setString(_prefServerUrl, _serverUrl);
+    await prefs.setString(_prefApiPath, _apiPath);
     await prefs.setString(_prefToken, token);
     await prefs.setString(_prefDeviceUid, deviceUid);
   }
@@ -101,11 +191,9 @@ class SalesTrackApiService {
   }
 
   // 1. PING
-  Future<SalesTrackApiResponse<Map<String, dynamic>>> ping(String targetUrl) async {
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> ping(String serverUrl, {String apiPath = defaultApiPath}) async {
     try {
-      var base = targetUrl.trim();
-      if (base.endsWith('/')) base = base.substring(0, base.length - 1);
-      final endpoint = base.endsWith('/mks_sales_track/api/v1') ? '$base/ping' : '$base/mks_sales_track/api/v1/ping';
+      final endpoint = '${normalizeServerUrl(serverUrl)}${normalizeApiPath(apiPath)}/ping';
 
       final response = await http.get(
         Uri.parse(endpoint),
@@ -142,48 +230,94 @@ class SalesTrackApiService {
   // 2. PAIR
   Future<SalesTrackApiResponse<Map<String, dynamic>>> pair({
     required String serverUrl,
+    required String apiPath,
     required String code,
     required Map<String, dynamic> deviceInfo,
   }) async {
     try {
-      _serverUrl = serverUrl;
+      _serverUrl = normalizeServerUrl(serverUrl);
+      _apiPath = normalizeApiPath(apiPath);
+      final cleanCode = code.replaceAll(RegExp(r'[\s-]+'), '');
       final endpoint = '$apiBaseUrl/pair';
       final payload = {
-        'code': code.trim(),
+        'code': cleanCode,
         'device': deviceInfo,
       };
 
+      // A fresh start: no token, device id or cookie from an earlier pairing.
       final response = await http.post(
         Uri.parse(endpoint),
-        headers: _buildHeaders(),
+        headers: const {'Content-Type': 'application/json; charset=UTF-8', 'Accept': 'application/json'},
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 30));
+
+      // A redirect (http to https, another host) is not followed for a POST:
+      // say where the CRM really is instead of failing on an HTML page.
+      if (response.statusCode >= 300 && response.statusCode < 400) {
+        final to = response.headers['location'] ?? '';
+        return SalesTrackApiResponse(
+          success: false,
+          error: 'REDIRECTED',
+          message: to.isNotEmpty ? 'The CRM moved to $to. Enter that address and try again.' : 'The CRM address redirects elsewhere. Check the address.',
+          statusCode: response.statusCode,
+        );
+      }
+
+      Map<String, dynamic> body;
+      try {
+        final decoded = jsonDecode(response.body);
+        body = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+      } catch (_) {
+        body = <String, dynamic>{};
+      }
+
+      if (body.isEmpty) {
+        return SalesTrackApiResponse(
+          success: false,
+          error: 'NOT_SALES_TRACK',
+          message: response.statusCode == 404
+              ? 'Sales Track was not found at $_serverUrl. Check the CRM address, and that the module is active.'
+              : 'The CRM answered with an error page (HTTP ${response.statusCode}). Check the address, or ask the CRM administrator.',
+          statusCode: response.statusCode,
+        );
+      }
 
       _saveCookiesFromResponse(response);
 
-      final Map<String, dynamic> body = jsonDecode(response.body);
-      if (response.statusCode == 200 && body['success'] == true) {
-        final token = body['token']?.toString() ?? '';
+      if (response.statusCode == 200 && body['success'] == true && (body['token']?.toString() ?? '').isNotEmpty) {
+        final token = body['token'].toString();
         final uid = deviceInfo['uid']?.toString() ?? '';
-        await saveCredentials(serverUrl: serverUrl, token: token, deviceUid: uid);
+        await saveCredentials(serverUrl: _serverUrl, apiPath: _apiPath, token: token, deviceUid: uid);
         return SalesTrackApiResponse(
           success: true,
           data: body,
           statusCode: response.statusCode,
         );
-      } else {
-        return SalesTrackApiResponse(
-          success: false,
-          error: body['error']?.toString() ?? 'PAIRING_FAILED',
-          message: body['message']?.toString() ?? 'Pairing failed',
-          statusCode: response.statusCode,
-        );
       }
+
+      return SalesTrackApiResponse(
+        success: false,
+        error: body['error']?.toString() ?? 'PAIRING_FAILED',
+        message: pairingMessage(response.statusCode, body['error']?.toString(), body['message']?.toString()),
+        statusCode: response.statusCode,
+      );
+    } on TimeoutException {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'TIMEOUT',
+        message: 'The CRM did not answer in 30 seconds. Check the internet connection and try again.',
+        statusCode: 0,
+      );
     } catch (e) {
+      final text = e.toString();
       return SalesTrackApiResponse(
         success: false,
         error: 'CONNECTION_ERROR',
-        message: e.toString(),
+        message: text.contains('SocketException') || text.contains('Failed host lookup')
+            ? 'Cannot reach $_serverUrl. Check the address and the internet connection.'
+            : (text.contains('HandshakeException') || text.contains('CERTIFICATE')
+                ? 'The CRM\'s security certificate was refused. Use its https address exactly as in the browser.'
+                : text),
         statusCode: 0,
       );
     }
@@ -443,6 +577,56 @@ class SalesTrackApiService {
       }
     } catch (e) {
       return SalesTrackApiResponse(success: false, error: e.toString(), statusCode: 0);
+    }
+  }
+
+  // 9. FETCH SERVER EVENTS
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> fetchEvents({
+    String? kind,
+    int limit = 100,
+    int page = 1,
+    String? since,
+  }) async {
+    if (!isPaired) {
+      return SalesTrackApiResponse(success: false, error: 'NOT_PAIRED', statusCode: 401);
+    }
+    try {
+      final queryParams = <String, String>{
+        'limit': limit.toString(),
+        'page': page.toString(),
+      };
+      if (kind != null && kind.isNotEmpty) queryParams['kind'] = kind;
+      if (since != null && since.isNotEmpty) queryParams['since'] = since;
+
+      final uri = Uri.parse('$apiBaseUrl/events').replace(queryParameters: queryParams);
+      final response = await http.get(
+        uri,
+        headers: _buildHeaders(),
+      ).timeout(const Duration(seconds: 15));
+
+      _saveCookiesFromResponse(response);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        return SalesTrackApiResponse(
+          success: body['success'] == true,
+          data: body,
+          statusCode: response.statusCode,
+        );
+      } else {
+        return SalesTrackApiResponse(
+          success: false,
+          error: 'FETCH_EVENTS_FAILED',
+          statusCode: response.statusCode,
+        );
+      }
+    } catch (e) {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'CONNECTION_ERROR',
+        message: e.toString(),
+        statusCode: 0,
+      );
     }
   }
 }
