@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
+import '../../models/sales_track_models.dart';
 import '../../services/sales_track_api_service.dart';
 import '../../services/telemetry_sync_service.dart';
+import '../widgets/app_update_dialog.dart';
 
 class PairingScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -90,6 +92,32 @@ class _PairingScreenState extends State<PairingScreen> {
           _pingMessage = 'Server unreachable: ${res.message ?? res.error}';
         }
       });
+
+      // Check for app update in the background after pinging
+      widget.syncService.api.fetchAppUpdate(targetUrl: url).then((upRes) {
+        if (!mounted) return;
+        if (upRes.success && upRes.data != null && upRes.data!.isNotEmpty) {
+          final info = upRes.data!;
+          final current = SalesTrackApiService.currentAppVersion;
+          final isBelowMin = info.minVersion.isNotEmpty &&
+              compareAppVersions(current, info.minVersion) < 0;
+          final isBelowLatest = info.latestVersion.isNotEmpty &&
+              compareAppVersions(current, info.latestVersion) < 0;
+
+          if (isBelowMin || isBelowLatest) {
+            showDialog(
+              context: context,
+              barrierDismissible: !isBelowMin,
+              builder: (dCtx) => AppUpdateDialog(
+                updateInfo: info,
+                isMandatory: isBelowMin,
+                onUpdate: () => widget.syncService.launchAppUpdateUrl(info.urlAndroid),
+                onDismiss: () => Navigator.of(dCtx).pop(),
+              ),
+            );
+          }
+        }
+      });
     }
   }
 
@@ -125,9 +153,36 @@ class _PairingScreenState extends State<PairingScreen> {
       if (mounted) {
         setState(() => _isPairing = false);
         if (res.success) {
-          widget.onPaired();
+          if (res.data?['update_required'] == true) {
+            final app = res.data?['config'] is Map && res.data?['config']['app'] is Map
+                ? AppUpdateInfo.fromJson(res.data!['config']['app'])
+                : const AppUpdateInfo();
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (dCtx) => AppUpdateDialog(
+                updateInfo: app,
+                isMandatory: true,
+                onUpdate: () => widget.syncService.launchAppUpdateUrl(app.urlAndroid),
+              ),
+            );
+          } else {
+            widget.onPaired();
+          }
         } else {
-          setState(() => _errorMessage = res.message ?? 'Pairing failed. Please verify the code.');
+          if (res.statusCode == 426) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (dCtx) => AppUpdateDialog(
+                updateInfo: const AppUpdateInfo(),
+                isMandatory: true,
+                onUpdate: () => widget.syncService.launchAppUpdateUrl(),
+              ),
+            );
+          } else {
+            setState(() => _errorMessage = res.message ?? 'Pairing failed. Please verify the code.');
+          }
         }
       }
     } catch (e) {

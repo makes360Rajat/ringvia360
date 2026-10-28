@@ -170,7 +170,7 @@ class MainActivity : FlutterActivity() {
                             "manufacturer" to Build.MANUFACTURER,
                             "model" to Build.MODEL,
                             "os_version" to Build.VERSION.RELEASE,
-                            "app_version" to "1.9.2",
+                            "app_version" to "1.0.2",
                             "batteryPercent" to batteryLevel,
                             "charging" to isCharging,
                             "network" to networkType,
@@ -318,6 +318,23 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("DIAL_ERROR", e.message, null)
+                    }
+                }
+
+                "launchUrl" -> {
+                    try {
+                        val url = call.argument<String>("url") ?: ""
+                        if (url.isNotEmpty()) {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    } catch (e: Exception) {
+                        result.error("LAUNCH_ERROR", e.message, null)
                     }
                 }
 

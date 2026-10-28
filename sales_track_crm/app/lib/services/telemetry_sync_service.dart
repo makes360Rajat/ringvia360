@@ -133,6 +133,66 @@ class TelemetrySyncService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // App Version Update State
+  AppUpdateInfo? _availableUpdate;
+  bool _isUpdateMandatory = false;
+
+  AppUpdateInfo? get availableUpdate => _availableUpdate;
+  bool get isUpdateMandatory => _isUpdateMandatory;
+
+  void dismissOptionalUpdate() {
+    if (!_isUpdateMandatory) {
+      _availableUpdate = null;
+      notifyListeners();
+    }
+  }
+
+  Future<AppUpdateInfo?> checkForAppUpdate({bool manual = false}) async {
+    try {
+      final res = await api.fetchAppUpdate();
+      if (res.success && res.data != null && res.data!.isNotEmpty) {
+        final info = res.data!;
+        final current = SalesTrackApiService.currentAppVersion;
+        final isBelowMin = info.minVersion.isNotEmpty &&
+            compareAppVersions(current, info.minVersion) < 0;
+        final isBelowLatest = info.latestVersion.isNotEmpty &&
+            compareAppVersions(current, info.latestVersion) < 0;
+
+        if (isBelowMin) {
+          _availableUpdate = info;
+          _isUpdateMandatory = true;
+          notifyListeners();
+          return info;
+        } else if (isBelowLatest) {
+          _availableUpdate = info;
+          _isUpdateMandatory = false;
+          notifyListeners();
+          return info;
+        }
+      }
+      if (manual) {
+        _statusMessage = 'App is up to date (v${SalesTrackApiService.currentAppVersion})';
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Error checking app update: $e');
+    }
+    return null;
+  }
+
+  Future<void> launchAppUpdateUrl([String? url]) async {
+    final target = (url != null && url.isNotEmpty)
+        ? url
+        : (_availableUpdate?.urlAndroid.isNotEmpty == true
+            ? _availableUpdate!.urlAndroid
+            : 'https://play.google.com/store/apps/details?id=com.CallVia360.app');
+    try {
+      await _platform.invokeMethod('launchUrl', {'url': target});
+    } catch (e) {
+      debugPrint('Error launching update URL: $e');
+    }
+  }
+
   Future<CallerIdInfo?> lookupCallerInfo(String phone) async {
     try {
       final localInfo = await LocalDatabaseService.instance.lookupCallerInfo(phone);
@@ -208,6 +268,14 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> _init() async {
     await api.init();
     _isPaired = api.isPaired;
+
+    api.onUpdateRequired = (info, isMandatory) {
+      _availableUpdate = info;
+      _isUpdateMandatory = isMandatory;
+      notifyListeners();
+    };
+
+    checkForAppUpdate();
 
     await _loadSavedMeta();
     _listenToNativeEvents();
@@ -458,6 +526,9 @@ class TelemetrySyncService extends ChangeNotifier {
   /// or a network error never does.
   static bool _isPairingLost(SalesTrackApiResponse res) =>
       res.statusCode == 401 && const {'device_revoked', 'invalid_token', 'device_mismatch'}.contains(res.error);
+
+  static bool _isUpdateRequired(SalesTrackApiResponse res) =>
+      res.statusCode == 426 || res.error == 'update_required';
 
   Future<void> _handlePairingLost(String reason) async {
     if (!_isPaired) return;
@@ -1516,6 +1587,13 @@ class TelemetrySyncService extends ChangeNotifier {
             await _handlePairingLost(res.error ?? 'device_revoked');
             return;
           }
+          if (_isUpdateRequired(res)) {
+            _isUpdateMandatory = true;
+            _statusMessage = 'App update required by CRM server';
+            notifyListeners();
+            keepSyncing = false;
+            break;
+          }
           serverSyncError = res.message ?? res.error ?? 'Server rejected sync';
           _statusMessage = 'Server: $serverSyncError (saved locally in SQLite)';
           keepSyncing = false;
@@ -1843,7 +1921,7 @@ class TelemetrySyncService extends ChangeNotifier {
 
     final res = await api.sendHeartbeat(
       health: health,
-      appVersion: _deviceInfo['app_version']?.toString() ?? '1.9.7',
+      appVersion: _deviceInfo['app_version']?.toString() ?? SalesTrackApiService.currentAppVersion,
       osVersion: _deviceInfo['os_version']?.toString() ?? '14',
       manufacturer: _deviceInfo['manufacturer']?.toString(),
       model: _deviceInfo['model']?.toString(),
@@ -1853,6 +1931,32 @@ class TelemetrySyncService extends ChangeNotifier {
       final c = res.data!['config'];
       if (c is Map<String, dynamic>) {
         _config = SalesTrackConfig.fromJson(c);
+      }
+
+      // Check for app update requirements from heartbeat config
+      if (res.data!['update_required'] == true) {
+        _isUpdateMandatory = true;
+        _availableUpdate = _config.appInfo.isNotEmpty
+            ? _config.appInfo
+            : AppUpdateInfo(
+                latestVersion: _config.appMinVersion,
+                minVersion: _config.appMinVersion,
+                notes: 'Essential update required by CRM server.',
+              );
+      } else if (_config.appInfo.isNotEmpty) {
+        final current = SalesTrackApiService.currentAppVersion;
+        final isBelowMin = _config.appInfo.minVersion.isNotEmpty &&
+            compareAppVersions(current, _config.appInfo.minVersion) < 0;
+        final isBelowLatest = _config.appInfo.latestVersion.isNotEmpty &&
+            compareAppVersions(current, _config.appInfo.latestVersion) < 0;
+
+        if (isBelowMin) {
+          _availableUpdate = _config.appInfo;
+          _isUpdateMandatory = true;
+        } else if (isBelowLatest && _availableUpdate == null) {
+          _availableUpdate = _config.appInfo;
+          _isUpdateMandatory = false;
+        }
       }
 
       // Process CRM commands
@@ -1865,6 +1969,14 @@ class TelemetrySyncService extends ChangeNotifier {
       notifyListeners();
     } else if (_isPairingLost(res)) {
       await _handlePairingLost(res.error ?? 'device_revoked');
+    } else if (_isUpdateRequired(res)) {
+      _isUpdateMandatory = true;
+      _availableUpdate ??= AppUpdateInfo(
+        latestVersion: _config.appMinVersion,
+        minVersion: _config.appMinVersion,
+        notes: 'Required app update needed to communicate with CRM server.',
+      );
+      notifyListeners();
     }
   }
 

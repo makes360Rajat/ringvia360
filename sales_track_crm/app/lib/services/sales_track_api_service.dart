@@ -28,6 +28,7 @@ class SalesTrackApiService {
   static const String _prefCookies = 'mks_session_cookies';
 
   static const String defaultServerUrl = 'https://crm.make360.in';
+  static const String currentAppVersion = '1.0.2';
 
   String _serverUrl = defaultServerUrl;
   String? _token;
@@ -153,6 +154,9 @@ class SalesTrackApiService {
   /// paired again on another phone. The sync service unpairs.
   void Function(String reason)? onPairingLost;
 
+  /// Told when the CRM indicates that the app is out of date (mandatory or optional).
+  void Function(AppUpdateInfo info, bool isMandatory)? onUpdateRequired;
+
   // The CRM's only answers that mean this phone is no longer paired: revoked,
   // deleted (its token is unknown) or paired again on another phone. A 403
   // (a feature switched off, an inactive staff account) or any other error
@@ -170,8 +174,32 @@ class SalesTrackApiService {
     } catch (_) {}
   }
 
+  void _watchUpdate(http.Response response) {
+    if (onUpdateRequired == null) return;
+    if (response.statusCode == 426) {
+      try {
+        final body = jsonDecode(response.body);
+        final info = body is Map<String, dynamic> ? AppUpdateInfo.fromJson(body) : const AppUpdateInfo();
+        onUpdateRequired!(info, true);
+      } catch (_) {
+        onUpdateRequired!(const AppUpdateInfo(), true);
+      }
+    } else {
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['update_required'] == true) {
+          final app = body['config'] is Map && body['config']['app'] is Map
+              ? AppUpdateInfo.fromJson(body['config']['app'])
+              : const AppUpdateInfo();
+          onUpdateRequired!(app, true);
+        }
+      } catch (_) {}
+    }
+  }
+
   void _saveCookiesFromResponse(http.Response response) async {
     _watchAuth(response);
+    _watchUpdate(response);
     final rawCookie = response.headers['set-cookie'];
     if (rawCookie != null && rawCookie.isNotEmpty) {
       _sessionCookies = rawCookie;
@@ -226,7 +254,54 @@ class SalesTrackApiService {
     }
   }
 
-  // 2. PAIR
+  // 2. APP UPDATE (GET, no token): update dialog
+  Future<SalesTrackApiResponse<AppUpdateInfo>> fetchAppUpdate({String? targetUrl}) async {
+    try {
+      final base = targetUrl != null ? normalizeServerUrl(targetUrl) : normalizeServerUrl(_serverUrl);
+      if (base.isEmpty) {
+        return SalesTrackApiResponse(
+          success: false,
+          error: 'EMPTY_URL',
+          message: 'Please enter a server URL',
+          statusCode: 0,
+        );
+      }
+      final endpoint = '$base/mks_sales_track/api/v1/app_update';
+
+      final response = await http.get(
+        Uri.parse(endpoint),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      _saveCookiesFromResponse(response);
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final updateInfo = AppUpdateInfo.fromJson(body);
+        return SalesTrackApiResponse(
+          success: body['success'] != false,
+          data: updateInfo,
+          statusCode: response.statusCode,
+        );
+      } else {
+        return SalesTrackApiResponse(
+          success: false,
+          error: 'HTTP_${response.statusCode}',
+          message: 'Server returned ${response.statusCode}',
+          statusCode: response.statusCode,
+        );
+      }
+    } catch (e) {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'CONNECTION_ERROR',
+        message: e.toString(),
+        statusCode: 0,
+      );
+    }
+  }
+
+  // 3. PAIR
   Future<SalesTrackApiResponse<Map<String, dynamic>>> pair({
     required String serverUrl,
     required String code,
@@ -339,7 +414,7 @@ class SalesTrackApiService {
       final endpoint = '$apiBaseUrl/config';
       final payload = <String, dynamic>{
         'health': health,
-        'app_version': appVersion ?? '1.9.7',
+        'app_version': appVersion ?? currentAppVersion,
         'os_version': osVersion ?? '14',
       };
       if (_token != null && _token!.isNotEmpty) {

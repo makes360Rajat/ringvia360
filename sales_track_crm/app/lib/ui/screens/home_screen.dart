@@ -3,10 +3,12 @@ import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../models/sales_track_models.dart';
 import '../../services/app_lock_service.dart';
+import '../../services/sales_track_api_service.dart';
 import '../../services/telemetry_sync_service.dart';
 import 'setup_wizard_screen.dart';
 import '../widgets/caller_id_dialog.dart';
 import '../widgets/after_call_dialog.dart';
+import '../widgets/app_update_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -29,6 +31,8 @@ class _HomeScreenState extends State<HomeScreen>
   String? _lastPromptedAfterCallUid;
   bool _hasPromptedCallerId = false;
   BuildContext? _callerIdDialogContext;
+  BuildContext? _updateDialogContext;
+  bool _hasShownOptionalUpdateDialog = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String? _expandedCallUid;
@@ -191,6 +195,44 @@ class _HomeScreenState extends State<HomeScreen>
       });
     } else if (afterCall == null) {
       _lastPromptedAfterCallUid = null;
+    }
+
+    // 3. App Version Update Dialog (Required or Optional)
+    final update = widget.syncService.availableUpdate;
+    if (update != null && _updateDialogContext == null) {
+      final isMandatory = widget.syncService.isUpdateMandatory;
+      if (isMandatory || !_hasShownOptionalUpdateDialog) {
+        if (!isMandatory) _hasShownOptionalUpdateDialog = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (widget.syncService.availableUpdate == null) return;
+          if (_updateDialogContext != null) return;
+
+          showDialog(
+            context: context,
+            barrierDismissible: !isMandatory,
+            builder: (dialogCtx) {
+              _updateDialogContext = dialogCtx;
+              return AppUpdateDialog(
+                updateInfo: update,
+                isMandatory: isMandatory,
+                onUpdate: () {
+                  widget.syncService.launchAppUpdateUrl();
+                },
+                onDismiss: () {
+                  _updateDialogContext = null;
+                  widget.syncService.dismissOptionalUpdate();
+                },
+              );
+            },
+          ).then((_) {
+            _updateDialogContext = null;
+            if (!isMandatory) {
+              widget.syncService.dismissOptionalUpdate();
+            }
+          });
+        });
+      }
     }
     setState(() {});
   }
@@ -556,6 +598,32 @@ class _HomeScreenState extends State<HomeScreen>
             onSelected: (val) {
               if (val == 'theme_mode') {
                 _showThemeSelectionDialog(context);
+              } else if (val == 'check_updates') {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Checking CRM server for app updates...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                service.checkForAppUpdate(manual: true).then((update) {
+                  if (update == null && mounted) {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Row(
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                            const SizedBox(width: 10),
+                            Text('You are using the latest version (v${SalesTrackApiService.currentAppVersion})'),
+                          ],
+                        ),
+                        backgroundColor: const Color(0xFF10B981),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  }
+                });
               } else if (val == 'permissions') {
                 Navigator.push(
                   context,
@@ -653,6 +721,16 @@ class _HomeScreenState extends State<HomeScreen>
                     Icon(Icons.history_toggle_off_rounded, color: colors.primary, size: 20),
                     const SizedBox(width: 10),
                     Text('Scan Phone History & Sync', style: TextStyle(color: colors.textPrimary)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'check_updates',
+                child: Row(
+                  children: [
+                    Icon(Icons.system_update_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Check for App Updates', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
