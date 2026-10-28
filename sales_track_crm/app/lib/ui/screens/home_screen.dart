@@ -48,6 +48,7 @@ class _HomeScreenState extends State<HomeScreen>
       }
     });
     widget.syncService.addListener(_onServiceChanged);
+    widget.syncService.checkPermissions();
   }
 
   @override
@@ -111,6 +112,7 @@ class _HomeScreenState extends State<HomeScreen>
         });
       });
     }
+    setState(() {});
   }
 
   String _formatDuration(int seconds) {
@@ -2424,12 +2426,12 @@ class _HomeScreenState extends State<HomeScreen>
     if (service.localRecordings.isEmpty) {
       if (!service.hasRecordingsFolderPermission) {
         return _buildEmptyState(
-          icon: Icons.folder_special_rounded,
-          title: 'Recordings Folder Access Required',
+          icon: Icons.audio_file_rounded,
+          title: 'Audio Storage Access Required',
           subtitle:
-              'Grant All Files Access so the app can locate and upload call audio recordings saved by your phone.',
-          actionLabel: 'Grant Folder Access',
-          onAction: () => service.openAllFilesSettings(),
+              'Grant audio storage permission so the app can locate and upload call audio recordings.',
+          actionLabel: 'Grant Access',
+          onAction: () => service.requestAllPermissions(),
         );
       }
       return _buildEmptyState(
@@ -2462,14 +2464,14 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             child: Row(
               children: [
-                Icon(Icons.folder_special_rounded, color: colors.warning, size: 24),
+                Icon(Icons.audio_file_rounded, color: colors.warning, size: 24),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Recordings Folder Access Required',
+                        'Audio Storage Permission Needed',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
@@ -2477,14 +2479,14 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                       Text(
-                        'Grant All Files Access to locate and upload call audio recordings.',
+                        'Grant audio storage permission to locate and upload call audio recordings.',
                         style: TextStyle(fontSize: 11, color: colors.textSecondary),
                       ),
                     ],
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: () => service.openAllFilesSettings(),
+                  onPressed: () => service.requestAllPermissions(),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colors.warning,
                     foregroundColor: Colors.black,

@@ -22,19 +22,36 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
+
+    // Auto-prompt permission dialog immediately on screen entry
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!widget.syncService.hasEssentialPermissions) {
+        widget.syncService.requestAllPermissions();
+      }
+    });
+  }
+
+  void _onServiceChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.syncService.removeListener(_onServiceChanged);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      widget.syncService.checkPermissions();
+      widget.syncService.checkPermissions().then((_) {
+        if (mounted) setState(() {});
+      });
     }
   }
 
@@ -136,11 +153,15 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
             Icon(Icons.check_circle_rounded, color: colors.primary, size: 24)
           else
             ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 onRequest();
-                Future.delayed(const Duration(seconds: 1), () {
-                  if (mounted) widget.syncService.checkPermissions();
-                });
+                for (final ms in [300, 700, 1500]) {
+                  await Future.delayed(Duration(milliseconds: ms));
+                  if (mounted) {
+                    await widget.syncService.checkPermissions();
+                    if (mounted) setState(() {});
+                  }
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: colors.primary,
@@ -186,6 +207,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
             ),
             tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
             onPressed: () => themeProvider.toggleTheme(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_suggest_rounded),
+            tooltip: 'Open App Settings',
+            onPressed: () => widget.syncService.openAppSettings(),
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -289,7 +315,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                     description: 'Reads exact talk duration, phone numbers, and timestamps from device call logs.',
                     icon: Icons.history_rounded,
                     isGranted: widget.syncService.hasCallLogPermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
+                    onRequest: () => widget.syncService.requestPermission('call_log'),
                   ),
 
                   // 2. Phone State
@@ -299,7 +325,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                     description: 'Detects real-time incoming, outgoing, answered, and missed phone calls.',
                     icon: Icons.phone_in_talk_rounded,
                     isGranted: widget.syncService.hasPhoneStatePermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
+                    onRequest: () => widget.syncService.requestPermission('phone_state'),
                   ),
 
                   // 3. Contacts
@@ -309,7 +335,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                     description: 'Resolves customer numbers to contact names saved on this phone.',
                     icon: Icons.contacts_rounded,
                     isGranted: widget.syncService.hasContactsPermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
+                    onRequest: () => widget.syncService.requestPermission('contacts'),
                   ),
 
                   // 4. SMS
@@ -319,7 +345,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                     description: 'Captures incoming and outgoing SMS text interactions with CRM clients.',
                     icon: Icons.sms_rounded,
                     isGranted: widget.syncService.hasSmsPermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
+                    onRequest: () => widget.syncService.requestPermission('sms'),
                   ),
 
                   // 5. WhatsApp Call Access
@@ -332,14 +358,14 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                     onRequest: () => widget.syncService.openNotificationListenerSettings(),
                   ),
 
-                  // 6. Recordings Folder
+                  // 6. Recordings Audio & Storage
                   _buildPermissionItem(
                     context: context,
-                    title: 'Call Recordings Storage',
-                    description: 'Storage access to discover, link, and upload call audio files (.m4a, .mp3, .amr).',
-                    icon: Icons.folder_special_rounded,
+                    title: 'Audio & Storage Access',
+                    description: 'Storage permission to detect, link, and upload call audio recordings (.m4a, .mp3, .wav).',
+                    icon: Icons.audio_file_rounded,
                     isGranted: widget.syncService.hasRecordingsFolderPermission,
-                    onRequest: () => widget.syncService.openAllFilesSettings(),
+                    onRequest: () => widget.syncService.requestPermission('audio'),
                   ),
 
                   // 7. Battery Unrestricted

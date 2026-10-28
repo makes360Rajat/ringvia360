@@ -153,6 +153,8 @@ class TelemetrySyncService extends ChangeNotifier {
     _isPaired = api.isPaired;
 
     await _loadSavedMeta();
+    _listenToNativeEvents();
+    await checkPermissions();
 
     if (_isPaired) {
       await _loadPersistedHistory();
@@ -161,8 +163,6 @@ class TelemetrySyncService extends ChangeNotifier {
       // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
       Future.delayed(const Duration(milliseconds: 100), () async {
         await fetchPlatformDeviceInfo();
-        await checkPermissions();
-        _listenToNativeEvents();
         await sendHeartbeat();
         _startHeartbeatLoop();
 
@@ -193,8 +193,14 @@ class TelemetrySyncService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Future<void> fetchPlatformDeviceInfo() async {
     try {
-      final info = await _platform.invokeMapMethod<String, dynamic>('getDeviceInfo');
-      if (info != null) {
+      final dynamic raw = await _platform.invokeMethod('getDeviceInfo');
+      if (raw is Map) {
+        final Map<String, dynamic> info = {};
+        raw.forEach((key, val) {
+          if (key != null) {
+            info[key.toString()] = val;
+          }
+        });
         _deviceInfo = info;
         _batteryPercent = (info['batteryPercent'] as num?)?.toInt() ?? 85;
         notifyListeners();
@@ -206,9 +212,15 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> checkPermissions() async {
     try {
-      final status = await _platform.invokeMapMethod<String, dynamic>('getPermissionsStatus');
-      if (status != null) {
-        _permissions = status.map((k, v) => MapEntry(k, v == true));
+      final dynamic raw = await _platform.invokeMethod('getPermissionsStatus');
+      if (raw is Map) {
+        final Map<String, bool> updated = {};
+        raw.forEach((key, val) {
+          if (key != null) {
+            updated[key.toString()] = val == true;
+          }
+        });
+        _permissions = updated;
         notifyListeners();
       }
     } catch (e) {
@@ -219,7 +231,7 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> requestAllPermissions() async {
     try {
       await _platform.invokeMethod('requestAllPermissions');
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 400));
       await checkPermissions();
       if (hasCallLogPermission) {
         await syncDeviceCallLogs();
@@ -230,6 +242,24 @@ class TelemetrySyncService extends ChangeNotifier {
       await scanLocalRecordings();
     } catch (e) {
       debugPrint('Error requesting permissions: $e');
+    }
+  }
+
+  Future<void> requestPermission(String permissionGroup) async {
+    try {
+      await _platform.invokeMethod('requestPermission', {'permission': permissionGroup});
+      await Future.delayed(const Duration(milliseconds: 400));
+      await checkPermissions();
+      if (hasCallLogPermission) {
+        await syncDeviceCallLogs();
+      }
+      if (hasSmsPermission) {
+        await syncDeviceSms();
+      }
+      await scanLocalRecordings();
+    } catch (e) {
+      debugPrint('Error requesting permission $permissionGroup: $e');
+      await requestAllPermissions();
     }
   }
 
@@ -433,8 +463,12 @@ class TelemetrySyncService extends ChangeNotifier {
     // Permission state changed callback from native Android
     if (type == 'permissions_updated') {
       if (raw['permissions'] is Map) {
-        final p = Map<String, dynamic>.from(raw['permissions'] as Map);
-        _permissions = p.map((k, v) => MapEntry(k, v == true));
+        final p = raw['permissions'] as Map;
+        final Map<String, bool> updated = {};
+        p.forEach((k, v) {
+          if (k != null) updated[k.toString()] = v == true;
+        });
+        _permissions = updated;
       } else {
         checkPermissions();
       }

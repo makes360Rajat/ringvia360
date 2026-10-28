@@ -21,6 +21,7 @@ import android.provider.CallLog
 import android.provider.Settings
 import android.provider.Telephony
 import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -194,6 +195,12 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
+                "requestPermission" -> {
+                    val perm = call.argument<String>("permission") ?: ""
+                    requestSpecificPermission(perm)
+                    result.success(true)
+                }
+
                 "isNotificationListenerEnabled" -> {
                     result.success(isNotificationListenerGranted())
                 }
@@ -253,19 +260,11 @@ class MainActivity : FlutterActivity() {
 
                 "openAllFilesSettings" -> {
                     try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                data = Uri.fromParts("package", packageName, null)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(intent)
-                        } else {
-                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                data = Uri.fromParts("package", packageName, null)
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            startActivity(intent)
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", packageName, null)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
+                        startActivity(intent)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("SETTINGS_ERROR", e.message, null)
@@ -688,9 +687,17 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun isNotificationListenerGranted(): Boolean {
-        val cn = ComponentName(this, WhatsAppNotificationListener::class.java)
-        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        return flat != null && flat.contains(cn.flattenToString())
+        return try {
+            val packages = NotificationManagerCompat.getEnabledListenerPackages(this)
+            if (packages.contains(packageName)) {
+                return true
+            }
+            val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            flat != null && flat.contains(packageName)
+        } catch (_: Exception) {
+            val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+            flat != null && flat.contains(packageName)
+        }
     }
 
     private fun checkAllPermissions(): Map<String, Boolean> {
@@ -712,14 +719,6 @@ class MainActivity : FlutterActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
 
-        val allFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            Environment.isExternalStorageManager()
-        } else {
-            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
-        }
-
-        val hasStorage = mediaAudio || allFiles
-
         return mapOf(
             "call_log" to callLog,
             "phone_state" to phoneState,
@@ -727,31 +726,114 @@ class MainActivity : FlutterActivity() {
             "sms" to sms,
             "whatsapp_access" to notifications,
             "notifications" to notifications,
-            "recordings_folder" to allFiles,
-            "manage_storage" to allFiles,
-            "storage" to hasStorage,
-            "recordings" to (hasStorage || recordAudio),
+            "recordings_folder" to mediaAudio,
+            "manage_storage" to mediaAudio,
+            "storage" to mediaAudio,
+            "recordings" to (mediaAudio || recordAudio),
             "battery_unrestricted" to isIgnoringBattery
         )
     }
 
-    private fun requestRequiredPermissions() {
-        val permissions = mutableListOf(
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_CALL_LOG,
-            Manifest.permission.READ_CONTACTS,
-            Manifest.permission.READ_SMS,
-            Manifest.permission.RECEIVE_SMS,
-            Manifest.permission.RECORD_AUDIO
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-            permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
-        } else {
-            permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
-            permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+    private fun requestSpecificPermission(group: String) {
+        val perms = when (group) {
+            "call_log" -> arrayOf(Manifest.permission.READ_CALL_LOG)
+            "phone_state" -> arrayOf(Manifest.permission.READ_PHONE_STATE)
+            "contacts" -> arrayOf(Manifest.permission.READ_CONTACTS)
+            "sms" -> arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
+            "audio", "storage", "recordings" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.RECORD_AUDIO)
+                } else {
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.RECORD_AUDIO)
+                }
+            }
+            else -> null
         }
-        ActivityCompat.requestPermissions(this, permissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
+
+        if (perms != null) {
+            val ungranted = perms.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+            if (ungranted.isEmpty()) {
+                val status = checkAllPermissions()
+                TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
+                    "type" to "permissions_updated",
+                    "permissions" to status
+                ))
+                return
+            }
+
+            val permanentlyDenied = ungranted.any { perm ->
+                !ActivityCompat.shouldShowRequestPermissionRationale(this, perm) &&
+                getSharedPreferences("app_perms", Context.MODE_PRIVATE).getBoolean("req_$perm", false)
+            }
+
+            val editor = getSharedPreferences("app_perms", Context.MODE_PRIVATE).edit()
+            ungranted.forEach { editor.putBoolean("req_$it", true) }
+            editor.apply()
+
+            if (permanentlyDenied) {
+                try {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", packageName, null)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {
+                    ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
+                }
+            } else {
+                ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
+            }
+        } else {
+            requestRequiredPermissions()
+        }
+    }
+
+    private fun requestRequiredPermissions() {
+        val permissions = mutableListOf<String>()
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.READ_PHONE_STATE)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.READ_CALL_LOG)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.READ_CONTACTS)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_SMS) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.READ_SMS)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.RECEIVE_SMS)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.READ_MEDIA_AUDIO)
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+
+        if (permissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, permissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
+        } else {
+            val status = checkAllPermissions()
+            TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
+                "type" to "permissions_updated",
+                "permissions" to status
+            ))
+        }
     }
 
     private fun getFastCallRecordingFiles(): List<LocalRecordingItem> {
