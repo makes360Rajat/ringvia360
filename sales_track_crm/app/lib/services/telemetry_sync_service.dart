@@ -825,6 +825,8 @@ class TelemetrySyncService extends ChangeNotifier {
   void dismissAfterCallPopup() {
     _activeAfterCallEvent = null;
     notifyListeners();
+    // Guarantee that call data and audio are immediately uploaded to the server
+    syncNow();
   }
 
   // ---------------------------------------------------------------------------
@@ -1844,7 +1846,10 @@ class TelemetrySyncService extends ChangeNotifier {
       final idx = _calls.indexWhere((c) => c.uid == uid);
       if (idx >= 0) {
         _calls[idx].name = cleanName;
+        _calls[idx].syncStatus = 'pending';
         LocalDatabaseService.instance.saveEvents([_calls[idx]]);
+        _pendingUids.remove(uid);
+        _enqueueEvent(_calls[idx]);
       }
     }
 

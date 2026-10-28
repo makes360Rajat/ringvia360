@@ -245,6 +245,31 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
     return '${d.day}/${d.month} at $timeStr';
   }
 
+  void _onSkipOrDismiss() {
+    widget.onDismiss();
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.cloud_done_rounded, color: Colors.white, size: 18),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Call uploaded to server! You can edit this lead & log outcome anytime from Call History.',
+                style: TextStyle(fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: const Color(0xFF1E293B),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   Future<void> _submit() async {
     if (_selectedOutcomeKey == null) return;
     final config = widget.syncService.config;
@@ -473,10 +498,7 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
                               ),
                               const Spacer(),
                               InkWell(
-                                onTap: () {
-                                  widget.onDismiss();
-                                  Navigator.of(context).pop();
-                                },
+                                onTap: _onSkipOrDismiss,
                                 borderRadius: BorderRadius.circular(16),
                                 child: Container(
                                   padding: const EdgeInsets.all(5),
@@ -931,10 +953,7 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
                             icon: Icons.close_rounded,
                             color: colors.textMuted,
                             label: 'Skip',
-                            onTap: () {
-                              widget.onDismiss();
-                              Navigator.of(context).pop();
-                            },
+                            onTap: _onSkipOrDismiss,
                             isDark: isDark,
                           ),
                           const SizedBox(width: 10),

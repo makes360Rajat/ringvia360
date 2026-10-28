@@ -1620,7 +1620,7 @@ class _HomeScreenState extends State<HomeScreen>
                         );
                       },
                       icon: const Icon(Icons.note_alt_outlined, size: 14),
-                      label: const Text('Log Lead Outcome', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      label: const Text('Edit Lead / Log Outcome', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colors.primary,
                         foregroundColor: Colors.white,
