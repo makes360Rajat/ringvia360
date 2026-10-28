@@ -72,6 +72,14 @@ class _HomeScreenState extends State<HomeScreen>
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
       widget.syncService.setForeground(true);
+      if (widget.syncService.hasCallLogPermission) {
+        widget.syncService.syncDeviceCallLogs();
+      }
+      if (widget.syncService.hasSmsPermission) {
+        widget.syncService.syncDeviceSms();
+      }
+      widget.syncService.scanLocalRecordings();
+      widget.syncService.syncNow();
       _onServiceChanged();
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       widget.syncService.setForeground(false);

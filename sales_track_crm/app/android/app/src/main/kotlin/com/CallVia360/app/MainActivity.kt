@@ -457,6 +457,7 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         registerCallLogObserver()
         registerSmsObserver()
+        observerHandler.postDelayed(checkLatestCallRunnable, 400)
         val status = checkAllPermissions()
         TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
             "type" to "permissions_updated",
