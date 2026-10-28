@@ -766,6 +766,10 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
+  Future<void> lookupAndEnrichCaller(String phone, [String? name, String? direction]) async {
+    await _startCallerIdLookup(phone, name ?? '', direction ?? 'incoming');
+  }
+
   bool _shouldShowAfterCallPopup(SalesTrackEvent event) {
     if (_config.outcomesAsk == 'off') return false;
     if (_config.outcomesAsk == 'connected_only') {

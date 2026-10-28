@@ -1585,6 +1585,89 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ],
 
+                const SizedBox(height: 10),
+                // Quick Call Actions Row (Lead outcome, CRM Caller ID, WhatsApp)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        final eventObj = call is SalesTrackEvent
+                            ? call
+                            : SalesTrackEvent(
+                                uid: call.uid?.toString() ?? 'call-${DateTime.now().millisecondsSinceEpoch}',
+                                kind: 'call',
+                                time: call.time as int,
+                                direction: call.direction?.toString() ?? 'incoming',
+                                number: call.number?.toString() ?? '',
+                                name: call.name?.toString() ?? '',
+                                duration: call.duration as int? ?? 0,
+                                recording: hasRec,
+                                recordingPath: call.recordingPath?.toString(),
+                              );
+                        showModalBottomSheet(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (_) => OutcomeModal(
+                            event: eventObj,
+                            syncService: service,
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.note_alt_outlined, size: 14),
+                      label: const Text('Log Lead Outcome', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.primary,
+                        foregroundColor: Colors.white,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final info = CallerIdInfo(
+                          phoneNumber: call.number,
+                          direction: call.direction?.toString() ?? 'incoming',
+                          name: call.name.isNotEmpty ? call.name : call.number,
+                          isSearching: true,
+                        );
+                        showDialog(
+                          context: context,
+                          builder: (_) => CallerIdDialog(
+                            info: info,
+                            syncService: service,
+                            onDismiss: () => service.dismissCallerId(),
+                          ),
+                        );
+                        service.lookupAndEnrichCaller(call.number, call.name, call.direction);
+                      },
+                      icon: const Icon(Icons.badge_outlined, size: 14),
+                      label: const Text('Caller CRM Info', style: TextStyle(fontSize: 11.5)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.textPrimary,
+                        visualDensity: VisualDensity.compact,
+                        side: BorderSide(color: colors.border),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => service.openWhatsAppChat(call.number),
+                      icon: Icon(Icons.chat_rounded, size: 16, color: colors.whatsappGreen),
+                      tooltip: 'Chat on WhatsApp',
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        backgroundColor: colors.whatsappGreen.withOpacity(0.12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ],
+                ),
+
                 // Inline Audio Player with Seekbar & Play Button
                 if (hasRec && call.recordingPath != null && call.recordingPath!.isNotEmpty) ...[
                   const SizedBox(height: 10),
