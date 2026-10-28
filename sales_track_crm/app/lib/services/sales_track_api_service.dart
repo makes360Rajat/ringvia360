@@ -27,7 +27,7 @@ class SalesTrackApiService {
   static const String _prefDeviceUid = 'mks_device_uid';
   static const String _prefCookies = 'mks_session_cookies';
 
-  static const String defaultServerUrl = '';
+  static const String defaultServerUrl = 'https://crm.make360.in';
 
   String _serverUrl = defaultServerUrl;
   String? _token;
@@ -40,9 +40,12 @@ class SalesTrackApiService {
   bool get isPaired => _token != null && _token!.isNotEmpty;
 
   String get apiBaseUrl {
-    final normalized = normalizeServerUrl(_serverUrl);
-    return normalized.isEmpty ? '' : '$normalized/mks_sales_track/api/v1';
+    final effective = _serverUrl.isNotEmpty ? _serverUrl : defaultServerUrl;
+    final normalized = normalizeServerUrl(effective);
+    return normalized.isEmpty ? 'https://crm.make360.in/mks_sales_track/api/v1' : '$normalized/mks_sales_track/api/v1';
   }
+
+  String get safeApiBaseUrl => apiBaseUrl;
 
   /// The CRM's own address from whatever was typed, pasted or scanned:
   /// e.g. "https://crm.yourcompany.com", "https://crm.yourcompany.com/admin/mks_sales_track/devices"
@@ -99,26 +102,23 @@ class SalesTrackApiService {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedUrl = prefs.getString(_prefServerUrl);
-    if (savedUrl != null && savedUrl.isNotEmpty && !savedUrl.contains('crm.make360.in')) {
-      _serverUrl = savedUrl;
-    } else {
-      _serverUrl = defaultServerUrl;
-      if (savedUrl != null && savedUrl.contains('crm.make360.in')) {
-        await prefs.remove(_prefServerUrl);
-      }
+    var savedUrl = prefs.getString(_prefServerUrl);
+    if (savedUrl == null || savedUrl.trim().isEmpty) {
+      savedUrl = defaultServerUrl;
+      await prefs.setString(_prefServerUrl, savedUrl);
     }
+    _serverUrl = savedUrl;
     _token = prefs.getString(_prefToken);
     _deviceUid = prefs.getString(_prefDeviceUid);
     _sessionCookies = prefs.getString(_prefCookies);
   }
 
   Future<void> saveCredentials({required String serverUrl, required String token, required String deviceUid}) async {
-    _serverUrl = serverUrl;
+    _serverUrl = serverUrl.isNotEmpty ? serverUrl : defaultServerUrl;
     _token = token;
     _deviceUid = deviceUid;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefServerUrl, serverUrl);
+    await prefs.setString(_prefServerUrl, _serverUrl);
     await prefs.setString(_prefToken, token);
     await prefs.setString(_prefDeviceUid, deviceUid);
   }
