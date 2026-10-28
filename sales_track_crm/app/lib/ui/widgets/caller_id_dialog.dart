@@ -63,8 +63,94 @@ class CallerIdDialog extends StatelessWidget {
     );
   }
 
+  Widget _buildAvatar(CallerIdInfo currentInfo, SalesTrackColors colors, String initial) {
+    final photo = currentInfo.photoUrl;
+    Widget avatarChild;
+
+    if (photo != null && photo.isNotEmpty && (photo.startsWith('http://') || photo.startsWith('https://'))) {
+      avatarChild = ClipOval(
+        child: Image.network(
+          photo,
+          width: 76,
+          height: 76,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _buildFallbackInitial(initial, currentInfo, colors),
+        ),
+      );
+    } else {
+      avatarChild = _buildFallbackInitial(initial, currentInfo, colors);
+    }
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          width: 76,
+          height: 76,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: (currentInfo.hasCrmLead ? colors.primary : const Color(0xFF0066FF)).withOpacity(0.35),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: avatarChild,
+        ),
+        // Truecaller Verified Badge on Avatar
+        Positioned(
+          bottom: 0,
+          right: -2,
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: currentInfo.hasCrmLead ? const Color(0xFF10B981) : const Color(0xFF0066FF),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 2),
+            ),
+            child: const Icon(
+              Icons.check_rounded,
+              color: Colors.white,
+              size: 14,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFallbackInitial(String initial, CallerIdInfo currentInfo, SalesTrackColors colors) {
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: LinearGradient(
+          colors: currentInfo.hasCrmLead
+              ? [const Color(0xFF10B981), const Color(0xFF059669)]
+              : [const Color(0xFF0066FF), const Color(0xFF0044CC)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          initial,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 32,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+
     return AnimatedBuilder(
       animation: syncService,
       builder: (context, _) {
@@ -78,444 +164,527 @@ class CallerIdDialog extends StatelessWidget {
                 !currentInfo.name.toLowerCase().contains('unknown') &&
                 !currentInfo.name.toLowerCase().contains('incoming caller'))
             ? currentInfo.name
-            : (currentInfo.company != null && currentInfo.company!.isNotEmpty ? currentInfo.company! : 'Unsaved Contact');
+            : (currentInfo.company != null && currentInfo.company!.isNotEmpty
+                ? currentInfo.company!
+                : 'Unsaved Number');
 
         final initial = displayName.isNotEmpty ? displayName.substring(0, 1).toUpperCase() : '?';
 
+        // Truecaller Header Color (Blue or Emerald for verified lead)
+        final headerColor = currentInfo.hasCrmLead ? const Color(0xFF10B981) : const Color(0xFF0066FF);
+
         return Dialog(
           backgroundColor: Colors.transparent,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 420),
+            width: double.infinity,
+            constraints: BoxConstraints(
+              maxWidth: 460,
+              maxHeight: screenSize.height * 0.88,
+            ),
             decoration: BoxDecoration(
-              color: colors.cardBackground,
-              borderRadius: BorderRadius.circular(24),
+              color: isDark ? const Color(0xFF111827) : Colors.white,
+              borderRadius: BorderRadius.circular(28),
               border: Border.all(
-                color: currentInfo.hasCrmLead
-                    ? colors.primary.withOpacity(0.4)
-                    : colors.border,
-                width: 1.5,
+                color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+                width: 1.2,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: colors.primary.withOpacity(isDark ? 0.25 : 0.15),
-                  blurRadius: 28,
-                  offset: const Offset(0, 12),
+                  color: Colors.black.withOpacity(isDark ? 0.6 : 0.22),
+                  blurRadius: 36,
+                  offset: const Offset(0, 16),
                 ),
               ],
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Top Status Banner
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isIncoming
-                        ? (isDark ? const Color(0xFF1B382B) : const Color(0xFFE8F5E9))
-                        : (isDark ? const Color(0xFF1E2F40) : const Color(0xFFE3F2FD)),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(22),
-                      topRight: Radius.circular(22),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: isIncoming ? colors.success : colors.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          isIncoming ? Icons.call_received_rounded : Icons.call_made_rounded,
-                          color: Colors.white,
-                          size: 14,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          isIncoming ? 'INCOMING CALL DETECTED' : 'OUTGOING CALL IN PROGRESS',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.8,
-                            color: isIncoming
-                                ? (isDark ? const Color(0xFF81C784) : const Color(0xFF2E7D32))
-                                : (isDark ? const Color(0xFF90CAF9) : const Color(0xFF1565C0)),
-                          ),
-                        ),
-                      ),
-                      if (currentInfo.isSearching)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 12,
-                              height: 12,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: colors.primary,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Searching CRM...',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: colors.textSecondary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: colors.primary.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            'CallVia360 ID',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: colors.primary,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-
-                // Caller Profile Header
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-                  child: Row(
-                    children: [
-                      // Avatar
-                      Container(
-                        width: 58,
-                        height: 58,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: currentInfo.hasCrmLead
-                                ? [colors.primary, const Color(0xFF8B5CF6)]
-                                : [colors.primaryLight, colors.primary],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: colors.primary.withOpacity(0.3),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Center(
-                          child: Text(
-                            initial,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-
-                      // Name & Category Details
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              displayName,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: colors.textPrimary,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              currentInfo.phoneNumber,
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: colors.textSecondary,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-
-                            // Badges Row
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 4,
-                              children: [
-                                if (currentInfo.hasCrmLead)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: colors.success.withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: colors.success.withOpacity(0.3)),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.verified_rounded, size: 11, color: colors.success),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          currentInfo.leadStatus != null && currentInfo.leadStatus!.isNotEmpty
-                                              ? 'CRM: ${currentInfo.leadStatus}'
-                                              : 'CRM Lead',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: colors.success,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                else if (currentInfo.isUnsaved)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: colors.warning.withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: colors.warning.withOpacity(0.3)),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(Icons.person_outline_rounded, size: 11, color: colors.warning),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          'Unsaved in Phone',
-                                          style: TextStyle(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            color: colors.warning,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-
-                                if (currentInfo.company != null && currentInfo.company!.isNotEmpty)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: colors.primary.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(6),
-                                    ),
-                                    child: Text(
-                                      currentInfo.company!,
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                        color: colors.primary,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const Divider(height: 1),
-
-                // Sales Intelligence History Section
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 1. Truecaller Signature Top Banner
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: colors.border),
+                      color: headerColor,
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(26),
+                        topRight: Radius.circular(26),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        Row(
-                          children: [
-                            Icon(Icons.history_rounded, size: 16, color: colors.primary),
-                            const SizedBox(width: 6),
-                            Text(
-                              'CRM Interaction History',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: colors.textPrimary,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              decoration: BoxDecoration(
-                                color: colors.primary.withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '${currentInfo.totalPreviousCalls} calls logged',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: colors.primary,
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            isIncoming ? Icons.call_received_rounded : Icons.call_made_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                isIncoming ? 'INCOMING CALL' : 'OUTGOING CALL',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.1,
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-
-                        if (currentInfo.totalPreviousCalls > 0 && currentInfo.lastCallTime != null) ...[
-                          Row(
-                            children: [
-                              Icon(Icons.access_time_rounded, size: 13, color: colors.textSecondary),
-                              const SizedBox(width: 6),
+                              const SizedBox(height: 1),
                               Text(
-                                'Last Call: ${_formatTime(currentInfo.lastCallTime!)} (${_formatDuration(currentInfo.lastDuration ?? 0)})',
+                                currentInfo.hasCrmLead
+                                    ? 'Identified CRM Lead'
+                                    : 'CallVia360 Caller ID',
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  color: colors.textSecondary,
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
                             ],
                           ),
-                          if (currentInfo.lastOutcome != null && currentInfo.lastOutcome!.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                        ),
+                        if (currentInfo.isSearching)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.label_outline_rounded, size: 13, color: colors.primary),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Last Outcome: ${currentInfo.lastOutcome!.replaceAll('_', ' ').toUpperCase()}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: colors.textPrimary,
-                                    ),
+                                SizedBox(
+                                  width: 10,
+                                  height: 10,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Searching...',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
                               ],
                             ),
-                          ],
-                          if (currentInfo.lastNote != null && currentInfo.lastNote!.isNotEmpty) ...[
-                            const SizedBox(height: 6),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: colors.background,
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: colors.border),
-                              ),
-                              child: Text(
-                                'Note: "${currentInfo.lastNote!}"',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontStyle: FontStyle.italic,
-                                  color: colors.textSecondary,
-                                ),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ] else ...[
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 4),
-                            child: Text(
-                              'No previous calls on record. This is a new contact ready for lead creation.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: colors.textSecondary,
-                              ),
-                            ),
+                          )
+                        else
+                          IconButton(
+                            onPressed: () {
+                              onDismiss();
+                              Navigator.of(context).pop();
+                            },
+                            icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                           ),
-                        ],
                       ],
                     ),
                   ),
-                ),
 
-                // Bottom Action Buttons
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  child: Row(
-                    children: [
-                      // WhatsApp Quick Button
-                      IconButton(
-                        onPressed: () => syncService.openWhatsAppChat(currentInfo.phoneNumber),
-                        icon: Icon(Icons.chat_rounded, color: colors.whatsappGreen),
-                        tooltip: 'Open in WhatsApp',
-                        style: IconButton.styleFrom(
-                          backgroundColor: colors.whatsappGreen.withOpacity(0.12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  // 2. Main Identity & Profile Area (Large Truecaller Layout)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        _buildAvatar(currentInfo, colors, initial),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // Contact / Lead Name
+                              Text(
+                                displayName,
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark ? Colors.white : const Color(0xFF111827),
+                                  letterSpacing: -0.3,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+
+                              // Formatted Phone Number
+                              Text(
+                                currentInfo.phoneNumber,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF4B5563),
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+
+                              // Verification & CRM Badge
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: [
+                                  if (currentInfo.hasCrmLead)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF10B981).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.verified, size: 12, color: Color(0xFF10B981)),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            currentInfo.leadStatus != null && currentInfo.leadStatus!.isNotEmpty
+                                                ? currentInfo.leadStatus!
+                                                : 'CRM Lead',
+                                            style: const TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF10B981),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else if (currentInfo.isUnsaved)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF59E0B).withOpacity(0.15),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.person_search_rounded, size: 12, color: Color(0xFFF59E0B)),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Unsaved Number',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFFF59E0B),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+
+                                  if (currentInfo.company != null && currentInfo.company!.isNotEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.business_rounded, size: 12, color: colors.textSecondary),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            currentInfo.company!,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: colors.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // 3. Sales & Interaction Intelligence Box (CRM History)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1F2937) : const Color(0xFFF9FAFB),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: headerColor.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(Icons.analytics_outlined, size: 16, color: headerColor),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                'CRM Sales Intelligence',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: isDark ? Colors.white : const Color(0xFF111827),
+                                ),
+                              ),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: headerColor.withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '${currentInfo.totalPreviousCalls} Calls Logged',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: headerColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
 
-                      // Dismiss Button
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () {
+                          if (currentInfo.totalPreviousCalls > 0 && currentInfo.lastCallTime != null) ...[
+                            Row(
+                              children: [
+                                Icon(Icons.schedule_rounded, size: 14, color: colors.textSecondary),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Last Call: ${_formatTime(currentInfo.lastCallTime!)} (${_formatDuration(currentInfo.lastDuration ?? 0)})',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: colors.textSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (currentInfo.lastOutcome != null && currentInfo.lastOutcome!.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(Icons.label_important_rounded, size: 14, color: headerColor),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Outcome: ${currentInfo.lastOutcome!.replaceAll('_', ' ').toUpperCase()}',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: isDark ? Colors.white : const Color(0xFF1F2937),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (currentInfo.lastNote != null && currentInfo.lastNote!.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF111827) : Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: isDark ? const Color(0xFF374151) : const Color(0xFFE5E7EB),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(Icons.format_quote_rounded, size: 16, color: colors.textMuted),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        currentInfo.lastNote!,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontStyle: FontStyle.italic,
+                                          color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF374151),
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                            if (currentInfo.followUpAt != null) ...[
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF8B5CF6).withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.alarm_on_rounded, size: 14, color: Color(0xFF8B5CF6)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Follow-up due: ${_formatTime(currentInfo.followUpAt!)}',
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF8B5CF6),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ] else ...[
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Text(
+                                'No previous call logs found. New contact detected — tap "Log Lead" to add remarks and follow-up.',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: colors.textSecondary,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // 4. Truecaller-Style Bottom Action Bar
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+                    child: Row(
+                      children: [
+                        // WhatsApp Button
+                        _buildCircleActionButton(
+                          icon: Icons.chat_rounded,
+                          color: const Color(0xFF25D366),
+                          label: 'WhatsApp',
+                          onTap: () => syncService.openWhatsAppChat(currentInfo.phoneNumber),
+                          isDark: isDark,
+                        ),
+                        const SizedBox(width: 12),
+
+                        // Dismiss Button
+                        _buildCircleActionButton(
+                          icon: Icons.close_rounded,
+                          color: isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280),
+                          label: 'Dismiss',
+                          onTap: () {
                             onDismiss();
                             Navigator.of(context).pop();
                           },
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: colors.textSecondary,
-                            side: BorderSide(color: colors.border),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          ),
-                          child: const Text('Dismiss', style: TextStyle(fontWeight: FontWeight.w600)),
+                          isDark: isDark,
                         ),
-                      ),
-                      const SizedBox(width: 8),
+                        const SizedBox(width: 12),
 
-                      // Log Lead / Outcome Button
-                      Expanded(
-                        flex: 2,
-                        child: ElevatedButton.icon(
-                          onPressed: () => _openLeadOutcomeModal(context),
-                          icon: const Icon(Icons.note_alt_outlined, size: 16),
-                          label: const Text('Log Lead', style: TextStyle(fontWeight: FontWeight.bold)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: colors.primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            elevation: 0,
+                        // Prominent "Log Lead" Button (Truecaller style primary action)
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _openLeadOutcomeModal(context),
+                            icon: const Icon(Icons.post_add_rounded, size: 18),
+                            label: const Text(
+                              'Log Lead',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: headerColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              elevation: 2,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
       },
     );
   }
-}
 
+  Widget _buildCircleActionButton({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required VoidCallback onTap,
+    required bool isDark,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.25)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

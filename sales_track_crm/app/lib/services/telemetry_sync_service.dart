@@ -502,12 +502,13 @@ class TelemetrySyncService extends ChangeNotifier {
     if (type == 'incoming_call_ringing' || type == 'outgoing_call_dialing') {
       final phoneNumber = raw['phoneNumber']?.toString() ?? raw['number']?.toString() ?? '';
       final contactName = raw['contactName']?.toString() ?? raw['name']?.toString() ?? '';
+      final photoUri = raw['photoUri']?.toString() ?? '';
       final direction = (raw['direction']?.toString() ?? (type == 'outgoing_call_dialing' ? 'outgoing' : 'incoming'));
 
       if (phoneNumber.isNotEmpty &&
           phoneNumber != 'Incoming Caller' &&
           phoneNumber.toLowerCase() != 'unknown') {
-        _startCallerIdLookup(phoneNumber, contactName, direction);
+        _startCallerIdLookup(phoneNumber, contactName, direction, photoUri.isNotEmpty ? photoUri : null);
       }
       return;
     }
@@ -695,7 +696,7 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
-  Future<void> _startCallerIdLookup(String phone, String name, String direction) async {
+  Future<void> _startCallerIdLookup(String phone, String name, String direction, [String? initialPhoto]) async {
     final hasContactName = name.isNotEmpty &&
         name != phone &&
         !name.toLowerCase().contains('unknown') &&
@@ -705,6 +706,7 @@ class TelemetrySyncService extends ChangeNotifier {
       phoneNumber: phone,
       direction: direction,
       name: hasContactName ? name : phone,
+      photoUrl: initialPhoto,
       isSearching: true,
       isUnsaved: !hasContactName,
       category: hasContactName ? 'contact' : 'unsaved',
@@ -755,6 +757,8 @@ class TelemetrySyncService extends ChangeNotifier {
             info.category = type;
             if (lastOutcome != null && lastOutcome.isNotEmpty) info.lastOutcome = lastOutcome;
             if (lastNote != null && lastNote.isNotEmpty) info.lastNote = lastNote;
+            final photo = entry['photo']?.toString() ?? entry['avatar']?.toString() ?? entry['image']?.toString();
+            if (photo != null && photo.isNotEmpty) info.photoUrl = photo;
           }
         }
       } catch (_) {}

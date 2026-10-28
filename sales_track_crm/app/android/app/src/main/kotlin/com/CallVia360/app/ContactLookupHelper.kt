@@ -6,25 +6,44 @@ import android.provider.ContactsContract
 
 object ContactLookupHelper {
 
-    fun resolveContactName(context: Context, phoneNumber: String?): String? {
-        if (phoneNumber.isNullOrEmpty()) return null
+    data class ContactDetails(val name: String?, val photoUri: String?)
+
+    fun resolveContactDetails(context: Context, phoneNumber: String?): ContactDetails {
+        if (phoneNumber.isNullOrEmpty()) return ContactDetails(null, null)
         var contactName: String? = null
+        var photoUri: String? = null
         try {
             val uri = Uri.withAppendedPath(
                 ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
                 Uri.encode(phoneNumber)
             )
-            val projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME)
+            val projection = arrayOf(
+                ContactsContract.PhoneLookup.DISPLAY_NAME,
+                ContactsContract.PhoneLookup.PHOTO_URI,
+                ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI
+            )
             context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val nameIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
+                    val photoIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup.PHOTO_URI)
+                    val thumbIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup.PHOTO_THUMBNAIL_URI)
                     if (nameIndex != -1) {
                         contactName = cursor.getString(nameIndex)
+                    }
+                    if (photoIndex != -1) {
+                        photoUri = cursor.getString(photoIndex)
+                    }
+                    if (photoUri.isNullOrEmpty() && thumbIndex != -1) {
+                        photoUri = cursor.getString(thumbIndex)
                     }
                 }
             }
         } catch (_: Exception) {}
-        return contactName
+        return ContactDetails(contactName, photoUri)
+    }
+
+    fun resolveContactName(context: Context, phoneNumber: String?): String? {
+        return resolveContactDetails(context, phoneNumber).name
     }
 
     fun getAllContacts(context: Context): List<Map<String, String>> {

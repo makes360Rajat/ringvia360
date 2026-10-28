@@ -40,14 +40,16 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 prefs.edit().putString("outgoing_number", outNum).apply()
 
-                val savedName = ContactLookupHelper.resolveContactName(context, outNum)
-                val contactDisplayName = if (!savedName.isNullOrEmpty()) savedName else outNum
+                val contactDetails = ContactLookupHelper.resolveContactDetails(context, outNum)
+                val contactDisplayName = if (!contactDetails.name.isNullOrEmpty()) contactDetails.name else outNum
+                val photoUri = contactDetails.photoUri ?: ""
                 val event = mapOf(
                     "type" to "outgoing_call_dialing",
                     "state" to "DIALING",
                     "direction" to "outgoing",
                     "phoneNumber" to outNum,
                     "contactName" to contactDisplayName,
+                    "photoUri" to photoUri,
                     "timestamp" to timestamp
                 )
                 TelemetryBridgeChannel.sendTelemetryEvent(event)
@@ -77,14 +79,16 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                     .putString("active_number", ringingNumber)
                     .apply()
 
-                val savedName = ContactLookupHelper.resolveContactName(context, ringingNumber)
-                val contactDisplayName = if (!savedName.isNullOrEmpty()) savedName else if (ringingNumber.isNotEmpty()) ringingNumber else "Incoming Caller"
+                val contactDetails = ContactLookupHelper.resolveContactDetails(context, ringingNumber)
+                val contactDisplayName = if (!contactDetails.name.isNullOrEmpty()) contactDetails.name else if (ringingNumber.isNotEmpty()) ringingNumber else "Incoming Caller"
+                val photoUri = contactDetails.photoUri ?: ""
                 val event = mapOf(
                     "type" to "incoming_call_ringing",
                     "state" to "RINGING",
                     "direction" to "incoming",
                     "phoneNumber" to (if (ringingNumber.isNotEmpty()) ringingNumber else "Incoming Caller"),
                     "contactName" to contactDisplayName,
+                    "photoUri" to photoUri,
                     "timestamp" to timestamp
                 )
                 TelemetryBridgeChannel.sendTelemetryEvent(event)

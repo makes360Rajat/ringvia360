@@ -542,6 +542,7 @@ class CallerIdInfo {
   String? leadStatus;
   String? leadStatusColor;
   String category; // 'lead', 'customer', 'staff', 'unsaved', 'contact'
+  String? photoUrl;
   int totalPreviousCalls;
   int? lastCallTime;
   int? lastDuration;
@@ -559,6 +560,7 @@ class CallerIdInfo {
     this.leadStatus,
     this.leadStatusColor,
     this.category = 'unsaved',
+    this.photoUrl,
     this.totalPreviousCalls = 0,
     this.lastCallTime,
     this.lastDuration,
