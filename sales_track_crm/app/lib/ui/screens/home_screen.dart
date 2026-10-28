@@ -25,7 +25,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
-  bool _hasPromptedOutcome = false;
+  BuildContext? _afterCallDialogContext;
+  String? _lastPromptedAfterCallUid;
   bool _hasPromptedCallerId = false;
   BuildContext? _callerIdDialogContext;
   final TextEditingController _searchController = TextEditingController();
@@ -52,6 +53,9 @@ class _HomeScreenState extends State<HomeScreen>
     });
     widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onServiceChanged();
+    });
   }
 
   @override
@@ -69,6 +73,9 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (widget.syncService.activeAfterCallEvent != null && _afterCallDialogContext == null) {
+        _lastPromptedAfterCallUid = null;
+      }
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
       widget.syncService.setForeground(true);
@@ -143,25 +150,47 @@ class _HomeScreenState extends State<HomeScreen>
 
     // 2. Automated After-Call Sales Outcome & Follow-up Truecaller Dialog
     final afterCall = widget.syncService.activeAfterCallEvent;
-    if (afterCall != null && !_hasPromptedOutcome) {
-      _hasPromptedOutcome = true;
+    if (afterCall != null &&
+        _lastPromptedAfterCallUid != afterCall.uid &&
+        _afterCallDialogContext == null) {
+      _lastPromptedAfterCallUid = afterCall.uid;
+
+      // Close ringing caller ID modal if it was still on screen
+      if (_callerIdDialogContext != null) {
+        try {
+          if (Navigator.of(_callerIdDialogContext!).canPop()) {
+            Navigator.of(_callerIdDialogContext!).pop();
+          }
+        } catch (_) {}
+        _callerIdDialogContext = null;
+        _hasPromptedCallerId = false;
+      }
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
+        if (widget.syncService.activeAfterCallEvent?.uid != afterCall.uid) return;
+        if (_afterCallDialogContext != null) return;
+
         showDialog(
           context: context,
           barrierDismissible: true,
-          builder: (dialogCtx) => AfterCallDialog(
-            event: afterCall,
-            syncService: widget.syncService,
-            onDismiss: () {
-              widget.syncService.dismissAfterCallPopup();
-            },
-          ),
+          builder: (dialogCtx) {
+            _afterCallDialogContext = dialogCtx;
+            return AfterCallDialog(
+              event: afterCall,
+              syncService: widget.syncService,
+              onDismiss: () {
+                widget.syncService.dismissAfterCallPopup();
+              },
+            );
+          },
         ).then((_) {
+          _afterCallDialogContext = null;
           widget.syncService.dismissAfterCallPopup();
-          _hasPromptedOutcome = false;
         });
       });
+    } else if (afterCall == null) {
+      _lastPromptedAfterCallUid = null;
     }
     setState(() {});
   }

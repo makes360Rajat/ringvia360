@@ -76,6 +76,7 @@ class TelemetrySyncService extends ChangeNotifier {
   bool get hasRecordingsFolderPermission => _permissions['recordings_folder'] == true || _permissions['manage_storage'] == true;
   bool get hasStoragePermission => _permissions['storage'] == true || hasRecordingsFolderPermission || _permissions['recordings'] == true;
   bool get hasBatteryOptimizationExemption => _permissions['battery_unrestricted'] == true;
+  bool get hasOverlayPermission => _permissions['overlay'] == true;
   bool get hasEssentialPermissions => hasCallLogPermission && hasPhoneStatePermission;
 
   bool get hasAllSevenPermissions =>
@@ -96,6 +97,7 @@ class TelemetrySyncService extends ChangeNotifier {
     if (!hasWhatsAppAccessPermission) list.add('WhatsApp Call Access');
     if (!hasRecordingsFolderPermission) list.add('Recordings Folder');
     if (!hasBatteryOptimizationExemption) list.add('Battery Unrestricted');
+    if (!hasOverlayPermission) list.add('Display Over Apps');
     return list;
   }
 
@@ -106,6 +108,7 @@ class TelemetrySyncService extends ChangeNotifier {
   final List<Map<String, dynamic>> _localRecordings = [];
   final List<CallListModel> _callLists = [];
   final List<OutcomeSubmission> _pendingOutcomes = [];
+  String? _pendingAfterCallNumber;
 
   List<SalesTrackEvent> get calls => List.unmodifiable(_calls);
   List<SalesTrackEvent> get whatsappEvents => List.unmodifiable(_whatsappEvents);
@@ -335,6 +338,12 @@ class TelemetrySyncService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> openOverlaySettings() async {
+    try {
+      await _platform.invokeMethod('openOverlaySettings');
+    } catch (_) {}
+  }
+
   Future<void> openAppSettings() async {
     try {
       await _platform.invokeMethod('openAppSettings');
@@ -548,6 +557,27 @@ class TelemetrySyncService extends ChangeNotifier {
           phoneNumber != 'Incoming Caller' &&
           phoneNumber.toLowerCase() != 'unknown') {
         _startCallerIdLookup(phoneNumber, contactName, direction, photoUri.isNotEmpty ? photoUri : null);
+      }
+      return;
+    }
+
+    if (type == 'open_after_call') {
+      final number = raw['number']?.toString() ?? '';
+      _pendingAfterCallNumber = number.isNotEmpty ? number : null;
+      SalesTrackEvent? target;
+      if (number.isNotEmpty) {
+        final cleanKey = extractNumberKey(number);
+        for (final c in _calls) {
+          if (extractNumberKey(c.number) == cleanKey) {
+            target = c;
+            break;
+          }
+        }
+      }
+      target ??= _calls.isNotEmpty ? _calls.first : null;
+      if (target != null) {
+        _activeAfterCallEvent = target;
+        notifyListeners();
       }
       return;
     }
@@ -1181,6 +1211,34 @@ class TelemetrySyncService extends ChangeNotifier {
         await _persistWhatsApp();
         await _persistQueue();
         await refreshPendingCounts();
+
+        // Auto-detect if a call finished recently (within last 5 minutes) or requested via launch intent
+        if (cleanCalls.isNotEmpty && _activeAfterCallEvent == null) {
+          SalesTrackEvent? candidate;
+          if (_pendingAfterCallNumber != null && _pendingAfterCallNumber!.isNotEmpty) {
+            final targetKey = extractNumberKey(_pendingAfterCallNumber!);
+            for (final c in cleanCalls) {
+              if (extractNumberKey(c.number) == targetKey) {
+                candidate = c;
+                break;
+              }
+            }
+            _pendingAfterCallNumber = null;
+          }
+          if (candidate == null) {
+            final newest = cleanCalls.first;
+            final callAgeMs = DateTime.now().millisecondsSinceEpoch - newest.time;
+            if (callAgeMs >= 0 && callAgeMs < 300000 && _shouldShowAfterCallPopup(newest)) {
+              candidate = newest;
+            }
+          }
+          if (candidate != null) {
+            final hasOutcome = await LocalDatabaseService.instance.hasOutcomeForUid(candidate.uid);
+            if (!hasOutcome) {
+              _activeAfterCallEvent = candidate;
+            }
+          }
+        }
 
         _statusMessage = 'Fetched ${_calls.length} calls from dialer ($newCount new)';
         notifyListeners();

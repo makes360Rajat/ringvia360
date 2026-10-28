@@ -377,6 +377,16 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                     isGranted: widget.syncService.hasBatteryOptimizationExemption,
                     onRequest: () => widget.syncService.openBatterySettings(),
                   ),
+
+                  // 8. Truecaller Overlay (Display Over Other Apps)
+                  _buildPermissionItem(
+                    context: context,
+                    title: 'Display Over Other Apps',
+                    description: 'Displays Truecaller-style caller ID and after-call outcome dialogs over phone dialer.',
+                    icon: Icons.layers_rounded,
+                    isGranted: widget.syncService.hasOverlayPermission,
+                    onRequest: () => widget.syncService.openOverlaySettings(),
+                  ),
                 ],
               ),
             ),

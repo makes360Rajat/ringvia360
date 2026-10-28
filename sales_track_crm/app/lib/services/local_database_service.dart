@@ -523,6 +523,20 @@ class LocalDatabaseService {
     }).toList();
   }
 
+  Future<bool> hasOutcomeForUid(String uid) async {
+    if (uid.isEmpty) return false;
+    final db = await database;
+    if (db == null) return false;
+    final res = await db.query(
+      'outcomes',
+      columns: ['uid'],
+      where: 'uid = ?',
+      whereArgs: [uid],
+      limit: 1,
+    );
+    return res.isNotEmpty;
+  }
+
   Future<void> markOutcomesSynced(List<String> uids) async {
     if (uids.isEmpty) return;
     final db = await database;

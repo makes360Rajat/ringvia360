@@ -13,6 +13,7 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -258,6 +259,40 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "isOverlayPermissionGranted" -> {
+                    val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Settings.canDrawOverlays(this)
+                    } else true
+                    result.success(granted)
+                }
+
+                "openOverlaySettings", "requestOverlayPermission" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } else {
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            result.error("SETTINGS_ERROR", e2.message, null)
+                        }
+                    }
+                }
+
                 "launchWhatsAppChat" -> {
                     try {
                         val number = call.argument<String>("number") ?: ""
@@ -451,6 +486,34 @@ class MainActivity : FlutterActivity() {
         // Initialize CallLogObserver and SmsObserver immediately
         registerCallLogObserver()
         registerSmsObserver()
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        handleLaunchIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.getStringExtra("action")
+        if (action == "after_call_dialog") {
+            val number = intent.getStringExtra("number") ?: ""
+            val contactName = intent.getStringExtra("contact_name") ?: ""
+            observerHandler.postDelayed({
+                TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
+                    "type" to "open_after_call",
+                    "number" to number,
+                    "contactName" to contactName,
+                    "time" to System.currentTimeMillis()
+                ))
+            }, 500)
+        }
     }
 
     override fun onResume() {
@@ -774,6 +837,10 @@ class MainActivity : FlutterActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
 
+        val overlay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(this)
+        } else true
+
         return mapOf(
             "call_log" to callLog,
             "phone_state" to phoneState,
@@ -785,11 +852,34 @@ class MainActivity : FlutterActivity() {
             "manage_storage" to mediaAudio,
             "storage" to mediaAudio,
             "recordings" to (mediaAudio || recordAudio),
-            "battery_unrestricted" to isIgnoringBattery
+            "battery_unrestricted" to isIgnoringBattery,
+            "overlay" to overlay
         )
     }
 
     private fun requestSpecificPermission(group: String) {
+        if (group == "overlay" || group == "system_alert_window") {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    ).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                }
+            } catch (_: Exception) {
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            }
+            return
+        }
+
         val perms = when (group) {
             "call_log" -> arrayOf(Manifest.permission.READ_CALL_LOG)
             "phone_state" -> arrayOf(Manifest.permission.READ_PHONE_STATE)

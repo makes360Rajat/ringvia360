@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.CallLog
 import android.provider.MediaStore
+import android.provider.Settings
 import android.telephony.TelephonyManager
 import androidx.core.app.NotificationCompat
 import java.io.File
@@ -264,7 +265,10 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
             }
 
             val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("action", "after_call_dialog")
+                putExtra("number", number)
+                putExtra("contact_name", contactName)
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
@@ -283,11 +287,21 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle(title)
                 .setContentText("Tap to log lead outcome, remarks & schedule follow-up")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, true)
+                .addAction(android.R.drawable.ic_menu_edit, "Log Lead Outcome", pendingIntent)
 
             notificationManager.notify(1002, builder.build())
+
+            // If "Display over other apps" (SYSTEM_ALERT_WINDOW) is granted, immediately launch CallVia360 over the dialer
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
+                try {
+                    context.startActivity(launchIntent)
+                } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
     }
 
