@@ -273,6 +273,45 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "dialPhoneNumber" -> {
+                    try {
+                        val number = call.argument<String>("number") ?: ""
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("DIAL_ERROR", e.message, null)
+                    }
+                }
+
+                "getContactPhoto" -> {
+                    Thread {
+                        val photoUriStr = call.argument<String>("photoUri")
+                        val phoneNumber = call.argument<String>("phoneNumber")
+                        try {
+                            var uri: Uri? = if (!photoUriStr.isNullOrEmpty()) Uri.parse(photoUriStr) else null
+                            if (uri == null && !phoneNumber.isNullOrEmpty()) {
+                                val details = ContactLookupHelper.resolveContactDetails(this, phoneNumber)
+                                if (!details.photoUri.isNullOrEmpty()) {
+                                    uri = Uri.parse(details.photoUri)
+                                }
+                            }
+                            if (uri != null) {
+                                contentResolver.openInputStream(uri)?.use { stream ->
+                                    val bytes = stream.readBytes()
+                                    runOnUiThread { result.success(bytes) }
+                                    return@Thread
+                                }
+                            }
+                            runOnUiThread { result.success(null) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.success(null) }
+                        }
+                    }.start()
+                }
+
                 "openAllFilesSettings" -> {
                     try {
                         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {

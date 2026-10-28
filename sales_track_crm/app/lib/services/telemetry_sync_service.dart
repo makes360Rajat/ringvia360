@@ -136,6 +136,26 @@ class TelemetrySyncService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  Future<void> dialPhoneNumber(String number) async {
+    try {
+      await _platform.invokeMethod('dialPhoneNumber', {'number': number});
+    } catch (_) {}
+  }
+
+  Future<Uint8List?> getContactPhotoBytes({String? photoUri, String? phoneNumber}) async {
+    try {
+      final res = await _platform.invokeMethod('getContactPhoto', {
+        'photoUri': photoUri,
+        'phoneNumber': phoneNumber,
+      });
+      if (res is Uint8List) return res;
+      if (res is List) return Uint8List.fromList(res.cast<int>());
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   // After-call popup trigger
   SalesTrackEvent? _activeAfterCallEvent;
   SalesTrackEvent? get activeAfterCallEvent => _activeAfterCallEvent;
@@ -779,8 +799,8 @@ class TelemetrySyncService extends ChangeNotifier {
     if (_config.outcomesAsk == 'connected_only') {
       return event.duration > 0;
     }
-    // For sales tracking: prompt on connected or outgoing calls
-    return event.duration > 0 || event.direction == 'outgoing' || _config.outcomesAsk == 'all';
+    // For sales tracking: prompt after completed calls (connected, outgoing, missed) so outcomes & notes can be logged
+    return true;
   }
 
   void dismissAfterCallPopup() {
@@ -1799,6 +1819,16 @@ class TelemetrySyncService extends ChangeNotifier {
     int? leadStatus,
     String? createLeadName,
   }) async {
+    // If a custom lead name was specified, update local call records immediately
+    if (createLeadName != null && createLeadName.trim().isNotEmpty) {
+      final cleanName = createLeadName.trim();
+      final idx = _calls.indexWhere((c) => c.uid == uid);
+      if (idx >= 0) {
+        _calls[idx].name = cleanName;
+        LocalDatabaseService.instance.saveEvents([_calls[idx]]);
+      }
+    }
+
     final submission = OutcomeSubmission(
       uid: uid,
       outcome: outcomeKey,
@@ -1808,9 +1838,11 @@ class TelemetrySyncService extends ChangeNotifier {
       createLead: (createLeadName != null && createLeadName.isNotEmpty) ? {'name': createLeadName} : null,
     );
 
+    _activeAfterCallEvent = null;
+    notifyListeners();
+
     final res = await api.submitOutcomes([submission]);
     if (res.success) {
-      _activeAfterCallEvent = null;
       notifyListeners();
       return true;
     }

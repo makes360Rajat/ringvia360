@@ -4,9 +4,9 @@ import '../../core/theme/sales_track_theme.dart';
 import '../../models/sales_track_models.dart';
 import '../../services/app_lock_service.dart';
 import '../../services/telemetry_sync_service.dart';
-import 'outcome_modal.dart';
 import 'setup_wizard_screen.dart';
 import '../widgets/caller_id_dialog.dart';
+import '../widgets/after_call_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -133,19 +133,21 @@ class _HomeScreenState extends State<HomeScreen>
       _hasPromptedCallerId = false;
     }
 
-    // 2. Automated After-Call Sales Outcome & Follow-up Modal
+    // 2. Automated After-Call Sales Outcome & Follow-up Truecaller Dialog
     final afterCall = widget.syncService.activeAfterCallEvent;
     if (afterCall != null && !_hasPromptedOutcome) {
       _hasPromptedOutcome = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        showModalBottomSheet(
+        showDialog(
           context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.transparent,
-          builder: (_) => OutcomeModal(
+          barrierDismissible: true,
+          builder: (dialogCtx) => AfterCallDialog(
             event: afterCall,
             syncService: widget.syncService,
+            onDismiss: () {
+              widget.syncService.dismissAfterCallPopup();
+            },
           ),
         ).then((_) {
           widget.syncService.dismissAfterCallPopup();
@@ -1607,13 +1609,13 @@ class _HomeScreenState extends State<HomeScreen>
                                 recording: hasRec,
                                 recordingPath: call.recordingPath?.toString(),
                               );
-                        showModalBottomSheet(
+                        showDialog(
                           context: context,
-                          isScrollControlled: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (_) => OutcomeModal(
+                          barrierDismissible: true,
+                          builder: (dialogCtx) => AfterCallDialog(
                             event: eventObj,
                             syncService: service,
+                            onDismiss: () {},
                           ),
                         );
                       },

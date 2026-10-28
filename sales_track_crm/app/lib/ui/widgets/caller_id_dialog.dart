@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../models/sales_track_models.dart';
 import '../../services/telemetry_sync_service.dart';
-import '../screens/outcome_modal.dart';
+import 'after_call_dialog.dart';
 
 class CallerIdDialog extends StatelessWidget {
   final CallerIdInfo info;
@@ -52,13 +52,14 @@ class CallerIdDialog extends StatelessWidget {
       source: 'auto',
     );
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => OutcomeModal(
+      barrierDismissible: true,
+      builder: (_) => AfterCallDialog(
         event: tempEvent,
+        callerInfo: info,
         syncService: syncService,
+        onDismiss: () {},
       ),
     );
   }
