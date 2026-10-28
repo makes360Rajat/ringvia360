@@ -50,7 +50,7 @@ function mks_st_view_columns($view)
     $contact = [
         'key'        => 'contact',
         'label'      => _l('mks_st_col_contact'),
-        'select'     => "COALESCE(l.name, cl.company, CONCAT(rs.firstname, ' ', rs.lastname), NULLIF(e.contact_name, ''), e.number, e.number_raw)",
+        'select'     => "COALESCE(l.name, cl.company, CONCAT(rs.firstname, ' ', rs.lastname), NULLIF(e.contact_name, ''), 'Un Saved')",
         'search'     => "CONCAT_WS(' ', e.number, e.number_raw, e.contact_name, l.name, l.company, cl.company, ct.firstname, ct.lastname, rs.firstname, rs.lastname)",
         'sortable'   => true,
         'searchable' => true,
@@ -65,6 +65,7 @@ function mks_st_view_columns($view)
     $size      = ['key' => 'size', 'label' => _l('mks_st_col_size'), 'select' => 'e.recording_size', 'sortable' => true, 'searchable' => false];
     $media     = ['key' => 'media', 'label' => _l('mks_st_col_type'), 'select' => 'e.media', 'sortable' => true, 'searchable' => false];
     $message   = ['key' => 'message', 'label' => _l('mks_st_col_message'), 'select' => 'e.body', 'sortable' => false, 'searchable' => true];
+    $activity  = ['key' => 'message', 'label' => 'Activity / Message', 'select' => 'e.body', 'search' => "CONCAT_WS(' ', e.body, e.media, e.title)", 'sortable' => false, 'searchable' => true];
     $sim       = ['key' => 'sim', 'label' => _l('mks_st_col_sim'), 'select' => 'e.sim_slot', 'sortable' => true, 'searchable' => false];
     $ai        = ['key' => 'ai', 'label' => _l('mks_st_col_ai'), 'select' => 'e.ai_score', 'sortable' => true, 'searchable' => false];
     $outcome   = ['key' => 'outcome', 'label' => _l('mks_st_col_outcome'), 'select' => 'e.outcome', 'search' => "CONCAT_WS(' ', e.outcome, e.outcome_note)", 'sortable' => true, 'searchable' => true];
@@ -76,10 +77,10 @@ function mks_st_view_columns($view)
                 : [$direction, $contact, $staff, $time, $duration, $size, $recording, $options];
 
         case 'whatsapp_calls':
-            return [$direction, $contact, $staff, $time, $duration, $media, $outcome, $options];
+            return [$direction, $contact, $staff, $time, $duration, $phone, $activity, $outcome, $options];
 
         case 'sms':
-            return [$direction, $contact, $message, $staff, $time, $sim, $options];
+            return [$direction, $contact, $staff, $time, $phone, $message, $options];
 
         default:
             return mks_st_enabled('ai_enabled') ? [$direction, $contact, $staff, $time, $duration, $phone, $recording, $outcome, $ai, $options]
@@ -141,11 +142,13 @@ function mks_st_direction_filters($view)
 
         case 'whatsapp_calls':
             return [
+                'calls'    => 'Calls Only',
+                'messages' => 'Messages Only',
                 'incoming' => _l('mks_st_dir_incoming'),
                 'outgoing' => _l('mks_st_dir_outgoing'),
                 'missed'   => _l('mks_st_dir_missed'),
-                'voice'    => _l('mks_st_media_voice'),
-                'video'    => _l('mks_st_media_video'),
+                'voice'    => 'Voice Calls',
+                'video'    => 'Video Calls',
             ];
 
         case 'sms':
@@ -265,8 +268,10 @@ function mks_st_view_where($view, array $filters, $pending = false)
     $CI    = &get_instance();
     $pages = mks_st_pages();
     $kind  = isset($pages[$view]) ? $pages[$view]['kind'] : 'call';
-    if ($view === 'sms') {
-        $where = ["AND e.kind IN ('sms', 'whatsapp_message', 'notification')"];
+    if ($view === 'whatsapp_calls') {
+        $where = ["AND e.kind IN ('whatsapp_call', 'whatsapp_message')"];
+    } elseif ($view === 'sms') {
+        $where = ["AND e.kind IN ('sms', 'notification')"];
     } else {
         $where = ["AND e.kind = '" . $kind . "'"];
     }
@@ -310,7 +315,11 @@ function mks_st_view_where($view, array $filters, $pending = false)
     $direction = isset($filters['direction']) ? (string) $filters['direction'] : '';
 
     if ($direction !== '' && array_key_exists($direction, mks_st_direction_filters($view))) {
-        if ($direction === 'connected') {
+        if ($direction === 'calls') {
+            $where[] = "AND e.kind = 'whatsapp_call'";
+        } elseif ($direction === 'messages') {
+            $where[] = "AND e.kind = 'whatsapp_message'";
+        } elseif ($direction === 'connected') {
             $where[] = 'AND e.duration >= ' . mks_st_connected_seconds();
         } elseif ($direction === 'unanswered') {
             $where[] = "AND e.direction = 'outgoing' AND e.duration < " . mks_st_connected_seconds();
@@ -320,8 +329,10 @@ function mks_st_view_where($view, array $filters, $pending = false)
             $where[] = "AND e.direction = 'outgoing' AND e.duration < " . mks_st_connected_seconds() . ' AND e.number_key IS NOT NULL'
                 . ' AND NOT EXISTS (SELECT 1 FROM ' . mks_st_events_table() . " x WHERE x.number_key = e.number_key AND x.kind IN ('call', 'whatsapp_call')"
                 . ' AND x.duration >= ' . mks_st_connected_seconds() . ')';
-        } elseif ($direction === 'voice' || $direction === 'video') {
-            $where[] = "AND e.media = '" . $direction . "'";
+        } elseif ($direction === 'voice') {
+            $where[] = "AND (e.media = 'voice' OR (e.kind = 'whatsapp_call' AND (e.media IS NULL OR e.media != 'video')))";
+        } elseif ($direction === 'video') {
+            $where[] = "AND e.media = 'video'";
         } else {
             $where[] = "AND e.direction = '" . $direction . "'";
         }
@@ -434,15 +445,23 @@ function mks_st_view_summary($view, array $filters, $search)
 
         case 'whatsapp_calls':
             $row = $CI->db->query('SELECT COUNT(*) AS total,'
-                . " SUM(e.media = 'voice') AS voice, SUM(e.media = 'video') AS video,"
-                . " SUM(e.direction IN ('missed', 'rejected')) AS missed, SUM(e.duration >= " . mks_st_connected_seconds() . ') AS connected,'
-                . ' COALESCE(SUM(e.duration), 0) AS talk ' . $base . $where)->row_array();
+                . " SUM(e.kind = 'whatsapp_call') AS calls_count,"
+                . " SUM(e.kind = 'whatsapp_message') AS msgs_count,"
+                . " SUM(e.media = 'video' AND e.kind = 'whatsapp_call') AS video,"
+                . " SUM((e.media = 'voice' OR e.media IS NULL OR e.media = '') AND e.kind = 'whatsapp_call') AS voice,"
+                . " SUM(e.direction IN ('missed', 'rejected') AND e.kind = 'whatsapp_call') AS missed,"
+                . ' SUM(e.duration >= ' . mks_st_connected_seconds() . ' AND e.kind = \'whatsapp_call\') AS connected,'
+                . " COALESCE(SUM(CASE WHEN e.kind = 'whatsapp_call' THEN e.duration ELSE 0 END), 0) AS talk " . $base . $where)->row_array();
+
+            $callsTotal = (int) $row['calls_count'];
+            $msgsTotal  = (int) $row['msgs_count'];
+            $splitHint  = $msgsTotal > 0 ? $callsTotal . ' calls, ' . $msgsTotal . ' msgs' : '';
 
             return [
-                mks_st_tile('total', _l('mks_st_kpi_whatsapp_calls'), mks_st_number_label($row['total']), '', 'fa-brands fa-whatsapp', 'green'),
-                mks_st_tile('voice', _l('mks_st_media_voice'), mks_st_number_label($row['voice']), '', 'fa-solid fa-phone', 'blue'),
-                mks_st_tile('video', _l('mks_st_media_video'), mks_st_number_label($row['video']), '', 'fa-solid fa-video', 'violet'),
-                mks_st_tile('missed', _l('mks_st_kpi_missed'), mks_st_number_label($row['missed']), '', 'fa-solid fa-phone-slash', (int) $row['missed'] > 0 ? 'red' : 'slate'),
+                mks_st_tile('total', 'WhatsApp Activity', mks_st_number_label($row['total']), $splitHint, 'fa-brands fa-whatsapp', 'green'),
+                mks_st_tile('voice', 'Voice Calls', mks_st_number_label($row['voice']), '', 'fa-solid fa-phone', 'blue'),
+                mks_st_tile('video', 'Video Calls', mks_st_number_label($row['video']), '', 'fa-solid fa-video', 'violet'),
+                mks_st_tile('messages', 'Messages', mks_st_number_label($row['msgs_count']), '', 'fa-solid fa-message', 'slate'),
                 mks_st_tile('talk', _l('mks_st_kpi_talk_time'), mks_st_duration_label($row['talk']), mks_st_average_hint($row['talk'], $row['connected']), 'fa-solid fa-clock', 'amber'),
             ];
 
@@ -627,7 +646,7 @@ function mks_st_render_cell($key, array $event, array $context)
             return mks_st_render_direction($event);
 
         case 'contact':
-            return mks_st_render_contact($event);
+            return mks_st_render_contact($event, $context);
 
         case 'outcome':
             return mks_st_render_outcome($event, $context);
@@ -690,11 +709,40 @@ function mks_st_direction_meta(array $event)
 {
     $direction = (string) $event['direction'];
     $kind      = (string) $event['kind'];
+    $media     = isset($event['media']) ? (string) $event['media'] : '';
 
-    if (in_array($kind, ['sms', 'whatsapp_message', 'notification'], true)) {
+    if ($kind === 'whatsapp_message') {
+        return $direction === 'outgoing'
+            ? ['label' => 'Sent Message', 'icon' => 'fa-arrow-up', 'tone' => 'violet']
+            : ['label' => 'Received Message', 'icon' => 'fa-arrow-down', 'tone' => 'green'];
+    }
+
+    if (in_array($kind, ['sms', 'notification'], true)) {
         return $direction === 'outgoing'
             ? ['label' => _l('mks_st_dir_sent'), 'icon' => 'fa-arrow-up', 'tone' => 'violet']
             : ['label' => _l('mks_st_dir_received'), 'icon' => 'fa-arrow-down', 'tone' => 'green'];
+    }
+
+    if ($kind === 'whatsapp_call') {
+        $isVideo = ($media === 'video');
+        $tag = $isVideo ? ' Video' : ' Voice';
+
+        switch ($direction) {
+            case 'incoming':
+                return ['label' => 'Incoming' . $tag, 'icon' => 'fa-arrow-down', 'tone' => 'green'];
+
+            case 'outgoing':
+                if ((int) $event['duration'] < mks_st_connected_seconds()) {
+                    return ['label' => 'Not Answered' . $tag, 'icon' => 'fa-arrow-up', 'tone' => 'amber'];
+                }
+                return ['label' => 'Outgoing' . $tag, 'icon' => 'fa-arrow-up', 'tone' => 'blue'];
+
+            case 'missed':
+                return ['label' => 'Missed' . $tag, 'icon' => 'fa-phone-slash', 'tone' => 'red'];
+
+            case 'rejected':
+                return ['label' => 'Rejected' . $tag, 'icon' => 'fa-ban', 'tone' => 'red'];
+        }
     }
 
     switch ($direction) {
@@ -746,7 +794,7 @@ function mks_st_render_direction(array $event)
  *
  * @return string
  */
-function mks_st_render_contact(array $event)
+function mks_st_render_contact(array $event, array $context = [])
 {
     $number  = mks_st_format_number($event['number'] !== null ? $event['number'] : $event['number_raw']);
     $relType = (string) $event['rel_type'];
@@ -817,13 +865,15 @@ function mks_st_render_contact(array $event)
             . '<i class="fa-solid fa-user-plus" aria-hidden="true"></i>' . e(_l('mks_st_create_lead')) . '</button>';
     }
 
+    $view = isset($context['view']) ? (string) $context['view'] : '';
+
     if (in_array($event['kind'], ['whatsapp_call', 'whatsapp_message'], true)) {
         if ($event['app_package'] === 'com.whatsapp.w4b') {
             $html .= '<span class="mks-sales-track-pill mks-sales-track-tone-green mks-sales-track-pill-soft">' . e(_l('mks_st_whatsapp_business')) . '</span>';
-        } else {
+        } elseif ($view !== 'whatsapp_calls') {
             $html .= '<span class="mks-sales-track-pill mks-sales-track-tone-green mks-sales-track-pill-soft"><i class="fa-brands fa-whatsapp" aria-hidden="true"></i> WhatsApp</span>';
         }
-    } elseif ($event['kind'] === 'notification') {
+    } elseif ($event['kind'] === 'notification' && $view !== 'sms') {
         $html .= '<span class="mks-sales-track-pill mks-sales-track-tone-blue mks-sales-track-pill-soft"><i class="fa-solid fa-bell" aria-hidden="true"></i> Notification</span>';
     }
 
@@ -1053,13 +1103,11 @@ function mks_st_event_title(array $event)
         return trim($event['rel_staff_first'] . ' ' . $event['rel_staff_last']);
     }
 
-    if (!empty($event['contact_name'])) {
+    if (!empty($event['contact_name']) && $event['contact_name'] !== $event['number']) {
         return (string) $event['contact_name'];
     }
 
-    $number = mks_st_format_number($event['number'] !== null ? $event['number'] : $event['number_raw']);
-
-    return $number !== '' ? $number : _l('mks_st_unknown_caller');
+    return 'Un Saved';
 }
 
 /**
@@ -1069,11 +1117,26 @@ function mks_st_event_title(array $event)
  */
 function mks_st_render_media(array $event)
 {
-    if ($event['media'] === 'video') {
-        return '<span class="mks-sales-track-chip"><i class="fa-solid fa-video" aria-hidden="true"></i>' . e(_l('mks_st_media_video')) . '</span>';
+    $kind  = isset($event['kind']) ? (string) $event['kind'] : '';
+    $media = isset($event['media']) ? (string) $event['media'] : '';
+
+    if ($kind === 'whatsapp_message') {
+        return '<span class="mks-sales-track-chip mks-sales-track-chip-chat"><i class="fa-solid fa-message" aria-hidden="true"></i> ' . e('Chat') . '</span>';
     }
 
-    return '<span class="mks-sales-track-chip"><i class="fa-solid fa-phone" aria-hidden="true"></i>' . e(_l('mks_st_media_voice')) . '</span>';
+    if ($media === 'video') {
+        return '<span class="mks-sales-track-chip mks-sales-track-chip-video"><i class="fa-solid fa-video" aria-hidden="true"></i> ' . e(_l('mks_st_media_video')) . '</span>';
+    }
+
+    if ($kind === 'whatsapp_call') {
+        return '<span class="mks-sales-track-chip mks-sales-track-chip-voice"><i class="fa-solid fa-phone" aria-hidden="true"></i> ' . e(_l('mks_st_media_voice')) . '</span>';
+    }
+
+    if ($kind === 'sms' || $kind === 'notification') {
+        return '<span class="mks-sales-track-chip"><i class="fa-solid fa-comment-sms" aria-hidden="true"></i> SMS</span>';
+    }
+
+    return '<span class="mks-sales-track-chip"><i class="fa-solid fa-phone" aria-hidden="true"></i> ' . e(_l('mks_st_media_voice')) . '</span>';
 }
 
 /**
@@ -1085,11 +1148,25 @@ function mks_st_render_media(array $event)
  */
 function mks_st_render_message(array $event)
 {
-    if ($event['body'] === null || $event['body'] === '') {
-        return '<span class="mks-sales-track-muted mks-sales-track-italic">' . e(_l('mks_st_text_not_stored')) . '</span>';
+    $kind  = isset($event['kind']) ? (string) $event['kind'] : '';
+    $body  = isset($event['body']) && $event['body'] !== null ? trim((string) $event['body']) : '';
+    $media = isset($event['media']) ? (string) $event['media'] : '';
+
+    if ($kind === 'whatsapp_call') {
+        $chip = ($media === 'video')
+            ? '<span class="mks-sales-track-chip mks-sales-track-chip-video"><i class="fa-solid fa-video" aria-hidden="true"></i> ' . e('Video Call') . '</span>'
+            : '<span class="mks-sales-track-chip mks-sales-track-chip-voice"><i class="fa-solid fa-phone" aria-hidden="true"></i> ' . e('Voice Call') . '</span>';
+
+        if ($body === '') {
+            return $chip;
+        }
+
+        return '<div class="mks-sales-track-activity-cell">' . $chip . '<div class="mks-sales-track-text" style="margin-top: 4px;">' . nl2br(e($body)) . '</div></div>';
     }
 
-    $body = (string) $event['body'];
+    if ($body === '') {
+        return '<span class="mks-sales-track-muted">-</span>';
+    }
 
     if (mb_strlen($body, 'UTF-8') <= 140) {
         return '<div class="mks-sales-track-text">' . nl2br(e($body)) . '</div>';

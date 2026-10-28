@@ -1,11 +1,5 @@
 import java.util.Properties
-
-val keystoreProperties = Properties()
-val keystorePropertiesFile = rootProject.file("key.properties")
-
-if (keystorePropertiesFile.exists()) {
-    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
-}
+import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
@@ -14,8 +8,15 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Load signing properties from key.properties
+val keyPropertiesFile = rootProject.file("key.properties")
+val keyProperties = Properties()
+if (keyPropertiesFile.exists()) {
+    keyProperties.load(FileInputStream(keyPropertiesFile))
+}
+
 android {
-    namespace = "com.makes360.salestrack.sales_track_crm"
+    namespace = "com.CallVia360.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -28,11 +29,17 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    signingConfigs {
+        create("release") {
+            keyAlias = keyProperties["keyAlias"] as String
+            keyPassword = keyProperties["keyPassword"] as String
+            storeFile = keyProperties["storeFile"]?.let { file(it) }
+            storePassword = keyProperties["storePassword"] as String
+        }
+    }
+
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.makes360.salestrack.sales_track_crm"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.CallVia360.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -41,25 +48,9 @@ android {
 
     buildTypes {
         release {
-            // A signed release is enabled after android/key.properties is
-            // filled with the private keystore credentials. Until then,
-            // Gradle produces an unsigned release rather than silently using
-            // the debug certificate.
-            val signingValues = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
-            val hasReleaseCredentials = keystorePropertiesFile.exists()
-                && signingValues.all {
-                    val value = keystoreProperties.getProperty(it)?.trim()
-                    !value.isNullOrEmpty() && !value.startsWith("CHANGE_ME")
-                }
-                && rootProject.file(keystoreProperties.getProperty("storeFile")).exists()
-            if (hasReleaseCredentials) {
-                signingConfig = signingConfigs.create("release") {
-                    keyAlias = keystoreProperties["keyAlias"] as String
-                    keyPassword = keystoreProperties["keyPassword"] as String
-                    storeFile = rootProject.file(keystoreProperties["storeFile"] as String)
-                    storePassword = keystoreProperties["storePassword"] as String
-                }
-            }
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

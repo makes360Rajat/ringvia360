@@ -23,89 +23,57 @@ class SalesTrackApiResponse<T> {
 
 class SalesTrackApiService {
   static const String _prefServerUrl = 'mks_server_url';
-  static const String _prefApiPath = 'mks_api_path';
   static const String _prefToken = 'mks_device_token';
   static const String _prefDeviceUid = 'mks_device_uid';
   static const String _prefCookies = 'mks_session_cookies';
 
-  /// The install-specific CRM host. Each customer enters this during pairing.
-  static const String defaultServerUrl = 'https://crm.make360.in';
-  /// The Sales Track module route. This is normally identical for every CRM,
-  /// but is editable for installations that use a custom module route.
-  static const String defaultApiPath = '/mks_sales_track/api/v1';
+  static const String defaultServerUrl = '';
 
   String _serverUrl = defaultServerUrl;
-  String _apiPath = defaultApiPath;
   String? _token;
   String? _deviceUid;
   String? _sessionCookies;
 
   String get serverUrl => _serverUrl;
-  String get apiPath => _apiPath;
   String? get token => _token;
   String? get deviceUid => _deviceUid;
   bool get isPaired => _token != null && _token!.isNotEmpty;
 
-  String get apiBaseUrl => '${normalizeServerUrl(_serverUrl)}${normalizeApiPath(_apiPath)}';
+  String get apiBaseUrl {
+    final normalized = normalizeServerUrl(_serverUrl);
+    return normalized.isEmpty ? '' : '$normalized/mks_sales_track/api/v1';
+  }
 
   /// The CRM's own address from whatever was typed, pasted or scanned:
-  /// "crm.make360.in", "https://crm.make360.in/admin/mks_sales_track/devices"
-  /// and "https://crm.make360.in/mks_sales_track/api/v1/" all become
-  /// "https://crm.make360.in". A CRM in a folder or behind index.php keeps it.
+  /// e.g. "https://crm.yourcompany.com", "https://crm.yourcompany.com/admin/mks_sales_track/devices"
+  /// and "https://crm.yourcompany.com/mks_sales_track/api/v1/" all become
+  /// "https://crm.yourcompany.com". A CRM in a folder or behind index.php keeps it.
   static String normalizeServerUrl(String input) {
     var url = input.trim().replaceAll(RegExp(r'\s+'), '');
-    if (url.isEmpty) return url;
+    if (url.isEmpty || url == 'https://' || url == 'http://') return '';
+    // Fix accidental duplicate protocol prefixes e.g. https://https://
+    url = url.replaceAll(RegExp(r'^(https?://)+', caseSensitive: false), 'https://');
     if (!RegExp(r'^https?://', caseSensitive: false).hasMatch(url)) {
-      url = 'https://$url';
+      if (url.startsWith('localhost') ||
+          url.startsWith('10.') ||
+          url.startsWith('192.168.') ||
+          url.contains(':8080') ||
+          url.contains(':3000') ||
+          url.contains(':8000')) {
+        url = 'http://$url';
+      } else {
+        url = 'https://$url';
+      }
     }
     url = url.replaceFirst(RegExp(r'[?#].*$'), '');
     url = url.replaceFirst(RegExp(r'(/mks_sales_track/api/v1|/admin)(/.*)?$', caseSensitive: false), '');
     while (url.endsWith('/')) {
       url = url.substring(0, url.length - 1);
     }
+    if (url == 'https:/' || url == 'https:' || url == 'http:/' || url == 'http:') {
+      return '';
+    }
     return url;
-  }
-
-  /// Makes an API route safe to append to a CRM host.
-  static String normalizeApiPath(String input) {
-    var path = input.trim().replaceAll(RegExp(r'\s+'), '');
-    if (path.isEmpty) return defaultApiPath;
-    final uri = Uri.tryParse(path);
-    if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
-      path = uri.path;
-    }
-    path = path.replaceFirst(RegExp(r'[?#].*$'), '');
-    if (!path.startsWith('/')) path = '/$path';
-    while (path.length > 1 && path.endsWith('/')) {
-      path = path.substring(0, path.length - 1);
-    }
-    return path.isEmpty || path == '/' ? defaultApiPath : path;
-  }
-
-  /// Splits a QR/API URL into the CRM host and its module route.
-  static String serverUrlFromApiUrl(String input) {
-    final normalized = input.trim().replaceAll(RegExp(r'\s+'), '');
-    final candidate = RegExp(r'^https?://', caseSensitive: false).hasMatch(normalized)
-        ? normalized
-        : 'https://$normalized';
-    final uri = Uri.tryParse(candidate);
-    if (uri == null || uri.host.isEmpty) return normalizeServerUrl(input);
-    const standardPath = '/mks_sales_track/api/v1';
-    final index = uri.path.toLowerCase().indexOf(standardPath);
-    final crmPrefix = index >= 0 ? uri.path.substring(0, index) : '';
-    return normalizeServerUrl('${uri.scheme}://${uri.authority}$crmPrefix');
-  }
-
-  static String apiPathFromApiUrl(String input) {
-    final normalized = input.trim().replaceAll(RegExp(r'\s+'), '');
-    final candidate = RegExp(r'^https?://', caseSensitive: false).hasMatch(normalized)
-        ? normalized
-        : 'https://$normalized';
-    final uri = Uri.tryParse(candidate);
-    if (uri == null || uri.host.isEmpty) return defaultApiPath;
-    const standardPath = '/mks_sales_track/api/v1';
-    final index = uri.path.toLowerCase().indexOf(standardPath);
-    return normalizeApiPath(index >= 0 ? uri.path.substring(index) : uri.path);
   }
 
   /// What a failed pairing means, in words a rep can act on.
@@ -131,26 +99,26 @@ class SalesTrackApiService {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    final savedServerUrl = prefs.getString(_prefServerUrl) ?? defaultServerUrl;
-    final savedApiPath = prefs.getString(_prefApiPath);
-    // Upgrade existing devices that stored one combined API address.
-    _serverUrl = serverUrlFromApiUrl(savedServerUrl);
-    _apiPath = savedApiPath == null
-        ? apiPathFromApiUrl(savedServerUrl)
-        : normalizeApiPath(savedApiPath);
+    final savedUrl = prefs.getString(_prefServerUrl);
+    if (savedUrl != null && savedUrl.isNotEmpty && !savedUrl.contains('crm.make360.in')) {
+      _serverUrl = savedUrl;
+    } else {
+      _serverUrl = defaultServerUrl;
+      if (savedUrl != null && savedUrl.contains('crm.make360.in')) {
+        await prefs.remove(_prefServerUrl);
+      }
+    }
     _token = prefs.getString(_prefToken);
     _deviceUid = prefs.getString(_prefDeviceUid);
     _sessionCookies = prefs.getString(_prefCookies);
   }
 
-  Future<void> saveCredentials({required String serverUrl, required String apiPath, required String token, required String deviceUid}) async {
-    _serverUrl = normalizeServerUrl(serverUrl);
-    _apiPath = normalizeApiPath(apiPath);
+  Future<void> saveCredentials({required String serverUrl, required String token, required String deviceUid}) async {
+    _serverUrl = serverUrl;
     _token = token;
     _deviceUid = deviceUid;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefServerUrl, _serverUrl);
-    await prefs.setString(_prefApiPath, _apiPath);
+    await prefs.setString(_prefServerUrl, serverUrl);
     await prefs.setString(_prefToken, token);
     await prefs.setString(_prefDeviceUid, deviceUid);
   }
@@ -181,7 +149,29 @@ class SalesTrackApiService {
     return headers;
   }
 
+  /// Told when the CRM no longer accepts this phone: revoked, deleted, or
+  /// paired again on another phone. The sync service unpairs.
+  void Function(String reason)? onPairingLost;
+
+  // The CRM's only answers that mean this phone is no longer paired: revoked,
+  // deleted (its token is unknown) or paired again on another phone. A 403
+  // (a feature switched off, an inactive staff account) or any other error
+  // never unpairs the phone.
+  static const Set<String> _pairingLostErrors = {'device_revoked', 'invalid_token', 'device_mismatch'};
+
+  void _watchAuth(http.Response response) {
+    if (response.statusCode != 401 || onPairingLost == null || _token == null || _token!.isEmpty) return;
+    try {
+      final body = jsonDecode(response.body);
+      final err = body is Map ? body['error']?.toString() : null;
+      if (err != null && _pairingLostErrors.contains(err)) {
+        onPairingLost!(err);
+      }
+    } catch (_) {}
+  }
+
   void _saveCookiesFromResponse(http.Response response) async {
+    _watchAuth(response);
     final rawCookie = response.headers['set-cookie'];
     if (rawCookie != null && rawCookie.isNotEmpty) {
       _sessionCookies = rawCookie;
@@ -191,9 +181,18 @@ class SalesTrackApiService {
   }
 
   // 1. PING
-  Future<SalesTrackApiResponse<Map<String, dynamic>>> ping(String serverUrl, {String apiPath = defaultApiPath}) async {
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> ping(String targetUrl) async {
     try {
-      final endpoint = '${normalizeServerUrl(serverUrl)}${normalizeApiPath(apiPath)}/ping';
+      final normalized = normalizeServerUrl(targetUrl);
+      if (normalized.isEmpty) {
+        return SalesTrackApiResponse(
+          success: false,
+          error: 'EMPTY_URL',
+          message: 'Please enter a server URL',
+          statusCode: 0,
+        );
+      }
+      final endpoint = '$normalized/mks_sales_track/api/v1/ping';
 
       final response = await http.get(
         Uri.parse(endpoint),
@@ -230,13 +229,11 @@ class SalesTrackApiService {
   // 2. PAIR
   Future<SalesTrackApiResponse<Map<String, dynamic>>> pair({
     required String serverUrl,
-    required String apiPath,
     required String code,
     required Map<String, dynamic> deviceInfo,
   }) async {
     try {
       _serverUrl = normalizeServerUrl(serverUrl);
-      _apiPath = normalizeApiPath(apiPath);
       final cleanCode = code.replaceAll(RegExp(r'[\s-]+'), '');
       final endpoint = '$apiBaseUrl/pair';
       final payload = {
@@ -287,7 +284,7 @@ class SalesTrackApiService {
       if (response.statusCode == 200 && body['success'] == true && (body['token']?.toString() ?? '').isNotEmpty) {
         final token = body['token'].toString();
         final uid = deviceInfo['uid']?.toString() ?? '';
-        await saveCredentials(serverUrl: _serverUrl, apiPath: _apiPath, token: token, deviceUid: uid);
+        await saveCredentials(serverUrl: _serverUrl, token: token, deviceUid: uid);
         return SalesTrackApiResponse(
           success: true,
           data: body,
@@ -329,6 +326,11 @@ class SalesTrackApiService {
     List<Map<String, dynamic>>? acks,
     String? pushToken,
     List<Map<String, dynamic>>? tamperReports,
+    String? appVersion,
+    String? osVersion,
+    String? manufacturer,
+    String? model,
+    List<Map<String, dynamic>>? sims,
   }) async {
     if (!isPaired) {
       return SalesTrackApiResponse(success: false, error: 'NOT_PAIRED', statusCode: 401);
@@ -337,9 +339,15 @@ class SalesTrackApiService {
       final endpoint = '$apiBaseUrl/config';
       final payload = <String, dynamic>{
         'health': health,
-        'app_version': '1.0.0',
-        'os_version': '14',
+        'app_version': appVersion ?? '1.9.7',
+        'os_version': osVersion ?? '14',
       };
+      if (_token != null && _token!.isNotEmpty) {
+        payload['token'] = _token;
+      }
+      if (_deviceUid != null && _deviceUid!.isNotEmpty) {
+        payload['device_uid'] = _deviceUid;
+      }
       if (acks != null && acks.isNotEmpty) {
         payload['acks'] = acks;
       }
@@ -349,12 +357,21 @@ class SalesTrackApiService {
       if (tamperReports != null && tamperReports.isNotEmpty) {
         payload['tamper'] = tamperReports;
       }
+      if (manufacturer != null && manufacturer.isNotEmpty) {
+        payload['manufacturer'] = manufacturer;
+      }
+      if (model != null && model.isNotEmpty) {
+        payload['model'] = model;
+      }
+      if (sims != null && sims.isNotEmpty) {
+        payload['sims'] = sims;
+      }
 
       final response = await http.post(
         Uri.parse(endpoint),
         headers: _buildHeaders(),
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 30));
 
       _saveCookiesFromResponse(response);
 
@@ -385,21 +402,33 @@ class SalesTrackApiService {
   }
 
   // 4. SYNC EVENTS BATCH
-  Future<SalesTrackApiResponse<Map<String, dynamic>>> syncEvents(List<SalesTrackEvent> events) async {
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> syncEvents(
+    List<SalesTrackEvent> events, {
+    Map<String, dynamic>? health,
+  }) async {
     if (!isPaired || events.isEmpty) {
       return SalesTrackApiResponse(success: false, error: 'NOT_PAIRED_OR_EMPTY', statusCode: 400);
     }
     try {
       final endpoint = '$apiBaseUrl/sync';
-      final payload = {
+      final payload = <String, dynamic>{
         'events': events.map((e) => e.toApiJson()).toList(),
       };
+      if (health != null && health.isNotEmpty) {
+        payload['health'] = health;
+      }
+      if (_token != null && _token!.isNotEmpty) {
+        payload['token'] = _token;
+      }
+      if (_deviceUid != null && _deviceUid!.isNotEmpty) {
+        payload['device_uid'] = _deviceUid;
+      }
 
       final response = await http.post(
         Uri.parse(endpoint),
         headers: _buildHeaders(),
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 25));
+      ).timeout(const Duration(seconds: 60));
 
       _saveCookiesFromResponse(response);
 
@@ -490,15 +519,21 @@ class SalesTrackApiService {
     }
     try {
       final endpoint = '$apiBaseUrl/outcome';
-      final payload = {
+      final payload = <String, dynamic>{
         'items': items.map((i) => i.toJson()).toList(),
       };
+      if (_token != null && _token!.isNotEmpty) {
+        payload['token'] = _token;
+      }
+      if (_deviceUid != null && _deviceUid!.isNotEmpty) {
+        payload['device_uid'] = _deviceUid;
+      }
 
       final response = await http.post(
         Uri.parse(endpoint),
         headers: _buildHeaders(),
         body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 20));
 
       _saveCookiesFromResponse(response);
 

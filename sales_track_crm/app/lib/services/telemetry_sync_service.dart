@@ -6,10 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sales_track_models.dart';
 import 'sales_track_api_service.dart';
 import 'local_database_service.dart';
+import '../main.dart';
 
 class TelemetrySyncService extends ChangeNotifier {
-  static const MethodChannel _platform = MethodChannel('com.makes360.salestrack/platform');
-  static const EventChannel _telemetryChannel = EventChannel('com.makes360.salestrack/telemetry_stream');
+  static const MethodChannel _platform = MethodChannel('com.CallVia360.app/platform');
+  static const EventChannel _telemetryChannel = EventChannel('com.CallVia360.app/telemetry_stream');
 
   final SalesTrackApiService api = SalesTrackApiService();
 
@@ -140,6 +141,10 @@ class TelemetrySyncService extends ChangeNotifier {
   Timer? _heartbeatTimer;
 
   TelemetrySyncService() {
+    // The CRM revoked or deleted this phone: stop and ask for a new pairing.
+    api.onPairingLost = (reason) {
+      _handlePairingLost(reason);
+    };
     _init();
   }
 
@@ -148,28 +153,32 @@ class TelemetrySyncService extends ChangeNotifier {
     _isPaired = api.isPaired;
 
     await _loadSavedMeta();
+    _listenToNativeEvents();
+    await checkPermissions();
 
     if (_isPaired) {
       await _loadPersistedHistory();
       await refreshPendingCounts();
 
-      // Defer hardware scanning and initial sync to asynchronous background task so UI renders at 60fps immediately
-      Future.delayed(const Duration(milliseconds: 300), () async {
+      // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
+      Future.delayed(const Duration(milliseconds: 100), () async {
         await fetchPlatformDeviceInfo();
-        await checkPermissions();
-        _listenToNativeEvents();
-
-        if (hasCallLogPermission) {
-          await syncDeviceCallLogs();
-        }
-        if (hasSmsPermission) {
-          await syncDeviceSms();
-        }
-        await scanLocalRecordings();
-
-        await fetchCallLists();
+        await sendHeartbeat();
         _startHeartbeatLoop();
-        await syncNow();
+
+        try {
+          if (hasCallLogPermission) {
+            await syncDeviceCallLogs();
+          }
+          if (hasSmsPermission) {
+            await syncDeviceSms();
+          }
+          await scanLocalRecordings();
+          await fetchCallLists();
+          await syncNow();
+        } catch (e) {
+          debugPrint('Background sync error: $e');
+        }
       });
     } else {
       _statusMessage = 'Enter 6-digit pairing code to connect';
@@ -184,8 +193,14 @@ class TelemetrySyncService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Future<void> fetchPlatformDeviceInfo() async {
     try {
-      final info = await _platform.invokeMapMethod<String, dynamic>('getDeviceInfo');
-      if (info != null) {
+      final dynamic raw = await _platform.invokeMethod('getDeviceInfo');
+      if (raw is Map) {
+        final Map<String, dynamic> info = {};
+        raw.forEach((key, val) {
+          if (key != null) {
+            info[key.toString()] = val;
+          }
+        });
         _deviceInfo = info;
         _batteryPercent = (info['batteryPercent'] as num?)?.toInt() ?? 85;
         notifyListeners();
@@ -197,9 +212,15 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> checkPermissions() async {
     try {
-      final status = await _platform.invokeMapMethod<String, dynamic>('getPermissionsStatus');
-      if (status != null) {
-        _permissions = status.map((k, v) => MapEntry(k, v == true));
+      final dynamic raw = await _platform.invokeMethod('getPermissionsStatus');
+      if (raw is Map) {
+        final Map<String, bool> updated = {};
+        raw.forEach((key, val) {
+          if (key != null) {
+            updated[key.toString()] = val == true;
+          }
+        });
+        _permissions = updated;
         notifyListeners();
       }
     } catch (e) {
@@ -210,7 +231,7 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> requestAllPermissions() async {
     try {
       await _platform.invokeMethod('requestAllPermissions');
-      await Future.delayed(const Duration(milliseconds: 800));
+      await Future.delayed(const Duration(milliseconds: 400));
       await checkPermissions();
       if (hasCallLogPermission) {
         await syncDeviceCallLogs();
@@ -221,6 +242,24 @@ class TelemetrySyncService extends ChangeNotifier {
       await scanLocalRecordings();
     } catch (e) {
       debugPrint('Error requesting permissions: $e');
+    }
+  }
+
+  Future<void> requestPermission(String permissionGroup) async {
+    try {
+      await _platform.invokeMethod('requestPermission', {'permission': permissionGroup});
+      await Future.delayed(const Duration(milliseconds: 400));
+      await checkPermissions();
+      if (hasCallLogPermission) {
+        await syncDeviceCallLogs();
+      }
+      if (hasSmsPermission) {
+        await syncDeviceSms();
+      }
+      await scanLocalRecordings();
+    } catch (e) {
+      debugPrint('Error requesting permission $permissionGroup: $e');
+      await requestAllPermissions();
     }
   }
 
@@ -253,7 +292,6 @@ class TelemetrySyncService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Future<SalesTrackApiResponse<Map<String, dynamic>>> pairWithCode({
     required String serverUrl,
-    required String apiPath,
     required String code,
   }) async {
     _statusMessage = 'Connecting to CRM...';
@@ -273,19 +311,19 @@ class TelemetrySyncService extends ChangeNotifier {
         'manufacturer': 'Android',
         'model': 'Device',
         'os_version': '14',
-        'app_version': '1.8.5',
+        'app_version': '1.9.7',
       };
     }
 
     final res = await api.pair(
       serverUrl: serverUrl,
-      apiPath: apiPath,
       code: code,
       deviceInfo: _deviceInfo,
     );
 
     if (res.success && res.data != null) {
       _isPaired = true;
+      _pairingLostMessage = null;
       final d = res.data!['device'];
       final s = res.data!['staff'];
       final c = res.data!['config'];
@@ -301,6 +339,7 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       await _persistMeta();
+      await sendHeartbeat();
       _startHeartbeatLoop();
       _statusMessage = 'Paired with ${_device?.name ?? "CRM"}';
       notifyListeners();
@@ -318,9 +357,20 @@ class TelemetrySyncService extends ChangeNotifier {
     return res;
   }
 
-  /// The first import after pairing: every step on its own, so one that
-  /// fails does not stop the others; the regular sync catches up later.
   Future<void> _firstImport() async {
+    try {
+      await LocalDatabaseService.instance.resetAllToPending();
+      for (final c in _calls) {
+        c.syncStatus = 'pending';
+      }
+      for (final s in _smsList) {
+        s.syncStatus = 'pending';
+      }
+      for (final w in _whatsappEvents) {
+        w.syncStatus = 'pending';
+      }
+    } catch (_) {}
+
     final steps = <Future<void> Function()>[syncDeviceCallLogs, syncDeviceSms, scanLocalRecordings, fetchCallLists, syncNow];
     for (final step in steps) {
       try {
@@ -332,11 +382,51 @@ class TelemetrySyncService extends ChangeNotifier {
     notifyListeners();
   }
 
+  // Why the phone was unpaired by the CRM, for the pairing screen.
+  String? _pairingLostMessage;
+  String? get pairingLostMessage => _pairingLostMessage;
+
+  /// The CRM revoked or deleted this phone (or it was paired again on
+  /// another phone): stop all syncing, forget the pairing and everything
+  /// waiting to be sent, and go back to the pairing screen for a new code.
+  /// Only the CRM's own answer that this phone is no longer paired unpairs it
+  /// (revoked, deleted, paired again elsewhere). The app's local "not paired
+  /// yet", a feature switched off in the CRM (403), an inactive staff account
+  /// or a network error never does.
+  static bool _isPairingLost(SalesTrackApiResponse res) =>
+      res.statusCode == 401 && const {'device_revoked', 'invalid_token', 'device_mismatch'}.contains(res.error);
+
+  Future<void> _handlePairingLost(String reason) async {
+    if (!_isPaired) return;
+    _pairingLostMessage = (reason == 'device_revoked' || reason == 'staff_inactive')
+        ? 'This phone was revoked in the CRM. Ask your administrator for a new pairing code.'
+        : 'This phone is no longer registered in the CRM (deleted, or paired again elsewhere). Ask your administrator for a new pairing code.';
+    _pendingQueue.clear();
+    _pendingUids.clear();
+    _calls.clear();
+    _smsList.clear();
+    _whatsappEvents.clear();
+    try {
+      await LocalDatabaseService.instance.clearAll();
+      await _persistCalls();
+      await _persistSms();
+      await _persistWhatsApp();
+      await _persistQueue();
+    } catch (_) {}
+    await unpair();
+    try {
+      rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    } catch (_) {}
+    _statusMessage = _pairingLostMessage!;
+    notifyListeners();
+  }
+
   Future<void> unpair() async {
     _isPaired = false;
     _device = null;
     _staff = null;
     _heartbeatTimer?.cancel();
+    _quickCheckTimer?.cancel();
     _periodicSyncTimer?.cancel();
     await api.clearCredentials();
     final prefs = await SharedPreferences.getInstance();
@@ -367,11 +457,18 @@ class TelemetrySyncService extends ChangeNotifier {
   void _handleIncomingNativeEvent(Map<String, dynamic> raw) {
     final type = raw['type']?.toString();
 
+    // Unpaired: calls, SMS and WhatsApp events are not kept or queued.
+    if (!_isPaired && type != 'permissions_updated') return;
+
     // Permission state changed callback from native Android
     if (type == 'permissions_updated') {
       if (raw['permissions'] is Map) {
-        final p = Map<String, dynamic>.from(raw['permissions'] as Map);
-        _permissions = p.map((k, v) => MapEntry(k, v == true));
+        final p = raw['permissions'] as Map;
+        final Map<String, bool> updated = {};
+        p.forEach((k, v) {
+          if (k != null) updated[k.toString()] = v == true;
+        });
+        _permissions = updated;
       } else {
         checkPermissions();
       }
@@ -872,6 +969,9 @@ class TelemetrySyncService extends ChangeNotifier {
                 event.syncStatus = 'synced';
               }
               _whatsappEvents[waIdx] = event;
+              if (event.syncStatus != 'synced') {
+                _enqueueEvent(event);
+              }
             } else {
               _whatsappEvents.add(event);
               _enqueueEvent(event);
@@ -906,6 +1006,9 @@ class TelemetrySyncService extends ChangeNotifier {
                 event.duration = _calls[existing].duration;
               }
               _calls[existing] = event;
+              if (event.syncStatus != 'synced') {
+                _enqueueEvent(event);
+              }
             } else {
               _calls.add(event);
               _enqueueEvent(event);
@@ -954,6 +1057,9 @@ class TelemetrySyncService extends ChangeNotifier {
               event.syncStatus = 'synced';
             }
             _smsList[existing] = event;
+            if (event.syncStatus != 'synced') {
+              _enqueueEvent(event);
+            }
           } else {
             _smsList.add(event);
             _enqueueEvent(event);
@@ -990,6 +1096,9 @@ class TelemetrySyncService extends ChangeNotifier {
               event.syncStatus = 'synced';
             }
             _whatsappEvents[existing] = event;
+            if (event.syncStatus != 'synced') {
+              _enqueueEvent(event);
+            }
           } else {
             _whatsappEvents.add(event);
             _enqueueEvent(event);
@@ -1073,6 +1182,7 @@ class TelemetrySyncService extends ChangeNotifier {
         _syncProgressMessage = 'Uploading telemetry data to CRM server...';
         notifyListeners();
         await syncNow(uploadRecordings: true, alreadyMarkedSyncing: true);
+        await sendHeartbeat();
       } else {
         _statusMessage = 'Refreshed ${_calls.length} calls locally (not paired)';
         _syncProgress = 1.0;
@@ -1129,7 +1239,7 @@ class TelemetrySyncService extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final batchSize = _config.batchSize > 0 ? _config.batchSize : 100;
+      final batchSize = (_config.batchSize > 0 && _config.batchSize <= 100) ? _config.batchSize : 50;
       int completedEvents = 0;
 
       // Query database pending count to compute progress
@@ -1156,7 +1266,7 @@ class TelemetrySyncService extends ChangeNotifier {
         _syncProgressMessage = 'Uploading ${batch.length} ${targetKind ?? "telemetry"} events to CRM...';
         notifyListeners();
 
-        final res = await api.syncEvents(batch);
+        final res = await api.syncEvents(batch, health: _buildHealthPayload());
 
         if (res.success && res.data != null) {
           final stored = List<String>.from(res.data!['stored'] ?? []);
@@ -1195,6 +1305,10 @@ class TelemetrySyncService extends ChangeNotifier {
           _statusMessage = 'Synced $completedEvents items to CRM...';
           notifyListeners();
         } else {
+          if (_isPairingLost(res)) {
+            await _handlePairingLost(res.error ?? 'device_revoked');
+            return;
+          }
           serverSyncError = res.message ?? res.error ?? 'Server rejected sync';
           _statusMessage = 'Server: $serverSyncError (saved locally in SQLite)';
           keepSyncing = false;
@@ -1243,7 +1357,7 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       await LocalDatabaseService.instance.cleanupDuplicates();
-      final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 5000);
+      final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 10000);
       _pendingQueue.clear();
       _pendingQueue.addAll(pendingFromDb);
       _pendingUids.clear();
@@ -1365,8 +1479,21 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> forceResyncAll({String? kind}) async {
     if (_isSyncing) return;
-    _statusMessage = 'Preparing historical data for resync...';
+    _statusMessage = 'Scanning phone dialer and preparing full history...';
     notifyListeners();
+
+    if (hasCallLogPermission && (kind == null || kind == 'call')) {
+      await syncDeviceCallLogs();
+    }
+    if (hasSmsPermission && (kind == null || kind == 'sms')) {
+      await syncDeviceSms();
+    }
+    if (kind == null || kind.startsWith('whatsapp')) {
+      await syncActiveWhatsAppNotifications();
+    }
+    if (kind == null || kind == 'call') {
+      await scanLocalRecordings();
+    }
 
     await LocalDatabaseService.instance.resetAllToPending(kind: kind);
 
@@ -1404,21 +1531,56 @@ class TelemetrySyncService extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   Timer? _periodicSyncTimer;
 
+  // A quick check with the CRM every minute while the app is on screen, so a
+  // phone revoked or deleted in the CRM unpairs within a minute.
+  Timer? _quickCheckTimer;
+  bool _foreground = true;
+
+  /// The home screen says when the app comes to the screen or leaves it.
+  void setForeground(bool value) {
+    _foreground = value;
+    if (value && _isPaired) {
+      sendHeartbeat();
+    }
+  }
+
   void _startHeartbeatLoop() {
     _heartbeatTimer?.cancel();
+    _quickCheckTimer?.cancel();
+
+    // The first heartbeat goes now, not after the first interval: the CRM
+    // shows this phone's health within seconds of pairing or opening the app.
+    Future.microtask(() async {
+      try {
+        await sendHeartbeat();
+      } catch (e) {
+        debugPrint('First heartbeat failed: $e');
+      }
+    });
+
+    _quickCheckTimer = Timer.periodic(const Duration(seconds: 60), (_) async {
+      if (!_isPaired || !_foreground) return;
+      try {
+        // Light: the last known health, no new reads on the phone. A 401
+        // (revoked, deleted) unpairs through the API client's watch.
+        await api.sendHeartbeat(health: _buildHealthPayload());
+      } catch (_) {}
+    });
     _periodicSyncTimer?.cancel();
     final intervalMinutes = _config.syncMinutes > 0 ? _config.syncMinutes : 15;
     _heartbeatTimer = Timer.periodic(Duration(minutes: intervalMinutes), (_) async {
       await sendHeartbeat();
-      if (_pendingQueue.isNotEmpty) {
+      await refreshPendingCounts();
+      if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
         await syncNow();
       }
     });
 
-    // Background sync checker every 45 seconds: flushes pending queue and automatically senses new calls/SMS/WhatsApp
-    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 45), (_) async {
+    // Background sync checker: flushes pending queue, senses new calls, and continuously verifies CRM pairing status every 30s
+    _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (_isPaired && !_isSyncing) {
-        if (_pendingQueue.isNotEmpty || _pendingRecordingsCount > 0) {
+        await refreshPendingCounts();
+        if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
           await syncNow();
         } else {
           // Sensing check: detect newly arrived calls, SMS, or WhatsApp events from device
@@ -1429,8 +1591,12 @@ class TelemetrySyncService extends ChangeNotifier {
             await syncDeviceSms();
           }
           await syncActiveWhatsAppNotifications();
-          if (_pendingQueue.isNotEmpty || _pendingRecordingsCount > 0) {
+          await refreshPendingCounts();
+          if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
             await syncNow();
+          } else {
+            // Heartbeat check: validates CRM connection and detects immediate device revocation or deletion
+            await sendHeartbeat();
           }
         }
       }
@@ -1439,21 +1605,43 @@ class TelemetrySyncService extends ChangeNotifier {
     sendHeartbeat();
   }
 
+  Map<String, dynamic> _buildHealthPayload() {
+    final rawNet = _deviceInfo['network']?.toString().toLowerCase();
+    final validNetwork = (rawNet == 'wifi' || rawNet == 'mobile' || rawNet == 'none')
+        ? rawNet!
+        : 'wifi';
+
+    final isCharging = _deviceInfo['charging'] == true;
+    final battery = (_deviceInfo['batteryPercent'] as num?)?.toInt() ?? _batteryPercent;
+    final queue = pendingEventsCount > 0 ? pendingEventsCount : _pendingQueue.length;
+    final recordingsQueue = _pendingRecordingsCount > 0 ? _pendingRecordingsCount : _localRecordings.length;
+
+    return {
+      'permissions': Map<String, bool>.from(_permissions),
+      'battery': battery,
+      'charging': isCharging,
+      'queue': queue,
+      'recordings_queue': recordingsQueue,
+      'network': validNetwork,
+    };
+  }
+
   Future<void> sendHeartbeat() async {
     if (!_isPaired) return;
     await checkPermissions();
     await fetchPlatformDeviceInfo();
+    await refreshPendingCounts();
 
-    final health = {
-      'permissions': _permissions,
-      'battery': _batteryPercent,
-      'charging': false,
-      'queue': _pendingQueue.length,
-      'recordings_queue': _localRecordings.length,
-      'network': 'active',
-    };
+    final health = _buildHealthPayload();
 
-    final res = await api.sendHeartbeat(health: health);
+    final res = await api.sendHeartbeat(
+      health: health,
+      appVersion: _deviceInfo['app_version']?.toString() ?? '1.9.7',
+      osVersion: _deviceInfo['os_version']?.toString() ?? '14',
+      manufacturer: _deviceInfo['manufacturer']?.toString(),
+      model: _deviceInfo['model']?.toString(),
+      sims: (_deviceInfo['sims'] as List?)?.whereType<Map<String, dynamic>>().toList(),
+    );
     if (res.success && res.data != null) {
       final c = res.data!['config'];
       if (c is Map<String, dynamic>) {
@@ -1468,6 +1656,8 @@ class TelemetrySyncService extends ChangeNotifier {
         }
       }
       notifyListeners();
+    } else if (_isPairingLost(res)) {
+      await _handlePairingLost(res.error ?? 'device_revoked');
     }
   }
 
@@ -1478,13 +1668,13 @@ class TelemetrySyncService extends ChangeNotifier {
     if (type == 'sync_now') {
       await syncAllLocalAndRemote();
       await api.sendHeartbeat(
-        health: {'queue': _pendingQueue.length},
+        health: _buildHealthPayload(),
         acks: [{'id': id, 'status': 'done'}],
       );
     } else if (type == 'recheck_permissions') {
       await checkPermissions();
       await api.sendHeartbeat(
-        health: {'permissions': _permissions},
+        health: _buildHealthPayload(),
         acks: [{'id': id, 'status': 'done'}],
       );
     }
@@ -1528,6 +1718,8 @@ class TelemetrySyncService extends ChangeNotifier {
       _callLists.clear();
       _callLists.addAll(res.data!);
       notifyListeners();
+    } else if (_isPairingLost(res)) {
+      await _handlePairingLost(res.error ?? 'device_revoked');
     }
   }
 
@@ -1684,7 +1876,7 @@ class TelemetrySyncService extends ChangeNotifier {
         _smsList.addAll(dedupSmsList(dbSms));
         await LocalDatabaseService.instance.cleanupDuplicates();
 
-        final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 500);
+        final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 10000);
         _pendingQueue.clear();
         _pendingQueue.addAll(pendingFromDb);
         _pendingUids.clear();
@@ -1814,6 +2006,7 @@ class TelemetrySyncService extends ChangeNotifier {
   void dispose() {
     _eventSubscription?.cancel();
     _heartbeatTimer?.cancel();
+    _quickCheckTimer?.cancel();
     _audioPollTimer?.cancel();
     super.dispose();
   }

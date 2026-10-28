@@ -95,7 +95,7 @@ $mks_state_tones = ['online' => 'green', 'idle' => 'amber', 'offline' => 'red', 
                     class="mks-sales-track-device mks-sales-track-device-<?= e($mks_state); ?>">
                     <div class="mks-sales-track-device-top">
                         <span class="mks-sales-track-device-icon<?= $mks_ios ? ' is-ios' : ''; ?><?= $mks_bound ? '' : ' is-pending'; ?>">
-                            <i class="<?= $mks_bound ? 'fa-brands ' . ($mks_ios ? 'fa-apple' : 'fa-android') : 'fa-solid fa-qrcode'; ?>" aria-hidden="true"></i>
+                            <i class="<?= $mks_bound ? 'fa-brands ' . ($mks_ios ? 'fa-apple' : 'fa-android') : 'fa-solid fa-hashtag'; ?>" aria-hidden="true"></i>
                         </span>
                         <div class="mks-sales-track-device-name">
                             <strong><?= e($mks_device['label']); ?></strong>
@@ -128,7 +128,7 @@ $mks_state_tones = ['online' => 'green', 'idle' => 'amber', 'offline' => 'red', 
                     <p class="mks-sales-track-device-error"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i><?= e(_l('mks_st_permissions_missing', (string) $mks_missing)); ?></p>
                     <?php } ?>
                     <?php } else { ?>
-                    <p class="mks-sales-track-device-note"><i class="fa-solid fa-qrcode" aria-hidden="true"></i> <?= e(_l('mks_st_open_for_code')); ?></p>
+                    <p class="mks-sales-track-device-note"><i class="fa-solid fa-hashtag" aria-hidden="true"></i> <?= e(_l('mks_st_open_for_code')); ?></p>
                     <?php } ?>
                 </a>
                 <?php } ?>

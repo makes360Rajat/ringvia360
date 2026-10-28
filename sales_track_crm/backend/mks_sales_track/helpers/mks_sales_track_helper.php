@@ -330,8 +330,9 @@ function mks_st_clean_health($health)
         }
     }
 
-    if (isset($health['network']) && in_array($health['network'], ['wifi', 'mobile', 'none', 'unknown'], true)) {
-        $out['network'] = $health['network'];
+    if (isset($health['network']) && is_scalar($health['network'])) {
+        $net = strtolower(trim((string) $health['network']));
+        $out['network'] = in_array($net, ['wifi', 'mobile', 'none', 'unknown'], true) ? $net : 'wifi';
     }
 
     if (isset($health['last_error'])) {
@@ -1127,7 +1128,26 @@ function mks_st_device_report($id, array $body)
     }
 
     if (isset($body['health']) && is_array($body['health'])) {
-        $update['health'] = json_encode(mks_st_clean_health($body['health']));
+        $existing = [];
+        if (!empty($id)) {
+            $current = mks_st_device_get($id);
+            if (!empty($current['health'])) {
+                $decoded = is_string($current['health']) ? json_decode($current['health'], true) : $current['health'];
+                if (is_array($decoded)) {
+                    $existing = $decoded;
+                }
+            }
+        }
+        $cleaned = mks_st_clean_health($body['health']);
+        if (empty($cleaned['permissions']) && !empty($existing['permissions'])) {
+            $cleaned['permissions'] = $existing['permissions'];
+        }
+        foreach (['battery', 'charging', 'network', 'recorder_folder'] as $k) {
+            if (!isset($cleaned[$k]) && isset($existing[$k])) {
+                $cleaned[$k] = $existing[$k];
+            }
+        }
+        $update['health'] = json_encode($cleaned);
     }
 
     // The Firebase registration token, for instant commands. An empty string
@@ -1568,7 +1588,25 @@ function mks_st_device_commands_exchange(array $device, $acks)
  */
 function mks_st_pairing_load()
 {
-    $raw   = get_option(MKS_ST_PAIRING_OPTION);
+    $CI  = &get_instance();
+    $raw = '';
+
+    // Direct database query first to bypass any stale in-memory or object cache
+    if (isset($CI->db)) {
+        $row = $CI->db->select('value')
+            ->where('name', MKS_ST_PAIRING_OPTION)
+            ->get(db_prefix() . 'options')
+            ->row_array();
+
+        if ($row && isset($row['value'])) {
+            $raw = $row['value'];
+        }
+    }
+
+    if ($raw === '' && function_exists('get_option')) {
+        $raw = get_option(MKS_ST_PAIRING_OPTION);
+    }
+
     $store = is_string($raw) && $raw !== '' ? json_decode($raw, true) : [];
     $store = is_array($store) ? $store : [];
 
@@ -1626,6 +1664,11 @@ function mks_st_pairing_create($device_id, $by)
     $CI      = &get_instance();
     $store   = mks_st_pairing_load();
     $minutes = (int) mks_st_setting('pair_minutes', 60);
+
+    if ($minutes < 5 || $minutes > 1440) {
+        $minutes = 60;
+    }
+
     $live    = [];
 
     $store['codes'] = array_values(array_filter($store['codes'], function ($entry) use ($device_id) {
@@ -1642,7 +1685,7 @@ function mks_st_pairing_create($device_id, $by)
 
     $secret  = bin2hex(random_bytes(16));
     $id      = bin2hex(random_bytes(8));
-    $expires = time() + $minutes * 60;
+    $expires = time() + ($minutes * 60);
 
     $store['codes'][] = [
         'id'        => $id,
@@ -1656,6 +1699,21 @@ function mks_st_pairing_create($device_id, $by)
     ];
 
     mks_st_pairing_save($store);
+
+    // Verify persistence: re-read from DB to confirm the code was saved.
+    $verify = mks_st_pairing_load();
+    $found  = false;
+
+    foreach ($verify['codes'] as $c) {
+        if ($c['id'] === $id) {
+            $found = true;
+            break;
+        }
+    }
+
+    if (!$found) {
+        log_activity('Sales Track PAIRING-CREATE: code ' . $id . ' NOT found after save! codes_count=' . count($verify['codes']));
+    }
 
     return ['id' => $id, 'code' => $code, 'secret' => $secret, 'expires' => $expires];
 }
@@ -1755,22 +1813,65 @@ function mks_st_pairing_locked($ip)
  */
 function mks_st_pairing_redeem($code, $ip)
 {
-    $store = mks_st_pairing_load();
-    $code  = preg_replace('/[\s-]+/', '', (string) $code);
+    $store    = mks_st_pairing_load();
+    $rawCode  = $code;
+    $code     = preg_replace('/[\s-]+/', '', (string) $code);
+    $codeCount = count($store['codes']);
+
+    log_activity('Sales Track PAIR-REDEEM: input="' . $rawCode . '" cleaned="' . $code
+        . '" codes_in_store=' . $codeCount . ' ip=' . $ip);
 
     if (preg_match('/^\d{6}$/', $code) || preg_match('/^[a-f0-9]{32}$/', $code)) {
         $hash = hash('sha256', $code);
+        $now  = time();
 
-        foreach ($store['codes'] as $index => $entry) {
-            if (!hash_equals((string) $entry['code'], $hash) && !hash_equals((string) $entry['secret'], $hash)) {
+        $activeMatchIndex  = null;
+        $expiredMatchIndex = null;
+
+        // Traverse in reverse so the newest codes are evaluated first
+        for ($i = count($store['codes']) - 1; $i >= 0; $i--) {
+            $entry = $store['codes'][$i];
+
+            $codeMatch   = hash_equals((string) $entry['code'], $hash);
+            $secretMatch = hash_equals((string) $entry['secret'], $hash);
+
+            if (!$codeMatch && !$secretMatch) {
                 continue;
             }
 
-            array_splice($store['codes'], $index, 1);
+            log_activity('Sales Track PAIR-REDEEM: hash match at index ' . $i
+                . ' device_id=' . $entry['device_id']
+                . ' expires=' . $entry['expires'] . ' now=' . $now
+                . ' diff=' . ($entry['expires'] - $now) . 's'
+                . ' via=' . ($codeMatch ? 'code' : 'secret'));
+
+            // Allow 300 seconds (5 min) clock-skew grace window
+            if ((int) $entry['expires'] >= ($now - 300)) {
+                $activeMatchIndex = $i;
+                break;
+            } elseif ($expiredMatchIndex === null) {
+                $expiredMatchIndex = $i;
+            }
+        }
+
+        if ($activeMatchIndex !== null) {
+            $matched = $store['codes'][$activeMatchIndex];
+            array_splice($store['codes'], $activeMatchIndex, 1);
             mks_st_pairing_save($store);
 
-            return $entry['expires'] < time() ? 'code_expired' : $entry;
+            log_activity('Sales Track PAIR-REDEEM: SUCCESS device_id=' . $matched['device_id']);
+
+            return $matched;
         }
+
+        if ($expiredMatchIndex !== null) {
+            log_activity('Sales Track PAIR-REDEEM: EXPIRED code for device_id=' . $store['codes'][$expiredMatchIndex]['device_id']);
+            return 'code_expired';
+        }
+
+        log_activity('Sales Track PAIR-REDEEM: NO MATCH for hash=' . substr($hash, 0, 12) . '...');
+    } else {
+        log_activity('Sales Track PAIR-REDEEM: code format invalid after clean: "' . $code . '"');
     }
 
     $store['fails'][] = ['ip' => (string) $ip, 't' => time()];
@@ -1977,9 +2078,13 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
         }
 
         if (empty($settings[$kinds[$kind]['setting']])) {
-            $result['skipped'][] = ['uid' => $uid, 'reason' => 'tracking_off'];
+            if ($kind === 'whatsapp_message' && (!empty($settings['track_whatsapp_calls']) || !empty($settings['track_sms']))) {
+                // Permitted: WhatsApp message covered by either WhatsApp or SMS tracking setting
+            } else {
+                $result['skipped'][] = ['uid' => $uid, 'reason' => 'tracking_off'];
 
-            continue;
+                continue;
+            }
         }
 
         $ms = mks_st_clean_time(isset($raw['time']) ? $raw['time'] : null);
@@ -2047,11 +2152,23 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
         $row['number_raw']   = $parts['raw'];
         $row['number']       = $parts['number'];
         $row['number_key']   = $parts['key'];
-        $row['contact_name'] = mks_st_null_if_empty(mks_st_clean_line(isset($raw['name']) ? $raw['name'] : '', 191));
+
+        $rawName = trim(isset($raw['name']) ? (string) $raw['name'] : (isset($raw['contact_name']) ? (string) $raw['contact_name'] : ''));
+        $rawTitle = trim(isset($raw['title']) ? (string) $raw['title'] : '');
+        $digitsName = preg_replace('/\D/', '', $rawName);
+        $digitsNum  = preg_replace('/\D/', '', (string) $parts['number']);
+        $isUnsaved = ($rawName === '' || $rawName === $parts['number'] || $rawName === $parts['raw']
+            || ($digitsName !== '' && $digitsName === $digitsNum)
+            || in_array(strtolower($rawName), ['unknown', 'unknown caller', 'unknown sender', 'null'], true));
+
+        $finalName = $isUnsaved ? 'Un Saved' : $rawName;
+        $finalTitle = ($rawTitle !== '' && $rawTitle !== $parts['number'] && $rawTitle !== $parts['raw']) ? $rawTitle : $finalName;
+
+        $row['contact_name'] = mks_st_clean_line($finalName, 191);
         $row['sim_slot']     = $sim > 0 ? $sim : null;
         $row['app_package']  = $app !== '' ? $app : null;
         $row['app_name']     = mks_st_null_if_empty(mks_st_clean_line(isset($raw['app_name']) ? $raw['app_name'] : '', 100));
-        $row['title']        = mks_st_null_if_empty(mks_st_clean_line(isset($raw['title']) ? $raw['title'] : '', 255));
+        $row['title']        = mks_st_clean_line($finalTitle, 255);
         $row['body']         = mks_st_null_if_empty(mks_st_clean_body(isset($raw['text']) ? $raw['text'] : ''));
         $row['occurred_at']  = date('Y-m-d H:i:s', (int) floor($ms / 1000));
         $row['duration']     = $duration;
@@ -2070,9 +2187,9 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
 
     $table = mks_st_events_table();
 
-    // Already stored from this device: update duration & recording status if incoming has more complete data
+    // Already stored from this device: update duration, direction, contact, body, number, media & recording status if incoming has more complete data
     foreach (array_chunk(array_keys($rows), 100) as $chunk) {
-        $held = $CI->db->select('id, uid, duration, direction, recording_status, contact_name, occurred_at')
+        $held = $CI->db->select('id, uid, duration, direction, recording_status, contact_name, occurred_at, number, number_raw, number_key, body, media, sim_slot, rel_type, rel_id')
             ->where('device_id', (int) $device['id'])
             ->where_in('uid', array_map('strval', $chunk))
             ->get($table)
@@ -2086,9 +2203,10 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
 
                 if ((int) $incoming['duration'] > (int) $h['duration']) {
                     $update['duration'] = (int) $incoming['duration'];
-                    if (!in_array($incoming['direction'], ['unknown', ''], true)) {
-                        $update['direction'] = $incoming['direction'];
-                    }
+                }
+
+                if (in_array($h['direction'], ['unknown', ''], true) && !in_array($incoming['direction'], ['unknown', ''], true)) {
+                    $update['direction'] = $incoming['direction'];
                 }
 
                 if ($incoming['recording_status'] === 'pending' && $h['recording_status'] !== 'stored') {
@@ -2096,11 +2214,37 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                     $result['recordings_wanted'][] = $hUid;
                 }
 
-                if (empty($h['contact_name']) && !empty($incoming['contact_name'])) {
+                if ((empty($h['contact_name']) || $h['contact_name'] === $h['number']) && !empty($incoming['contact_name']) && $incoming['contact_name'] !== $incoming['number']) {
                     $update['contact_name'] = $incoming['contact_name'];
                 }
 
+                if (empty($h['body']) && !empty($incoming['body'])) {
+                    $update['body'] = $incoming['body'];
+                }
+
+                if (empty($h['number']) && !empty($incoming['number'])) {
+                    $update['number']     = $incoming['number'];
+                    $update['number_raw'] = $incoming['number_raw'];
+                    $update['number_key'] = $incoming['number_key'];
+                }
+
+                if (empty($h['media']) && !empty($incoming['media'])) {
+                    $update['media'] = $incoming['media'];
+                }
+
+                if (empty($h['sim_slot']) && !empty($incoming['sim_slot'])) {
+                    $update['sim_slot'] = $incoming['sim_slot'];
+                }
+
+                if (empty($h['rel_type']) && !empty($incoming['rel_type'])) {
+                    $update['rel_type']   = $incoming['rel_type'];
+                    $update['rel_id']     = $incoming['rel_id'];
+                    $update['lead_id']    = $incoming['lead_id'];
+                    $update['contact_id'] = $incoming['contact_id'];
+                }
+
                 if (!empty($update)) {
+                    $update['received_at'] = $now;
                     $CI->db->where('id', (int) $h['id'])->update($table, $update);
                 }
 
@@ -2127,14 +2271,30 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                 if (!isset($rows[$u2])) continue;
                 $r2 = $rows[$u2];
 
-                $kindsMatch = ($r1['kind'] === $r2['kind']) ||
-                    (!$isCall1 && in_array($r1['kind'], ['sms', 'whatsapp_message', 'notification'], true) && in_array($r2['kind'], ['sms', 'whatsapp_message', 'notification'], true));
+                $kindsMatch = ($r1['kind'] === $r2['kind']);
 
                 $numMatch = (!empty($r1['number_key']) && $r1['number_key'] === $r2['number_key'])
                     || (!empty($r1['number_raw']) && $r1['number_raw'] === $r2['number_raw'])
                     || (!empty($r1['number']) && $r1['number'] === $r2['number']);
 
                 if ($kindsMatch && $numMatch) {
+                    if (!$isCall1) {
+                        $b1 = trim((string) (isset($r1['body']) ? $r1['body'] : ''));
+                        $b2 = trim((string) (isset($r2['body']) ? $r2['body'] : ''));
+                        if ($b1 !== '' && $b2 !== '' && $b1 !== $b2) {
+                            continue; // Different message texts - NOT a duplicate!
+                        }
+                    } else {
+                        // Check distinct CallLog IDs
+                        $m1 = preg_match('/^call-(\d+)-/', $u1, $match1) ? $match1[1] : null;
+                        $m2 = preg_match('/^call-(\d+)-/', $u2, $match2) ? $match2[1] : null;
+                        if ($m1 !== null && $m2 !== null && $m1 !== $m2) {
+                            continue; // Distinct Android CallLog IDs - NOT a duplicate!
+                        }
+                        if ($r1['direction'] !== $r2['direction'] && $r1['direction'] !== 'unknown' && $r2['direction'] !== 'unknown') {
+                            continue; // Different directions (e.g. incoming vs outgoing) - NOT a duplicate!
+                        }
+                    }
                     $t2 = strtotime($r2['occurred_at']);
                     if (abs($t1 - $t2) <= $window1) {
                         // Merge r2 into r1
@@ -2186,22 +2346,37 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                 $windowSec = $isCallKind ? 120 : 60;
 
                 foreach ($held as $h) {
-                    $kindsMatch = ($h['kind'] === $row['kind']) ||
-                        (!$isCallKind && in_array($h['kind'], ['sms', 'whatsapp_message', 'notification'], true) && in_array($row['kind'], ['sms', 'whatsapp_message', 'notification'], true));
+                    $kindsMatch = ($h['kind'] === $row['kind']);
 
                     $numMatch = (!empty($row['number_key']) && $h['number_key'] === $row['number_key'])
                         || (!empty($row['number_raw']) && $h['number_raw'] === $row['number_raw'])
                         || (!empty($row['number']) && $h['number'] === $row['number']);
 
                     if ($kindsMatch && $numMatch) {
+                        if (!$isCallKind) {
+                            $hb = trim((string) (isset($h['body']) ? $h['body'] : ''));
+                            $rb = trim((string) (isset($row['body']) ? $row['body'] : ''));
+                            if ($hb !== '' && $rb !== '' && $hb !== $rb) {
+                                continue; // Different message texts - NOT a duplicate!
+                            }
+                        } else {
+                            $m1 = preg_match('/^call-(\d+)-/', $uid, $match1) ? $match1[1] : null;
+                            $m2 = preg_match('/^call-(\d+)-/', (string) $h['uid'], $match2) ? $match2[1] : null;
+                            if ($m1 !== null && $m2 !== null && $m1 !== $m2) {
+                                continue; // Distinct Android CallLog IDs - NOT a duplicate!
+                            }
+                            if ($row['direction'] !== $h['direction'] && $row['direction'] !== 'unknown' && $h['direction'] !== 'unknown') {
+                                continue; // Different directions (e.g. incoming vs outgoing) - NOT a duplicate!
+                            }
+                        }
                         $hTs = strtotime($h['occurred_at']);
                         if (abs($rowTs - $hTs) <= $windowSec) {
                             $update = [];
                             if ((int) $row['duration'] > (int) $h['duration']) {
                                 $update['duration'] = (int) $row['duration'];
-                                if (!in_array($row['direction'], ['unknown', ''], true)) {
-                                    $update['direction'] = $row['direction'];
-                                }
+                            }
+                            if (in_array($h['direction'], ['unknown', ''], true) && !in_array($row['direction'], ['unknown', ''], true)) {
+                                $update['direction'] = $row['direction'];
                             }
 
                             if ($row['recording_status'] === 'pending' && $h['recording_status'] !== 'stored') {
@@ -2209,7 +2384,7 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                                 $result['recordings_wanted'][] = (string) $uid;
                             }
 
-                            if (empty($h['contact_name']) && !empty($row['contact_name'])) {
+                            if ((empty($h['contact_name']) || $h['contact_name'] === $h['number']) && !empty($row['contact_name']) && $row['contact_name'] !== $row['number']) {
                                 $update['contact_name'] = $row['contact_name'];
                             }
 
@@ -2217,13 +2392,29 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                                 $update['body'] = $row['body'];
                             }
 
-                            if (preg_match('/^call-\d+-/', $uid) && !preg_match('/^call-\d+-/', (string) $h['uid'])) {
-                                $update['uid'] = $uid;
-                            } elseif (preg_match('/^sms-\d+-/', $uid) && !preg_match('/^sms-\d+-/', (string) $h['uid'])) {
-                                $update['uid'] = $uid;
+                            if (empty($h['number']) && !empty($row['number'])) {
+                                $update['number']     = $row['number'];
+                                $update['number_raw'] = $row['number_raw'];
+                                $update['number_key'] = $row['number_key'];
+                            }
+
+                            if (empty($h['media']) && !empty($row['media'])) {
+                                $update['media'] = $row['media'];
+                            }
+
+                            if (empty($h['sim_slot']) && !empty($row['sim_slot'])) {
+                                $update['sim_slot'] = $row['sim_slot'];
+                            }
+
+                            if (empty($h['rel_type']) && !empty($row['rel_type'])) {
+                                $update['rel_type']   = $row['rel_type'];
+                                $update['rel_id']     = $row['rel_id'];
+                                $update['lead_id']    = $row['lead_id'];
+                                $update['contact_id'] = $row['contact_id'];
                             }
 
                             if (!empty($update)) {
+                                $update['received_at'] = $now;
                                 $CI->db->where('id', (int) $h['id'])->update($table, $update);
                             }
 
@@ -2243,9 +2434,21 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
 
     $keys = [];
 
-    foreach ($rows as $row) {
+    foreach ($rows as $uid => $row) {
         if ($row['number_key'] !== null) {
             $keys[$row['number_key']] = $row['number_key'];
+        } elseif (!empty($row['contact_name'])) {
+            // Auto-resolve missing phone number from CRM lead if contact_name matches
+            $matchedLead = $CI->db->select('id, phonenumber')->where('name', $row['contact_name'])->get(db_prefix() . 'leads')->row_array();
+            if ($matchedLead && !empty($matchedLead['phonenumber'])) {
+                $lp = mks_st_number_parts($matchedLead['phonenumber']);
+                if ($lp['key'] !== null) {
+                    $rows[$uid]['number']     = $lp['number'];
+                    $rows[$uid]['number_raw'] = $lp['raw'];
+                    $rows[$uid]['number_key'] = $lp['key'];
+                    $keys[$lp['key']]         = $lp['key'];
+                }
+            }
         }
     }
 
@@ -2257,6 +2460,13 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
             $rows[$uid]['rel_id']     = $matches[$row['number_key']]['rel_id'];
             $rows[$uid]['contact_id'] = $matches[$row['number_key']]['contact_id'];
             $rows[$uid]['lead_id']    = $matches[$row['number_key']]['lead_id'];
+        } elseif ($row['rel_type'] === null && !empty($row['contact_name'])) {
+            $matchedLead = $CI->db->select('id')->where('name', $row['contact_name'])->get(db_prefix() . 'leads')->row_array();
+            if ($matchedLead) {
+                $rows[$uid]['rel_type'] = 'lead';
+                $rows[$uid]['rel_id']   = (int) $matchedLead['id'];
+                $rows[$uid]['lead_id']  = (int) $matchedLead['id'];
+            }
         }
 
         // A missed call joins its rep's callback queue.
@@ -2441,100 +2651,106 @@ function mks_st_cleanup_duplicate_events()
 
     $removed = 0;
 
-    // 1. Cleanup call and whatsapp_call duplicates within 120s
-    $callDups = $CI->db->query("
-        SELECT e1.id as keep_id, e2.id as remove_id, 
-               e1.duration as dur1, e2.duration as dur2,
-               e1.direction as dir1, e2.direction as dir2,
-               e1.recording_status as rec1, e2.recording_status as rec2,
-               e1.recording_file as file1, e2.recording_file as file2,
-               e1.contact_name as name1, e2.contact_name as name2,
-               e1.uid as uid1, e2.uid as uid2
-        FROM {$table} e1
-        INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
-            AND e1.kind = e2.kind 
-            AND (
-                (e1.number_key IS NOT NULL AND e1.number_key != '' AND e1.number_key = e2.number_key)
-                OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
-                OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
-            )
-            AND e1.id < e2.id
-            AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 120
-        WHERE e1.kind IN ('call', 'whatsapp_call')
-    ");
+    try {
+        // 1. Cleanup call and whatsapp_call duplicates within 120s
+        $callDups = $CI->db->query("
+            SELECT e1.id as keep_id, e2.id as remove_id, 
+                   e1.duration as dur1, e2.duration as dur2,
+                   e1.direction as dir1, e2.direction as dir2,
+                   e1.recording_status as rec1, e2.recording_status as rec2,
+                   e1.recording_file as file1, e2.recording_file as file2,
+                   e1.contact_name as name1, e2.contact_name as name2,
+                   e1.uid as uid1, e2.uid as uid2
+            FROM {$table} e1
+            INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
+                AND e1.kind = e2.kind 
+                AND (
+                    (e1.number_key IS NOT NULL AND e1.number_key != '' AND e1.number_key = e2.number_key)
+                    OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
+                    OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
+                )
+                AND e1.id < e2.id
+                AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 120
+            WHERE e1.kind IN ('call', 'whatsapp_call')
+        ");
 
-    if ($callDups) {
-        foreach ($callDups->result_array() as $d) {
-            $update = [];
-            if ((int) $d['dur2'] > (int) $d['dur1']) {
-                $update['duration'] = (int) $d['dur2'];
-                if (!in_array($d['dir2'], ['unknown', ''], true)) {
-                    $update['direction'] = $d['dir2'];
+        if ($callDups && $callDups->num_rows() > 0) {
+            foreach ($callDups->result_array() as $d) {
+                // Delete duplicate record first to release any constraints
+                $CI->db->where('id', (int) $d['remove_id'])->delete($table);
+                $removed++;
+
+                $update = [];
+                if ((int) $d['dur2'] > (int) $d['dur1']) {
+                    $update['duration'] = (int) $d['dur2'];
+                    if (!in_array($d['dir2'], ['unknown', ''], true)) {
+                        $update['direction'] = $d['dir2'];
+                    }
+                }
+                if ($d['rec2'] === 'stored' && $d['rec1'] !== 'stored') {
+                    $update['recording_status'] = 'stored';
+                    $update['recording_file']   = $d['file2'];
+                } elseif ($d['rec2'] === 'pending' && $d['rec1'] === 'none') {
+                    $update['recording_status'] = 'pending';
+                }
+                if (empty($d['name1']) && !empty($d['name2'])) {
+                    $update['contact_name'] = $d['name2'];
+                }
+                // NOTE: DO NOT update uid - keep_id already has its own unique uid, preventing duplicate key errors
+                if (!empty($update)) {
+                    $CI->db->where('id', (int) $d['keep_id'])->update($table, $update);
                 }
             }
-            if ($d['rec2'] === 'stored' && $d['rec1'] !== 'stored') {
-                $update['recording_status'] = 'stored';
-                $update['recording_file']   = $d['file2'];
-            } elseif ($d['rec2'] === 'pending' && $d['rec1'] === 'none') {
-                $update['recording_status'] = 'pending';
-            }
-            if (empty($d['name1']) && !empty($d['name2'])) {
-                $update['contact_name'] = $d['name2'];
-            }
-            if (preg_match('/^call-\d+-/', (string) $d['uid2']) && !preg_match('/^call-\d+-/', (string) $d['uid1'])) {
-                $update['uid'] = $d['uid2'];
-            }
-            if (!empty($update)) {
-                $CI->db->where('id', (int) $d['keep_id'])->update($table, $update);
-            }
-            $CI->db->where('id', (int) $d['remove_id'])->delete($table);
-            $removed++;
         }
-    }
 
-    // 2. Cleanup SMS, whatsapp_message, and notification duplicates within 60s
-    $smsDups = $CI->db->query("
-        SELECT e1.id as keep_id, e2.id as remove_id,
+        // 2. Cleanup SMS, whatsapp_message, and notification duplicates within 60s
+        $smsDups = $CI->db->query("
+            SELECT e1.id as keep_id, e2.id as remove_id,
                e1.kind as kind1, e2.kind as kind2,
                e1.body as body1, e2.body as body2,
                e1.contact_name as name1, e2.contact_name as name2,
                e1.uid as uid1, e2.uid as uid2
-        FROM {$table} e1
-        INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
-            AND (
-                e1.kind = e2.kind 
-                OR (e1.kind IN ('sms', 'whatsapp_message', 'notification') AND e2.kind IN ('sms', 'whatsapp_message', 'notification'))
-            )
-            AND (
-                (e1.number_key IS NOT NULL AND e1.number_key != '' AND e1.number_key = e2.number_key)
-                OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
-                OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
-            )
-            AND e1.id < e2.id
-            AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 60
-        WHERE e1.kind IN ('sms', 'whatsapp_message', 'notification')
-    ");
+            FROM {$table} e1
+            INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
+                AND (
+                    e1.kind = e2.kind 
+                    OR (e1.kind IN ('sms', 'whatsapp_message', 'notification') AND e2.kind IN ('sms', 'whatsapp_message', 'notification'))
+                )
+                AND (
+                    (e1.number_key IS NOT NULL AND e1.number_key != '' AND e1.number_key = e2.number_key)
+                    OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
+                    OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
+                )
+                AND e1.id < e2.id
+                AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 60
+            WHERE e1.kind IN ('sms', 'whatsapp_message', 'notification')
+        ");
 
-    if ($smsDups) {
-        foreach ($smsDups->result_array() as $d) {
-            $update = [];
-            if ($d['kind1'] === 'notification' && in_array($d['kind2'], ['sms', 'whatsapp_message'], true)) {
-                $update['kind'] = $d['kind2'];
+        if ($smsDups && $smsDups->num_rows() > 0) {
+            foreach ($smsDups->result_array() as $d) {
+                // Delete duplicate record first to release any constraints
+                $CI->db->where('id', (int) $d['remove_id'])->delete($table);
+                $removed++;
+
+                $update = [];
+                if ($d['kind1'] === 'notification' && in_array($d['kind2'], ['sms', 'whatsapp_message'], true)) {
+                    $update['kind'] = $d['kind2'];
+                }
+                if (empty($d['body1']) && !empty($d['body2'])) {
+                    $update['body'] = $d['body2'];
+                }
+                if (empty($d['name1']) && !empty($d['name2'])) {
+                    $update['contact_name'] = $d['name2'];
+                }
+                // NOTE: DO NOT update uid - keep_id already has its own unique uid, preventing duplicate key errors
+                if (!empty($update)) {
+                    $CI->db->where('id', (int) $d['keep_id'])->update($table, $update);
+                }
             }
-            if (empty($d['body1']) && !empty($d['body2'])) {
-                $update['body'] = $d['body2'];
-            }
-            if (empty($d['name1']) && !empty($d['name2'])) {
-                $update['contact_name'] = $d['name2'];
-            }
-            if (preg_match('/^(sms|wamsg)-\d+-/', (string) $d['uid2']) && !preg_match('/^(sms|wamsg)-\d+-/', (string) $d['uid1'])) {
-                $update['uid'] = $d['uid2'];
-            }
-            if (!empty($update)) {
-                $CI->db->where('id', (int) $d['keep_id'])->update($table, $update);
-            }
-            $CI->db->where('id', (int) $d['remove_id'])->delete($table);
-            $removed++;
+        }
+    } catch (\Throwable $e) {
+        if (function_exists('log_message')) {
+            log_message('error', 'mks_sales_track cleanup duplicate events error: ' . $e->getMessage());
         }
     }
 

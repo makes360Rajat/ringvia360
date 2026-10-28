@@ -6,7 +6,7 @@ Read this first. It assumes no memory of how the module was built.
 | --- | --- |
 | Folder | `mks_sales_track` |
 | Module name | Sales Track |
-| Version | 1.8.0 (phase 9) |
+| Version | 1.9.7 |
 | Platform | Perfex CRM 3.4.1, PHP 8.3, CodeIgniter 3 HMVC, MariaDB or MySQL utf8mb4 |
 | Hosting | Hostinger shared, no SSH, deployed as a ZIP through File Manager |
 | Owner | Anish, Makes360 |

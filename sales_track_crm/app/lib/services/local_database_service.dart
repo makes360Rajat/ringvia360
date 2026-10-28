@@ -145,7 +145,7 @@ class LocalDatabaseService {
   Future<List<SalesTrackEvent>> getEvents({
     String? kind,
     String? syncStatus,
-    int limit = 2000,
+    int limit = 50000,
     int offset = 0,
   }) async {
     final db = await database;
@@ -183,7 +183,7 @@ class LocalDatabaseService {
   }
 
   /// Retrieve all pending events for server sync
-  Future<List<SalesTrackEvent>> getPendingEvents({String? kind, int limit = 100}) async {
+  Future<List<SalesTrackEvent>> getPendingEvents({String? kind, int limit = 500}) async {
     final db = await database;
     if (db == null) return [];
     String query = "SELECT * FROM events WHERE sync_status != 'synced'";
@@ -461,6 +461,18 @@ class LocalDatabaseService {
       }
     } catch (_) {}
     return removed;
+  }
+
+  /// Everything kept for a CRM this phone is no longer paired with.
+  Future<void> clearAll() async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      final tables = await db.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'android_metadata'");
+      for (final t in tables) {
+        await db.delete(t['name'] as String);
+      }
+    } catch (_) {}
   }
 
   /// Offline outcome queue

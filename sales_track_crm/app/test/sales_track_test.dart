@@ -174,19 +174,10 @@ void main() {
       expect(notifJson['text'], equals('Your balance is low'));
     });
 
-    test('SalesTrackApiService keeps CRM host and API path independently configurable', () {
-      expect(SalesTrackApiService.defaultServerUrl, equals('https://crm.make360.in'));
-      expect(SalesTrackApiService.defaultApiPath, equals('/mks_sales_track/api/v1'));
-      final api = SalesTrackApiService();
-      expect(api.apiBaseUrl, equals('https://crm.make360.in/mks_sales_track/api/v1'));
-      expect(
-        SalesTrackApiService.serverUrlFromApiUrl('https://crm.example.com/crm/mks_sales_track/api/v1/'),
-        equals('https://crm.example.com/crm'),
-      );
-      expect(
-        SalesTrackApiService.apiPathFromApiUrl('https://crm.example.com/crm/mks_sales_track/api/v1/'),
-        equals('/mks_sales_track/api/v1'),
-      );
+    test('SalesTrackApiService normalizes server URL correctly', () {
+      expect(SalesTrackApiService.defaultServerUrl, equals(''));
+      expect(SalesTrackApiService.normalizeServerUrl('crm.example.com'), equals('https://crm.example.com'));
+      expect(SalesTrackApiService.normalizeServerUrl('https://crm.example.com/admin/'), equals('https://crm.example.com'));
     });
   });
 }
