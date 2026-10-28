@@ -247,7 +247,9 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
 
   void _onSkipOrDismiss() {
     widget.onDismiss();
-    Navigator.of(context).pop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Row(
@@ -294,7 +296,9 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
     if (mounted) {
       setState(() => _isSubmitting = false);
       widget.onDismiss();
-      Navigator.of(context).pop();
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

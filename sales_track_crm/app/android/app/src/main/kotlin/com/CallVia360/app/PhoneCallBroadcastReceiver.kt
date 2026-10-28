@@ -221,7 +221,10 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
             }
 
             val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("action", "caller_id")
+                putExtra("number", number)
+                putExtra("contact_name", contactName)
             }
             val pendingIntent = PendingIntent.getActivity(
                 context,
@@ -241,10 +244,18 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 .setContentTitle(title)
                 .setContentText("Incoming call • Tap to view CRM history & notes")
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, false)
 
             notificationManager.notify(1003, builder.build())
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
+                try {
+                    context.startActivity(launchIntent)
+                } catch (_: Exception) {}
+            }
         } catch (_: Exception) {}
     }
 

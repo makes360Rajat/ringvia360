@@ -38,7 +38,9 @@ class CallerIdDialog extends StatelessWidget {
 
   void _openLeadOutcomeModal(BuildContext context) {
     onDismiss();
-    Navigator.of(context).pop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
 
     final tempEvent = SalesTrackEvent(
       uid: 'call-now-${DateTime.now().millisecondsSinceEpoch}',
@@ -289,7 +291,9 @@ class CallerIdDialog extends StatelessWidget {
                           IconButton(
                             onPressed: () {
                               onDismiss();
-                              Navigator.of(context).pop();
+                              if (Navigator.of(context).canPop()) {
+                                Navigator.of(context).pop();
+                              }
                             },
                             icon: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
                             padding: EdgeInsets.zero,
@@ -611,7 +615,9 @@ class CallerIdDialog extends StatelessWidget {
                           label: 'Dismiss',
                           onTap: () {
                             onDismiss();
-                            Navigator.of(context).pop();
+                            if (Navigator.of(context).canPop()) {
+                              Navigator.of(context).pop();
+                            }
                           },
                           isDark: isDark,
                         ),

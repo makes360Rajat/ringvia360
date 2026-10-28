@@ -513,6 +513,18 @@ class MainActivity : FlutterActivity() {
                     "time" to System.currentTimeMillis()
                 ))
             }, 500)
+        } else if (action == "caller_id") {
+            val number = intent.getStringExtra("number") ?: ""
+            val contactName = intent.getStringExtra("contact_name") ?: ""
+            observerHandler.postDelayed({
+                TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
+                    "type" to "incoming_call_ringing",
+                    "number" to number,
+                    "phoneNumber" to number,
+                    "contactName" to contactName,
+                    "direction" to "incoming"
+                ))
+            }, 500)
         }
     }
 
