@@ -25,13 +25,64 @@ class _OutcomeModalState extends State<OutcomeModal> {
   int? _selectedLeadStatus;
   bool _isSubmitting = false;
 
+  static final List<OutcomeOptionModel> _defaultOutcomes = [
+    OutcomeOptionModel(key: 'interested', label: 'Interested', tone: 'green', followUp: true, leadStatus: 1, fixed: false),
+    OutcomeOptionModel(key: 'callback', label: 'Callback Requested', tone: 'amber', followUp: true, leadStatus: 1, fixed: false),
+    OutcomeOptionModel(key: 'meeting', label: 'Meeting Fixed', tone: 'purple', followUp: true, leadStatus: 2, fixed: false),
+    OutcomeOptionModel(key: 'busy', label: 'Busy / In Meeting', tone: 'orange', followUp: true, leadStatus: 0, fixed: false),
+    OutcomeOptionModel(key: 'not_interested', label: 'Not Interested', tone: 'rose', followUp: false, leadStatus: 3, fixed: false),
+    OutcomeOptionModel(key: 'wrong_number', label: 'Wrong Number', tone: 'slate', followUp: false, leadStatus: 4, fixed: false),
+    OutcomeOptionModel(key: 'deal_won', label: 'Deal Closed', tone: 'green', followUp: false, leadStatus: 5, fixed: false),
+  ];
+
+  static const List<String> _quickNoteChips = [
+    'Interested in pricing',
+    'Requested callback',
+    'Send details on WhatsApp',
+    'Busy, call tomorrow',
+    'Quotation sent',
+    'Meeting scheduled',
+    'Decision maker unavailable',
+    'Follow up next week',
+  ];
+
   @override
   void initState() {
     super.initState();
     final config = widget.syncService.config;
-    if (config.outcomesList.isNotEmpty) {
-      _selectedOutcomeKey = config.outcomesList.first.key;
+    final available = config.outcomesList.isNotEmpty ? config.outcomesList : _defaultOutcomes;
+    _selectedOutcomeKey = available.first.key;
+
+    if (widget.event.name.isNotEmpty &&
+        widget.event.name != widget.event.number &&
+        !widget.event.name.toLowerCase().contains('unknown') &&
+        !widget.event.name.toLowerCase().contains('caller')) {
+      _leadNameController.text = widget.event.name;
     }
+  }
+
+  void _addQuickNote(String chip) {
+    final current = _noteController.text.trim();
+    if (current.isEmpty) {
+      _noteController.text = chip;
+    } else {
+      _noteController.text = '$current • $chip';
+    }
+    _noteController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _noteController.text.length),
+    );
+    setState(() {});
+  }
+
+  void _setFollowUpPreset(Duration offset, {int targetHour = 10}) {
+    final now = DateTime.now();
+    DateTime target = now.add(offset);
+    if (offset.inDays > 0) {
+      target = DateTime(target.year, target.month, target.day, targetHour, 0);
+    }
+    setState(() {
+      _followUpDate = target;
+    });
   }
 
   @override
@@ -200,7 +251,7 @@ class _OutcomeModalState extends State<OutcomeModal> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: config.outcomesList.map((outcome) {
+                children: (config.outcomesList.isNotEmpty ? config.outcomesList : _defaultOutcomes).map((outcome) {
                   final isSelected = _selectedOutcomeKey == outcome.key;
                   final toneColor = _getToneColor(outcome.tone, colors);
                   return ChoiceChip(
@@ -237,7 +288,7 @@ class _OutcomeModalState extends State<OutcomeModal> {
 
               // Note Input
               Text(
-                'CALL NOTE ${config.outcomesNoteRequired ? "(REQUIRED)" : "(OPTIONAL)"}',
+                'CALL NOTE / REMARKS ${config.outcomesNoteRequired ? "(REQUIRED)" : "(OPTIONAL)"}',
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
@@ -253,107 +304,225 @@ class _OutcomeModalState extends State<OutcomeModal> {
                 decoration: InputDecoration(
                   hintText: config.outcomesNoteRequired
                       ? 'Enter mandatory summary of the discussion...'
-                      : 'Add summary notes from this call...',
+                      : 'Add summary notes or tap quick chips below...',
                   prefixIcon: Icon(Icons.notes_rounded, color: colors.textMuted),
                 ),
               ),
-              const SizedBox(height: 14),
-
-              // Follow-up Date Picker
-              if (_selectedOutcomeKey != null &&
-                  config.outcomesList
-                      .firstWhere((o) => o.key == _selectedOutcomeKey,
-                          orElse: () => config.outcomesList.first)
-                      .followUp) ...[
-                Text(
-                  'FOLLOW-UP SCHEDULE',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                    color: colors.textMuted,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                InkWell(
-                  onTap: () async {
-                    final pickedDate = await showDatePicker(
-                      context: context,
-                      initialDate: _followUpDate ?? DateTime.now().add(const Duration(days: 1)),
-                      firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
-                    );
-                    if (pickedDate != null && context.mounted) {
-                      final pickedTime = await showTimePicker(
-                        context: context,
-                        initialTime: const TimeOfDay(hour: 10, minute: 0),
-                      );
-                      if (pickedTime != null && mounted) {
-                        setState(() {
-                          _followUpDate = DateTime(
-                            pickedDate.year,
-                            pickedDate.month,
-                            pickedDate.day,
-                            pickedTime.hour,
-                            pickedTime.minute,
-                          );
-                        });
-                      }
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(12),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-                    decoration: BoxDecoration(
-                      color: colors.surfaceColor,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.border),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _quickNoteChips.map((chip) {
+                  return InkWell(
+                    onTap: () => _addQuickNote(chip),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceColor,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: colors.border.withOpacity(0.8)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.add_rounded, size: 12, color: colors.primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            chip,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: colors.textSecondary,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.event_rounded, color: colors.primary, size: 20),
-                        const SizedBox(width: 10),
-                        Text(
-                          _followUpDate != null
-                              ? 'Follow-up: ${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year} ${_followUpDate!.hour.toString().padLeft(2, '0')}:${_followUpDate!.minute.toString().padLeft(2, '0')}'
-                              : 'Set Follow-up reminder date & time',
-                          style: TextStyle(
-                            color: _followUpDate != null ? colors.textPrimary : colors.textMuted,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w500,
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+
+              // Follow-up Date Picker & Presets
+              Builder(
+                builder: (context) {
+                  final activeList = config.outcomesList.isNotEmpty ? config.outcomesList : _defaultOutcomes;
+                  final selectedOutcome = activeList.firstWhere(
+                    (o) => o.key == _selectedOutcomeKey,
+                    orElse: () => activeList.first,
+                  );
+                  final showFollowUp = selectedOutcome.followUp || _followUpDate != null;
+
+                  if (!showFollowUp) return const SizedBox.shrink();
+
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'FOLLOW-UP SCHEDULE',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.6,
+                              color: colors.textMuted,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (_followUpDate != null)
+                            GestureDetector(
+                              onTap: () => setState(() => _followUpDate = null),
+                              child: Text(
+                                'Clear',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: colors.danger,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Quick Follow-up Presets Row
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            OutlinedButton(
+                              onPressed: () => _setFollowUpPreset(const Duration(hours: 2)),
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                side: BorderSide(color: colors.border),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: Text('+2 Hours', style: TextStyle(fontSize: 11, color: colors.textPrimary)),
+                            ),
+                            const SizedBox(width: 6),
+                            OutlinedButton(
+                              onPressed: () => _setFollowUpPreset(const Duration(days: 1), targetHour: 10),
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                side: BorderSide(color: colors.border),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: Text('Tomorrow 10 AM', style: TextStyle(fontSize: 11, color: colors.textPrimary)),
+                            ),
+                            const SizedBox(width: 6),
+                            OutlinedButton(
+                              onPressed: () => _setFollowUpPreset(const Duration(days: 3), targetHour: 11),
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                side: BorderSide(color: colors.border),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: Text('+3 Days', style: TextStyle(fontSize: 11, color: colors.textPrimary)),
+                            ),
+                            const SizedBox(width: 6),
+                            OutlinedButton(
+                              onPressed: () => _setFollowUpPreset(const Duration(days: 7), targetHour: 10),
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                side: BorderSide(color: colors.border),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              child: Text('Next Week', style: TextStyle(fontSize: 11, color: colors.textPrimary)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      InkWell(
+                        onTap: () async {
+                          final pickedDate = await showDatePicker(
+                            context: context,
+                            initialDate: _followUpDate ?? DateTime.now().add(const Duration(days: 1)),
+                            firstDate: DateTime.now(),
+                            lastDate: DateTime.now().add(const Duration(days: 365)),
+                          );
+                          if (pickedDate != null && context.mounted) {
+                            final pickedTime = await showTimePicker(
+                              context: context,
+                              initialTime: const TimeOfDay(hour: 10, minute: 0),
+                            );
+                            if (pickedTime != null && mounted) {
+                              setState(() {
+                                _followUpDate = DateTime(
+                                  pickedDate.year,
+                                  pickedDate.month,
+                                  pickedDate.day,
+                                  pickedTime.hour,
+                                  pickedTime.minute,
+                                );
+                              });
+                            }
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: _followUpDate != null ? colors.primary.withOpacity(0.5) : colors.border,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.event_rounded, color: colors.primary, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _followUpDate != null
+                                      ? 'Scheduled: ${_followUpDate!.day}/${_followUpDate!.month}/${_followUpDate!.year} at ${_followUpDate!.hour.toString().padLeft(2, '0')}:${_followUpDate!.minute.toString().padLeft(2, '0')}'
+                                      : 'Pick custom date & time...',
+                                  style: TextStyle(
+                                    color: _followUpDate != null ? colors.textPrimary : colors.textMuted,
+                                    fontSize: 13,
+                                    fontWeight: _followUpDate != null ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
+                              Icon(Icons.calendar_month_rounded, color: colors.textMuted, size: 18),
+                            ],
                           ),
                         ),
-                        const Spacer(),
-                        Icon(Icons.calendar_month_rounded, color: colors.textMuted, size: 18),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-              ],
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  );
+                },
+              ),
 
-              // Create Lead Input (for unknown callers)
-              if (config.outcomesCreateLead) ...[
-                Text(
-                  'CREATE NEW CRM LEAD (OPTIONAL)',
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.6,
-                    color: colors.textMuted,
-                  ),
+              // Create Lead Input
+              Text(
+                'LEAD OR CONTACT NAME (OPTIONAL)',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.6,
+                  color: colors.textMuted,
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _leadNameController,
-                  style: TextStyle(color: colors.textPrimary, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'Lead person or company name',
-                    prefixIcon: Icon(Icons.person_add_rounded, color: colors.textMuted),
-                  ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _leadNameController,
+                style: TextStyle(color: colors.textPrimary, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Enter lead person or company name...',
+                  prefixIcon: Icon(Icons.person_add_rounded, color: colors.textMuted),
                 ),
-                const SizedBox(height: 18),
-              ],
+              ),
+              const SizedBox(height: 20),
 
               // Submit Button
               SizedBox(

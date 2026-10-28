@@ -258,6 +258,21 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "launchWhatsAppChat" -> {
+                    try {
+                        val number = call.argument<String>("number") ?: ""
+                        val cleanDigits = number.replace(Regex("\\D"), "")
+                        val uri = Uri.parse("https://wa.me/$cleanDigits")
+                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("WHATSAPP_LAUNCH_ERROR", e.message, null)
+                    }
+                }
+
                 "openAllFilesSettings" -> {
                     try {
                         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {

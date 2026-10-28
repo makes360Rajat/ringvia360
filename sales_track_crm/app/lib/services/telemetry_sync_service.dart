@@ -121,6 +121,21 @@ class TelemetrySyncService extends ChangeNotifier {
   List<SalesTrackEvent> get pendingQueue => List.unmodifiable(_pendingQueue);
   int get pendingQueueCount => _pendingQueue.length;
 
+  // Truecaller-like Active Caller ID State
+  CallerIdInfo? _activeCallerId;
+  CallerIdInfo? get activeCallerId => _activeCallerId;
+
+  void dismissCallerId() {
+    _activeCallerId = null;
+    notifyListeners();
+  }
+
+  Future<void> openWhatsAppChat(String number) async {
+    try {
+      await _platform.invokeMethod('launchWhatsAppChat', {'number': number});
+    } catch (_) {}
+  }
+
   // After-call popup trigger
   SalesTrackEvent? _activeAfterCallEvent;
   SalesTrackEvent? get activeAfterCallEvent => _activeAfterCallEvent;
@@ -483,7 +498,24 @@ class TelemetrySyncService extends ChangeNotifier {
       return;
     }
 
+    // Truecaller-like real-time call detection (Incoming Ringing or Outgoing Dialing)
+    if (type == 'incoming_call_ringing' || type == 'outgoing_call_dialing') {
+      final phoneNumber = raw['phoneNumber']?.toString() ?? raw['number']?.toString() ?? '';
+      final contactName = raw['contactName']?.toString() ?? raw['name']?.toString() ?? '';
+      final direction = (raw['direction']?.toString() ?? (type == 'outgoing_call_dialing' ? 'outgoing' : 'incoming'));
+
+      if (phoneNumber.isNotEmpty &&
+          phoneNumber != 'Incoming Caller' &&
+          phoneNumber.toLowerCase() != 'unknown') {
+        _startCallerIdLookup(phoneNumber, contactName, direction);
+      }
+      return;
+    }
+
     if (type == 'call_completed') {
+      // Dismiss active ringing caller ID
+      _activeCallerId = null;
+
       final uid = raw['uid']?.toString() ?? 'call-${DateTime.now().millisecondsSinceEpoch}';
       final event = SalesTrackEvent(
         uid: uid,
@@ -663,16 +695,84 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
-  bool _shouldShowAfterCallPopup(SalesTrackEvent event) {
-    if (!_config.outcomesCreateLead && _config.outcomesList.isEmpty) return false;
-    if (_config.outcomesAsk == 'all') return true;
-    if (_config.outcomesAsk == 'connected') {
-      return event.duration > 0 || event.direction == 'outgoing';
+  Future<void> _startCallerIdLookup(String phone, String name, String direction) async {
+    final hasContactName = name.isNotEmpty &&
+        name != phone &&
+        !name.toLowerCase().contains('unknown') &&
+        !name.toLowerCase().contains('caller');
+
+    final info = CallerIdInfo(
+      phoneNumber: phone,
+      direction: direction,
+      name: hasContactName ? name : phone,
+      isSearching: true,
+      isUnsaved: !hasContactName,
+      category: hasContactName ? 'contact' : 'unsaved',
+    );
+
+    _activeCallerId = info;
+    notifyListeners();
+
+    // 1. Instant local SQLite lookup (< 5ms)
+    try {
+      final localInfo = await LocalDatabaseService.instance.lookupCallerInfo(phone);
+      if (localInfo != null && _activeCallerId?.phoneNumber == phone) {
+        if (!hasContactName && localInfo['resolvedName'] != null) {
+          info.name = localInfo['resolvedName'];
+          info.isUnsaved = false;
+        }
+        info.totalPreviousCalls = (localInfo['totalCalls'] as int?) ?? 0;
+        info.lastCallTime = localInfo['lastCallTime'];
+        info.lastDuration = localInfo['lastDuration'];
+        info.lastOutcome = localInfo['lastOutcome'];
+        info.lastNote = localInfo['lastNote'];
+        info.followUpAt = localInfo['followUpAt'];
+        notifyListeners();
+      }
+    } catch (_) {}
+
+    // 2. Central CRM Database Directory Lookup (if paired and online)
+    if (_isPaired) {
+      try {
+        final res = await api.lookupNumber(phone);
+        if (res.success && res.data != null && _activeCallerId?.phoneNumber == phone) {
+          final data = res.data!;
+          if (data['found'] == true && data['entry'] is Map) {
+            final entry = Map<String, dynamic>.from(data['entry'] as Map);
+            final crmName = entry['n']?.toString();
+            final company = entry['c']?.toString();
+            final status = entry['s']?.toString();
+            final type = entry['t']?.toString() ?? 'lead';
+            final lastOutcome = entry['lo']?.toString();
+            final lastNote = entry['ln']?.toString();
+
+            if (crmName != null && crmName.isNotEmpty) {
+              info.name = crmName;
+              info.isUnsaved = false;
+            }
+            if (company != null && company.isNotEmpty) info.company = company;
+            if (status != null && status.isNotEmpty) info.leadStatus = status;
+            info.category = type;
+            if (lastOutcome != null && lastOutcome.isNotEmpty) info.lastOutcome = lastOutcome;
+            if (lastNote != null && lastNote.isNotEmpty) info.lastNote = lastNote;
+          }
+        }
+      } catch (_) {}
     }
+
+    if (_activeCallerId?.phoneNumber == phone) {
+      info.isSearching = false;
+      notifyListeners();
+    }
+  }
+
+  bool _shouldShowAfterCallPopup(SalesTrackEvent event) {
+    if (_config.outcomesAsk == 'off') return false;
     if (_config.outcomesAsk == 'connected_only') {
       return event.duration > 0;
     }
-    return false;
+    // For sales tracking: prompt on connected or outgoing calls
+    return event.duration > 0 || event.direction == 'outgoing' || _config.outcomesAsk == 'all';
   }
 
   void dismissAfterCallPopup() {

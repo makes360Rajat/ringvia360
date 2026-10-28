@@ -6,6 +6,7 @@ import '../../services/app_lock_service.dart';
 import '../../services/telemetry_sync_service.dart';
 import 'outcome_modal.dart';
 import 'setup_wizard_screen.dart';
+import '../widgets/caller_id_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -25,6 +26,8 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   bool _hasPromptedOutcome = false;
+  bool _hasPromptedCallerId = false;
+  BuildContext? _callerIdDialogContext;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String? _expandedCallUid;
@@ -94,10 +97,47 @@ class _HomeScreenState extends State<HomeScreen>
       widget.onUnpaired();
       return;
     }
+
+    // 1. Truecaller-like Active Caller ID Popup
+    final activeCaller = widget.syncService.activeCallerId;
+    if (activeCaller != null && !_hasPromptedCallerId) {
+      _hasPromptedCallerId = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: true,
+          builder: (dialogCtx) {
+            _callerIdDialogContext = dialogCtx;
+            return CallerIdDialog(
+              info: activeCaller,
+              syncService: widget.syncService,
+              onDismiss: () {
+                widget.syncService.dismissCallerId();
+              },
+            );
+          },
+        ).then((_) {
+          _callerIdDialogContext = null;
+          _hasPromptedCallerId = false;
+        });
+      });
+    } else if (activeCaller == null && _callerIdDialogContext != null) {
+      try {
+        if (Navigator.of(_callerIdDialogContext!).canPop()) {
+          Navigator.of(_callerIdDialogContext!).pop();
+        }
+      } catch (_) {}
+      _callerIdDialogContext = null;
+      _hasPromptedCallerId = false;
+    }
+
+    // 2. Automated After-Call Sales Outcome & Follow-up Modal
     final afterCall = widget.syncService.activeAfterCallEvent;
     if (afterCall != null && !_hasPromptedOutcome) {
       _hasPromptedOutcome = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
         showModalBottomSheet(
           context: context,
           isScrollControlled: true,

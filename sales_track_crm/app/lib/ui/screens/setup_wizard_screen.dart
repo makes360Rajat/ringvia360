@@ -190,7 +190,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
     final isDark = context.isDarkMode;
 
     final perms = widget.syncService.permissions;
-    final totalCount = perms.length > 0 ? perms.length : 7;
+    final totalCount = perms.isNotEmpty ? perms.length : 7;
     final grantedCount = perms.values.where((v) => v).length;
     final allGranted = perms.isNotEmpty && perms.values.every((v) => v);
     final progress = totalCount > 0 ? (grantedCount / totalCount).clamp(0.0, 1.0) : 0.0;

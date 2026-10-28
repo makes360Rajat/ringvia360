@@ -533,3 +533,42 @@ class CallListModel {
     );
   }
 }
+
+class CallerIdInfo {
+  final String phoneNumber;
+  final String direction; // 'incoming' or 'outgoing'
+  String name;
+  String? company;
+  String? leadStatus;
+  String? leadStatusColor;
+  String category; // 'lead', 'customer', 'staff', 'unsaved', 'contact'
+  int totalPreviousCalls;
+  int? lastCallTime;
+  int? lastDuration;
+  String? lastOutcome;
+  String? lastNote;
+  int? followUpAt;
+  bool isSearching;
+  bool isUnsaved;
+
+  CallerIdInfo({
+    required this.phoneNumber,
+    this.direction = 'incoming',
+    required this.name,
+    this.company,
+    this.leadStatus,
+    this.leadStatusColor,
+    this.category = 'unsaved',
+    this.totalPreviousCalls = 0,
+    this.lastCallTime,
+    this.lastDuration,
+    this.lastOutcome,
+    this.lastNote,
+    this.followUpAt,
+    this.isSearching = false,
+    this.isUnsaved = true,
+  });
+
+  bool get hasCrmLead => category == 'lead' || (leadStatus != null && leadStatus!.isNotEmpty);
+}
+
