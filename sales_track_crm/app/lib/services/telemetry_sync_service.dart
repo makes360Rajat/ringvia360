@@ -130,6 +130,25 @@ class TelemetrySyncService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<CallerIdInfo?> lookupCallerInfo(String phone) async {
+    try {
+      final localInfo = await LocalDatabaseService.instance.lookupCallerInfo(phone);
+      if (localInfo != null) {
+        return CallerIdInfo(
+          phoneNumber: phone,
+          name: localInfo['resolvedName']?.toString() ?? phone,
+          totalPreviousCalls: (localInfo['totalCalls'] as int?) ?? 0,
+          lastCallTime: localInfo['lastCallTime'],
+          lastDuration: localInfo['lastDuration'],
+          lastOutcome: localInfo['lastOutcome']?.toString(),
+          lastNote: localInfo['lastNote']?.toString(),
+          followUpAt: localInfo['followUpAt'],
+        );
+      }
+    } catch (_) {}
+    return null;
+  }
+
   Future<void> openWhatsAppChat(String number) async {
     try {
       await _platform.invokeMethod('launchWhatsAppChat', {'number': number});
@@ -1838,11 +1857,15 @@ class TelemetrySyncService extends ChangeNotifier {
       createLead: (createLeadName != null && createLeadName.isNotEmpty) ? {'name': createLeadName} : null,
     );
 
+    // Save to local SQLite database so caller lookup and offline history are immediately updated
+    await LocalDatabaseService.instance.saveOutcome(submission);
+
     _activeAfterCallEvent = null;
     notifyListeners();
 
     final res = await api.submitOutcomes([submission]);
     if (res.success) {
+      await LocalDatabaseService.instance.markOutcomesSynced([uid]);
       notifyListeners();
       return true;
     }

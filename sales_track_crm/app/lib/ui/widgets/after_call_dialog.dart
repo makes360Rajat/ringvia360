@@ -97,7 +97,43 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
       _leadNameController.text = initialName;
     }
 
+    if (_enrichedInfo != null) {
+      _applyEnrichedInfo(_enrichedInfo!, available);
+    }
+
+    widget.syncService.lookupCallerInfo(widget.event.number).then((info) {
+      if (mounted && info != null) {
+        setState(() {
+          _enrichedInfo = info;
+          _applyEnrichedInfo(info, available);
+        });
+        _loadContactPhoto();
+      }
+    });
+
     _loadContactPhoto();
+  }
+
+  void _applyEnrichedInfo(CallerIdInfo info, List<OutcomeOptionModel> available) {
+    if (_leadNameController.text.isEmpty &&
+        info.name.isNotEmpty &&
+        info.name != widget.event.number &&
+        !info.name.toLowerCase().contains('unknown') &&
+        !info.name.toLowerCase().contains('caller')) {
+      _leadNameController.text = info.name;
+    }
+    if (_noteController.text.isEmpty && info.lastNote != null && info.lastNote!.isNotEmpty) {
+      _noteController.text = info.lastNote!;
+    }
+    if (info.lastOutcome != null && info.lastOutcome!.isNotEmpty) {
+      final exists = available.any((o) => o.key == info.lastOutcome);
+      if (exists) {
+        _selectedOutcomeKey = info.lastOutcome;
+      }
+    }
+    if (_followUpDate == null && info.followUpAt != null && info.followUpAt! > 0) {
+      _followUpDate = DateTime.fromMillisecondsSinceEpoch(info.followUpAt!);
+    }
   }
 
   Future<void> _loadContactPhoto() async {
