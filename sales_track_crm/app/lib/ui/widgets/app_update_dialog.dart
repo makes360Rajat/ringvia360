@@ -296,3 +296,4 @@ class AppUpdateDialog extends StatelessWidget {
     );
   }
 }
+
