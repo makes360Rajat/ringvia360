@@ -198,6 +198,7 @@ class SalesTrackConfig {
   final List<LeadStatusModel> leadStatuses;
   final String version;
   final AppUpdateInfo appInfo;
+  final bool webview;
 
   SalesTrackConfig({
     required this.trackingCalls,
@@ -231,6 +232,7 @@ class SalesTrackConfig {
     required this.leadStatuses,
     required this.version,
     this.appInfo = const AppUpdateInfo(),
+    this.webview = false,
   });
 
   factory SalesTrackConfig.defaultConfig() {
@@ -271,6 +273,7 @@ class SalesTrackConfig {
       leadStatuses: [],
       version: '1.0.0',
       appInfo: const AppUpdateInfo(),
+      webview: false,
     );
   }
 
@@ -346,10 +349,12 @@ class SalesTrackConfig {
       leadStatuses: leadStatuses,
       version: json['version']?.toString() ?? '',
       appInfo: AppUpdateInfo.fromJson(app),
+      webview: json['webview'] == true,
     );
   }
 
   Map<String, dynamic> toJson() => {
+    'webview': webview,
     'tracking': {
       'calls': trackingCalls,
       'recordings': trackingRecordings,

@@ -6,6 +6,7 @@ import '../../services/app_lock_service.dart';
 import '../../services/sales_track_api_service.dart';
 import '../../services/telemetry_sync_service.dart';
 import 'setup_wizard_screen.dart';
+import 'crm_webview_screen.dart';
 import '../widgets/caller_id_dialog.dart';
 import '../widgets/after_call_dialog.dart';
 import '../widgets/app_update_dialog.dart';
@@ -27,6 +28,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
+  int _selectedBottomNavIndex = 0;
   BuildContext? _afterCallDialogContext;
   String? _lastPromptedAfterCallUid;
   bool _hasPromptedCallerId = false;
@@ -103,11 +105,12 @@ class _HomeScreenState extends State<HomeScreen>
     double top = 8,
     double horizontal = 14,
   }) {
+    final bottomInset = (service.isPlayingAudio || service.activeAudioPath != null) ? 108.0 : 40.0;
     return EdgeInsets.fromLTRB(
       horizontal,
       top,
       horizontal,
-      36.0,
+      bottomInset,
     );
   }
 
@@ -505,69 +508,94 @@ class _HomeScreenState extends State<HomeScreen>
         service.whatsappEvents.where((e) => e.kind == 'whatsapp_call').length;
     final smsCount = service.smsList.length;
 
-    return Scaffold(
-      backgroundColor: colors.background,
-      appBar: AppBar(
-        backgroundColor: colors.cardBackground,
-        elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: service.isPaired ? colors.primary : colors.warning,
-                boxShadow: [
-                  BoxShadow(
-                    color: (service.isPaired ? colors.primary : colors.warning)
-                        .withOpacity(0.55),
-                    blurRadius: 6,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    device?.name ?? 'Sales Phone',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: colors.textPrimary,
+    return PopScope(
+      canPop: _selectedBottomNavIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _selectedBottomNavIndex != 0) {
+          setState(() => _selectedBottomNavIndex = 0);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: colors.background,
+        appBar: _selectedBottomNavIndex == 1
+            ? null
+            : AppBar(
+                backgroundColor: colors.cardBackground,
+                elevation: 0,
+                title: Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: service.isPaired ? colors.primary : colors.warning,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (service.isPaired ? colors.primary : colors.warning)
+                                .withOpacity(0.55),
+                            blurRadius: 6,
+                          ),
+                        ],
+                      ),
                     ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: colors.textSecondary,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            device?.name ?? 'Sales Phone',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: colors.textSecondary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                    overflow: TextOverflow.ellipsis,
+                  ],
+                ),
+                actions: [
+                  // CRM Portal Quick Action Button
+                  IconButton(
+                    icon: Icon(
+                      Icons.business_center_rounded,
+                      color: colors.primary,
+                      size: 21,
+                    ),
+                    tooltip: 'Open CRM Portal',
+                    onPressed: () {
+                      if (service.isPlayingAudio) {
+                        service.stopRecording();
+                      }
+                      setState(() => _selectedBottomNavIndex = 1);
+                    },
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          // Theme Toggle Action Button
-          IconButton(
-            icon: Icon(
-              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: colors.textPrimary,
-              size: 20,
-            ),
-            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-            onPressed: () => themeProvider.toggleTheme(context),
-          ),
 
-          // Real-time Sync Action Button
+                  // Theme Toggle Action Button
+                  IconButton(
+                    icon: Icon(
+                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                      color: colors.textPrimary,
+                      size: 20,
+                    ),
+                    tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                    onPressed: () => themeProvider.toggleTheme(context),
+                  ),
+
+                  // Real-time Sync Action Button
           IconButton(
             icon: service.isSyncing
                 ? SizedBox(
@@ -803,48 +831,99 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      body: SafeArea(
-        top: false,
-        bottom: true,
-        child: Column(
-          children: [
-            // Live Real-Time Sync Progress Banner
-            if (service.isSyncing) _buildSyncProgressBanner(service),
-
-            // Proactive Permission Warning Banner
-            _buildPermissionAlertBanner(service),
-
-            // KPI Metric Banner
-            _buildKpiBanner(
-              totalCalls: totalCalls,
-              connectedCalls: connectedCalls,
-              talkSeconds: totalTalkSeconds,
-              waCalls: whatsappCallsCount,
-              pendingQueue: service.pendingQueueCount,
-              statusMsg: service.statusMessage,
-            ),
-
-            // Tab Content
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
+      body: _selectedBottomNavIndex == 1
+          ? CrmWebviewScreen(
+              syncService: service,
+              isTabMode: true,
+              onBackToSales: () => setState(() => _selectedBottomNavIndex = 0),
+            )
+          : SafeArea(
+              top: false,
+              bottom: true,
+              child: Column(
                 children: [
-                  _buildCallsTab(service),
-                  _buildWhatsAppTab(service),
-                  _buildSmsTab(service),
-                  _buildRecordingsTab(service),
-                  _buildPendingTab(service),
-                  _buildCallListsTab(service),
+                  // Live Real-Time Sync Progress Banner
+                  if (service.isSyncing) _buildSyncProgressBanner(service),
+
+                  // Proactive Permission Warning Banner
+                  _buildPermissionAlertBanner(service),
+
+                  // KPI Metric Banner
+                  _buildKpiBanner(
+                    totalCalls: totalCalls,
+                    connectedCalls: connectedCalls,
+                    talkSeconds: totalTalkSeconds,
+                    waCalls: whatsappCallsCount,
+                    pendingQueue: service.pendingQueueCount,
+                    statusMsg: service.statusMessage,
+                  ),
+
+                  // Tab Content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildCallsTab(service),
+                        _buildWhatsAppTab(service),
+                        _buildSmsTab(service),
+                        _buildRecordingsTab(service),
+                        _buildPendingTab(service),
+                        _buildCallListsTab(service),
+                      ],
+                    ),
+                  ),
+
+                  // Floating Audio Player bar
+                  if (service.isPlayingAudio || service.activeAudioPath != null)
+                    _buildAudioPlayerBar(service),
                 ],
               ),
             ),
-
-            // Floating Audio Player bar
-            if (service.isPlayingAudio || service.activeAudioPath != null)
-              _buildAudioPlayerBar(service),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: colors.cardBackground,
+          border: Border(
+            top: BorderSide(color: colors.border.withOpacity(0.6), width: 1),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
           ],
         ),
+        child: SafeArea(
+          top: false,
+          bottom: true,
+          child: NavigationBar(
+            height: 64,
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            indicatorColor: colors.primary.withOpacity(0.15),
+            selectedIndex: _selectedBottomNavIndex,
+            onDestinationSelected: (index) {
+              if (widget.syncService.isPlayingAudio) {
+                widget.syncService.stopRecording();
+              }
+              setState(() => _selectedBottomNavIndex = index);
+            },
+            destinations: [
+              NavigationDestination(
+                icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
+                selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
+                label: 'Sales Tracker',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
+                selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
+                label: 'CRM Portal',
+              ),
+            ],
+          ),
+        ),
       ),
+    ),
     );
   }
 

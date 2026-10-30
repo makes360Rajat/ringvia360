@@ -247,6 +247,7 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
 
   void _onSkipOrDismiss() {
     widget.onDismiss();
+    widget.syncService.syncNow();
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }

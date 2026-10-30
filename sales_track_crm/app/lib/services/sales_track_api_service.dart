@@ -43,7 +43,10 @@ class SalesTrackApiService {
   String get apiBaseUrl {
     final effective = _serverUrl.isNotEmpty ? _serverUrl : defaultServerUrl;
     final normalized = normalizeServerUrl(effective);
-    return normalized.isEmpty ? 'https://crm.make360.in/mks_sales_track/api/v1' : '$normalized/mks_sales_track/api/v1';
+    if (normalized.isEmpty || !normalized.startsWith('http')) {
+      return 'https://crm.make360.in/mks_sales_track/api/v1';
+    }
+    return '$normalized/mks_sales_track/api/v1';
   }
 
   String get safeApiBaseUrl => apiBaseUrl;
@@ -727,6 +730,58 @@ class SalesTrackApiService {
         return SalesTrackApiResponse(
           success: false,
           error: 'FETCH_EVENTS_FAILED',
+          statusCode: response.statusCode,
+        );
+      }
+    } catch (e) {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'CONNECTION_ERROR',
+        message: e.toString(),
+        statusCode: 0,
+      );
+    }
+  }
+
+  // 10. OPEN CRM WEBVIEW SESSION
+  /// Requests a one-time 60-second sign-in link to open the CRM portal directly inside the app.
+  /// POST /webview
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> openCrmSession() async {
+    if (!isPaired) {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'device_revoked',
+        message: 'Device is not paired with CRM.',
+        statusCode: 401,
+      );
+    }
+    try {
+      final endpoint = '$apiBaseUrl/webview';
+      final response = await http.post(
+        Uri.parse(endpoint),
+        headers: _buildHeaders(),
+        body: jsonEncode({}),
+      ).timeout(const Duration(seconds: 15));
+
+      _saveCookiesFromResponse(response);
+
+      Map<String, dynamic> body = {};
+      try {
+        body = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (_) {}
+
+      if (response.statusCode == 200 && body['success'] == true) {
+        return SalesTrackApiResponse(
+          success: true,
+          data: body,
+          statusCode: response.statusCode,
+        );
+      } else {
+        return SalesTrackApiResponse(
+          success: false,
+          error: body['error']?.toString() ?? 'webview_failed',
+          message: body['message']?.toString(),
+          data: body,
           statusCode: response.statusCode,
         );
       }
