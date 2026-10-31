@@ -11,6 +11,10 @@ import UserNotifications
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    GeneratedPluginRegistrant.register(with: self)
+    if let registrar = self.registrar(forPlugin: "TelemetryBridgePlugin") {
+      TelemetryBridgePlugin.register(with: registrar)
+    }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -92,38 +96,45 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       let micStatus = AVAudioSession.sharedInstance().recordPermission
       let micGranted = (micStatus == .granted)
 
-      let semaphore = DispatchSemaphore(value: 0)
-      var notifGranted = false
       UNUserNotificationCenter.current().getNotificationSettings { settings in
-        notifGranted = (settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional)
-        semaphore.signal()
-      }
-      _ = semaphore.wait(timeout: .now() + 0.3)
+        let notifGranted = (settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional)
 
-      let status: [String: Bool] = [
-        "contacts": contactsGranted,
-        "microphone": micGranted,
-        "record_audio": micGranted,
-        "recordings_folder": micGranted,
-        "manage_storage": micGranted,
-        "storage": micGranted,
-        "notifications": notifGranted,
-        "whatsapp_access": notifGranted,
-        "call_log": true,
-        "phone_state": true,
-        "sms": true,
-        "battery_optimization": true,
-        "battery_unrestricted": true,
-        "overlay": true
-      ]
-      result(status)
+        let status: [String: Bool] = [
+          "contacts": contactsGranted,
+          "microphone": micGranted,
+          "record_audio": micGranted,
+          "recordings_folder": micGranted,
+          "manage_storage": micGranted,
+          "storage": micGranted,
+          "notifications": notifGranted,
+          "whatsapp_access": notifGranted,
+          "call_log": true,
+          "phone_state": true,
+          "sms": true,
+          "battery_optimization": true,
+          "battery_unrestricted": true,
+          "overlay": true
+        ]
+
+        DispatchQueue.main.async {
+          result(status)
+        }
+      }
 
     case "requestAllPermissions":
       if #available(iOS 9.0, *) {
-        CNContactStore().requestAccess(for: .contacts) { _, _ in }
+        if CNContactStore.authorizationStatus(for: .contacts) == .notDetermined {
+          CNContactStore().requestAccess(for: .contacts) { _, _ in }
+        }
       }
-      AVAudioSession.sharedInstance().requestRecordPermission { _ in }
-      UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+      if AVAudioSession.sharedInstance().recordPermission == .undetermined {
+        AVAudioSession.sharedInstance().requestRecordPermission { _ in }
+      }
+      UNUserNotificationCenter.current().getNotificationSettings { settings in
+        if settings.authorizationStatus == .notDetermined {
+          UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+        }
+      }
       result(true)
 
     case "requestPermission":
@@ -133,20 +144,61 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       switch group {
       case "contacts":
         if #available(iOS 9.0, *) {
-          CNContactStore().requestAccess(for: .contacts) { granted, _ in
-            DispatchQueue.main.async { result(granted) }
+          let status = CNContactStore.authorizationStatus(for: .contacts)
+          if status == .notDetermined {
+            CNContactStore().requestAccess(for: .contacts) { granted, _ in
+              DispatchQueue.main.async { result(granted) }
+            }
+          } else if status == .authorized {
+            result(true)
+          } else {
+            // Already denied: open iOS Settings so user can toggle it on
+            DispatchQueue.main.async {
+              if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+              }
+              result(false)
+            }
           }
         } else {
           result(true)
         }
+
       case "audio", "record_audio", "microphone":
-        AVAudioSession.sharedInstance().requestRecordPermission { granted in
-          DispatchQueue.main.async { result(granted) }
+        let status = AVAudioSession.sharedInstance().recordPermission
+        if status == .undetermined {
+          AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            DispatchQueue.main.async { result(granted) }
+          }
+        } else if status == .granted {
+          result(true)
+        } else {
+          DispatchQueue.main.async {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+              UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+            result(false)
+          }
         }
+
       case "notifications", "whatsapp_access":
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
-          DispatchQueue.main.async { result(granted) }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+          if settings.authorizationStatus == .notDetermined {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+              DispatchQueue.main.async { result(granted) }
+            }
+          } else if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+            DispatchQueue.main.async { result(true) }
+          } else {
+            DispatchQueue.main.async {
+              if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+              }
+              result(false)
+            }
+          }
         }
+
       default:
         result(true)
       }
@@ -158,17 +210,21 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       }
 
     case "openAppSettings", "openNotificationListenerSettings", "openBatteryOptimizationSettings", "openAllFilesSettings", "openOverlaySettings":
-      if let url = URL(string: UIApplication.openSettingsURLString) {
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
+      DispatchQueue.main.async {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+          UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        }
+        result(true)
       }
-      result(true)
 
     case "launchUrl":
       if let args = call.arguments as? [String: Any],
          let urlStr = args["url"] as? String,
          let url = URL(string: urlStr) {
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-        result(true)
+        DispatchQueue.main.async {
+          UIApplication.shared.open(url, options: [:], completionHandler: nil)
+          result(true)
+        }
       } else {
         result(false)
       }
@@ -176,49 +232,57 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "launchWhatsAppChat":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
       let clean = rawNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-      if let appUrl = URL(string: "whatsapp://send?phone=\(clean)"), UIApplication.shared.canOpenURL(appUrl) {
-        UIApplication.shared.open(appUrl, options: [:], completionHandler: nil)
-        result(true)
-      } else if let webUrl = URL(string: "https://wa.me/\(clean)") {
-        UIApplication.shared.open(webUrl, options: [:], completionHandler: nil)
-        result(true)
-      } else {
-        result(false)
+      DispatchQueue.main.async {
+        if let appUrl = URL(string: "whatsapp://send?phone=\(clean)"), UIApplication.shared.canOpenURL(appUrl) {
+          UIApplication.shared.open(appUrl, options: [:], completionHandler: nil)
+          result(true)
+        } else if let webUrl = URL(string: "https://wa.me/\(clean)") {
+          UIApplication.shared.open(webUrl, options: [:], completionHandler: nil)
+          result(true)
+        } else {
+          result(false)
+        }
       }
 
     case "dialPhoneNumber":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
       let clean = rawNumber.components(separatedBy: CharacterSet(charactersIn: "+0123456789").inverted).joined()
-      if let url = URL(string: "tel://\(clean)") {
-        UIApplication.shared.open(url, options: [:], completionHandler: nil)
-        result(true)
-      } else {
-        result(false)
+      DispatchQueue.main.async {
+        if let url = URL(string: "tel://\(clean)") {
+          UIApplication.shared.open(url, options: [:], completionHandler: nil)
+          result(true)
+        } else {
+          result(false)
+        }
       }
 
     case "getContactPhoto":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
       let clean = rawNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-      var photoData: Data? = nil
-      if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
-        let store = CNContactStore()
-        let keys = [CNContactThumbnailImageDataKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
-        let request = CNContactFetchRequest(keysToFetch: keys)
-        try? store.enumerateContacts(with: request) { contact, stop in
-          for phone in contact.phoneNumbers {
-            let digits = phone.value.stringValue.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
-            if digits.hasSuffix(clean) || clean.hasSuffix(digits) {
-              photoData = contact.thumbnailImageData
-              stop.pointee = true
-              break
+      DispatchQueue.global(qos: .userInitiated).async {
+        var photoData: Data? = nil
+        if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
+          let store = CNContactStore()
+          let keys = [CNContactThumbnailImageDataKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
+          let request = CNContactFetchRequest(keysToFetch: keys)
+          try? store.enumerateContacts(with: request) { contact, stop in
+            for phone in contact.phoneNumbers {
+              let digits = phone.value.stringValue.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+              if digits.hasSuffix(clean) || clean.hasSuffix(digits) {
+                photoData = contact.thumbnailImageData
+                stop.pointee = true
+                break
+              }
             }
           }
         }
-      }
-      if let data = photoData {
-        result(FlutterStandardTypedData(bytes: data))
-      } else {
-        result(nil)
+        DispatchQueue.main.async {
+          if let data = photoData {
+            result(FlutterStandardTypedData(bytes: data))
+          } else {
+            result(nil)
+          }
+        }
       }
 
     case "pauseAudio", "resumeAudio", "stopAudio", "seekAudio":

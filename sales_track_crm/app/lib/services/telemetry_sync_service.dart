@@ -80,14 +80,14 @@ class TelemetrySyncService extends ChangeNotifier {
   bool get hasOverlayPermission => _permissions['overlay'] == true;
   bool get hasEssentialPermissions {
     if (Platform.isIOS) {
-      return hasContactsPermission;
+      return true;
     }
     return hasCallLogPermission && hasPhoneStatePermission;
   }
 
   bool get hasAllSevenPermissions {
     if (Platform.isIOS) {
-      return hasContactsPermission && hasNotificationPermission;
+      return hasContactsPermission;
     }
     return hasCallLogPermission &&
         hasPhoneStatePermission &&

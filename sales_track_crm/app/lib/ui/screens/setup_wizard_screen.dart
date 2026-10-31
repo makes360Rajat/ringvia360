@@ -201,7 +201,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
       if (widget.syncService.hasRecordingsFolderPermission) g++;
       if (widget.syncService.hasNotificationPermission) g++;
       grantedCount = g;
-      allGranted = (g >= 2);
+      allGranted = (g >= 1);
     } else {
       final perms = widget.syncService.permissions;
       totalCount = perms.isNotEmpty ? perms.length : 7;
