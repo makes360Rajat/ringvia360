@@ -40,6 +40,23 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     _initWebviewSession();
   }
 
+  /// Resolves the URL safely.
+  /// If [input] already starts with http:// or https:// (e.g. from CRM settings or API response),
+  /// it is returned verbatim and NEVER prefixed with the CRM server URL.
+  String _resolveFullUrl(String? input) {
+    if (input == null || input.trim().isEmpty) {
+      final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
+      return '$base/admin';
+    }
+    final trimmed = input.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
+    final cleanPath = trimmed.replaceAll(RegExp(r'^/+'), '');
+    return '$base/$cleanPath';
+  }
+
   Future<void> _initWebviewSession([String? targetPage]) async {
     if (!mounted) return;
     setState(() {
@@ -64,12 +81,12 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     String? completeUrlFromCrm;
     if (res.data != null) {
       final rawUrl = res.data!['url']?.toString().trim();
-      if (rawUrl != null && rawUrl.isNotEmpty && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
-        completeUrlFromCrm = rawUrl;
+      if (rawUrl != null && rawUrl.isNotEmpty) {
+        completeUrlFromCrm = _resolveFullUrl(rawUrl);
       } else {
         final rawPage = res.data!['page']?.toString().trim();
-        if (rawPage != null && rawPage.isNotEmpty && (rawPage.startsWith('http://') || rawPage.startsWith('https://'))) {
-          completeUrlFromCrm = rawPage;
+        if (rawPage != null && rawPage.isNotEmpty) {
+          completeUrlFromCrm = _resolveFullUrl(rawPage);
         }
       }
     }
@@ -88,10 +105,12 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     // Directly open the CRM web portal in this in-app webview so the user is never blocked!
     if (res.error == 'webview_admin_blocked' || res.error == 'webview_disabled') {
       _isAutoLoginWorking = false;
-      final serverUrl = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
-      final route = (targetPage ?? widget.initialPage ?? widget.syncService.config.crmStartPage ?? 'admin')
-          .replaceAll(RegExp(r'^/+'), '');
-      final directCrmUrl = '$serverUrl/$route';
+      final rawTarget = res.data?['page']?.toString() ??
+          targetPage ??
+          widget.initialPage ??
+          widget.syncService.config.crmStartPage;
+
+      final directCrmUrl = _resolveFullUrl(rawTarget);
 
       debugPrint('=====================================================================');
       debugPrint('[CRM WebView] >>> ${res.error}: DIRECTLY OPENING CRM IN APP WEBVIEW:');
@@ -612,8 +631,8 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                     icon: const Icon(Icons.web_rounded, size: 18),
                     label: const Text('Open In-App Webview'),
                     onPressed: () {
-                      final serverUrl = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
-                      _setupWebViewController('$serverUrl/admin');
+                      final rawTarget = widget.syncService.config.crmStartPage;
+                      _setupWebViewController(_resolveFullUrl(rawTarget));
                     },
                   ),
                   TextButton.icon(
