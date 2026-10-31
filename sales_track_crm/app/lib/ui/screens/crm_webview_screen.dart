@@ -68,25 +68,31 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
     if (!mounted) return;
 
-    if (res.success && res.data != null && res.data!['url'] != null) {
-      final sessionUrl = res.data!['url'].toString();
-      final pageUrl = res.data?['page']?.toString();
-      debugPrint('====================================================');
-      debugPrint('[CRM WebView] DYNAMIC ONE-TIME SIGN-IN URL: $sessionUrl');
-      if (pageUrl != null) {
-        debugPrint('[CRM WebView] DYNAMIC START PAGE: $pageUrl');
-      }
-      debugPrint('====================================================');
-      if (sessionUrl.isNotEmpty) {
-        _isAutoLoginWorking = true;
-        _setupWebViewController(sessionUrl);
-        return;
+    // 1. Check for the COMPLETE URL string directly coming from the CRM API
+    String? completeUrlFromCrm;
+    if (res.data != null) {
+      final rawUrl = res.data!['url']?.toString().trim();
+      if (rawUrl != null && rawUrl.isNotEmpty && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
+        completeUrlFromCrm = rawUrl;
+      } else {
+        final rawPage = res.data!['page']?.toString().trim();
+        if (rawPage != null && rawPage.isNotEmpty && (rawPage.startsWith('http://') || rawPage.startsWith('https://'))) {
+          completeUrlFromCrm = rawPage;
+        }
       }
     }
 
-    // If auto-login fails (e.g. webview_disabled in CRM settings, admin blocked, etc.)
-    // DO NOT block the user or send to external browser!
-    // Fall back to loading the dynamic CRM URL directly inside this in-app webview.
+    if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
+      _isAutoLoginWorking = true;
+      debugPrint('====================================================');
+      debugPrint('[CRM WebView] >>> OPENING COMPLETE URL STRING FROM CRM API:');
+      debugPrint('>>> URL: $completeUrlFromCrm');
+      debugPrint('====================================================');
+      _setupWebViewController(completeUrlFromCrm);
+      return;
+    }
+
+    // 2. If no complete URL in API response, use dynamic fallback URL
     _isAutoLoginWorking = false;
     final dynamicFallbackUrl = _getDynamicUrl(res.data?['page']?.toString() ?? targetPage);
     debugPrint('[CRM WebView] Fallback dynamic CRM URL from server: $dynamicFallbackUrl');
@@ -121,7 +127,23 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   void _setupWebViewController(String url) {
-    debugPrint('[CRM WebView] Initializing WebViewController with dynamic URL: $url');
+    final cleanUrl = url.trim();
+    debugPrint('[CRM WebView] >>> OPENING COMPLETE URL IN WEBVIEW: $cleanUrl');
+
+    if (_controller != null) {
+      try {
+        _controller!.loadRequest(Uri.parse(cleanUrl));
+        setState(() {
+          _currentUrl = cleanUrl;
+          _isLoading = true;
+          _errorMessage = null;
+        });
+        return;
+      } catch (e) {
+        debugPrint('[CRM WebView] Error reloading webview with existing controller: $e');
+      }
+    }
+
     try {
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -195,11 +217,11 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
             },
           ),
         )
-        ..loadRequest(Uri.parse(url));
+        ..loadRequest(Uri.parse(cleanUrl));
 
       setState(() {
         _controller = controller;
-        _currentUrl = url;
+        _currentUrl = cleanUrl;
       });
     } catch (e) {
       debugPrint('[CRM WebView] Error initializing webview: $e');
