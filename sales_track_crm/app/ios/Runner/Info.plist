@@ -66,5 +66,24 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSContactsUsageDescription</key>
+	<string>CallVia360 needs access to contacts to match customer phone numbers with CRM contact details and client history.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CallVia360 needs microphone access to record audio notes, call recordings, and voice memos.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>whatsapp</string>
+		<string>tel</string>
+		<string>sms</string>
+		<string>mailto</string>
+		<string>https</string>
+		<string>http</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>remote-notification</string>
+		<string>processing</string>
+	</array>
 </dict>
 </plist>

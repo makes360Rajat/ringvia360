@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
@@ -61,7 +62,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
     required String description,
     required IconData icon,
     required bool isGranted,
-    required VoidCallback onRequest,
+    VoidCallback? onRequest,
   }) {
     final colors = context.stColors;
 
@@ -149,7 +150,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
             ),
           ),
           const SizedBox(width: 10),
-          if (isGranted)
+          if (isGranted || onRequest == null)
             Icon(Icons.check_circle_rounded, color: colors.primary, size: 24)
           else
             ElevatedButton(
@@ -189,10 +190,24 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
     final themeProvider = context.watch<ThemeProvider>();
     final isDark = context.isDarkMode;
 
-    final perms = widget.syncService.permissions;
-    final totalCount = perms.isNotEmpty ? perms.length : 7;
-    final grantedCount = perms.values.where((v) => v).length;
-    final allGranted = perms.isNotEmpty && perms.values.every((v) => v);
+    final int totalCount;
+    final int grantedCount;
+    final bool allGranted;
+
+    if (Platform.isIOS) {
+      totalCount = 3;
+      int g = 0;
+      if (widget.syncService.hasContactsPermission) g++;
+      if (widget.syncService.hasRecordingsFolderPermission) g++;
+      if (widget.syncService.hasNotificationPermission) g++;
+      grantedCount = g;
+      allGranted = (g >= 2);
+    } else {
+      final perms = widget.syncService.permissions;
+      totalCount = perms.isNotEmpty ? perms.length : 7;
+      grantedCount = perms.values.where((v) => v).length;
+      allGranted = perms.isNotEmpty && perms.values.every((v) => v);
+    }
     final progress = totalCount > 0 ? (grantedCount / totalCount).clamp(0.0, 1.0) : 0.0;
 
     return Scaffold(
@@ -308,85 +323,137 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                   ),
                   const SizedBox(height: 10),
 
-                  // 1. Call Log
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'Call Log Access',
-                    description: 'Reads exact talk duration, phone numbers, and timestamps from device call logs.',
-                    icon: Icons.history_rounded,
-                    isGranted: widget.syncService.hasCallLogPermission,
-                    onRequest: () => widget.syncService.requestPermission('call_log'),
-                  ),
+                  if (Platform.isIOS) ...[
+                    // iOS 1. Contacts
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Contacts Book',
+                      description: 'Resolves customer numbers to contact names and client history saved on this iPhone.',
+                      icon: Icons.contacts_rounded,
+                      isGranted: widget.syncService.hasContactsPermission,
+                      onRequest: () => widget.syncService.requestPermission('contacts'),
+                    ),
 
-                  // 2. Phone State
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'Phone State Sensing',
-                    description: 'Detects real-time incoming, outgoing, answered, and missed phone calls.',
-                    icon: Icons.phone_in_talk_rounded,
-                    isGranted: widget.syncService.hasPhoneStatePermission,
-                    onRequest: () => widget.syncService.requestPermission('phone_state'),
-                  ),
+                    // iOS 2. Microphone & Audio
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Microphone & Audio Access',
+                      description: 'Access to record customer call audio, voice notes, and meeting memos.',
+                      icon: Icons.mic_rounded,
+                      isGranted: widget.syncService.hasRecordingsFolderPermission,
+                      onRequest: () => widget.syncService.requestPermission('microphone'),
+                    ),
 
-                  // 3. Contacts
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'Contacts Book',
-                    description: 'Resolves customer numbers to contact names saved on this phone.',
-                    icon: Icons.contacts_rounded,
-                    isGranted: widget.syncService.hasContactsPermission,
-                    onRequest: () => widget.syncService.requestPermission('contacts'),
-                  ),
+                    // iOS 3. Notifications & CRM Alerts
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'CRM Notifications & Alerts',
+                      description: 'Receives real-time lead updates, scheduled call reminders, and sync alerts.',
+                      icon: Icons.notifications_active_rounded,
+                      isGranted: widget.syncService.hasNotificationPermission,
+                      onRequest: () => widget.syncService.requestPermission('notifications'),
+                    ),
 
-                  // 4. SMS
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'SMS Message Logs',
-                    description: 'Captures incoming and outgoing SMS text interactions with CRM clients.',
-                    icon: Icons.sms_rounded,
-                    isGranted: widget.syncService.hasSmsPermission,
-                    onRequest: () => widget.syncService.requestPermission('sms'),
-                  ),
+                    // iOS 4. WhatsApp & Phone Calling
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'WhatsApp & Cellular Dialing',
+                      description: 'Integrates one-tap calling and direct WhatsApp messaging from CRM lead lists.',
+                      icon: Icons.mark_chat_unread_rounded,
+                      isGranted: true,
+                      onRequest: null,
+                    ),
 
-                  // 5. WhatsApp Call Access
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'WhatsApp Call Access',
-                    description: 'Notification Listener permission to capture WhatsApp & WhatsApp Business calls.',
-                    icon: Icons.mark_chat_unread_rounded,
-                    isGranted: widget.syncService.hasWhatsAppAccessPermission,
-                    onRequest: () => widget.syncService.openNotificationListenerSettings(),
-                  ),
+                    // iOS 5. Background Telemetry Sync
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Background Telemetry Sync',
+                      description: 'Leverages iOS Background Processing to synchronize CRM data and pending interaction queues.',
+                      icon: Icons.sync_rounded,
+                      isGranted: true,
+                      onRequest: null,
+                    ),
+                  ] else ...[
+                    // Android 1. Call Log
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Call Log Access',
+                      description: 'Reads exact talk duration, phone numbers, and timestamps from device call logs.',
+                      icon: Icons.history_rounded,
+                      isGranted: widget.syncService.hasCallLogPermission,
+                      onRequest: () => widget.syncService.requestPermission('call_log'),
+                    ),
 
-                  // 6. Recordings Audio & Storage
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'Audio & Storage Access',
-                    description: 'Storage permission to detect, link, and upload call audio recordings (.m4a, .mp3, .wav).',
-                    icon: Icons.audio_file_rounded,
-                    isGranted: widget.syncService.hasRecordingsFolderPermission,
-                    onRequest: () => widget.syncService.requestPermission('audio'),
-                  ),
+                    // Android 2. Phone State
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Phone State Sensing',
+                      description: 'Detects real-time incoming, outgoing, answered, and missed phone calls.',
+                      icon: Icons.phone_in_talk_rounded,
+                      isGranted: widget.syncService.hasPhoneStatePermission,
+                      onRequest: () => widget.syncService.requestPermission('phone_state'),
+                    ),
 
-                  // 7. Battery Unrestricted
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'Battery Background Exemption',
-                    description: 'Prevents the Android OS from suspending background telemetry synchronization.',
-                    icon: Icons.battery_charging_full_rounded,
-                    isGranted: widget.syncService.hasBatteryOptimizationExemption,
-                    onRequest: () => widget.syncService.openBatterySettings(),
-                  ),
+                    // Android 3. Contacts
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Contacts Book',
+                      description: 'Resolves customer numbers to contact names saved on this phone.',
+                      icon: Icons.contacts_rounded,
+                      isGranted: widget.syncService.hasContactsPermission,
+                      onRequest: () => widget.syncService.requestPermission('contacts'),
+                    ),
 
-                  // 8. Truecaller Overlay (Display Over Other Apps)
-                  _buildPermissionItem(
-                    context: context,
-                    title: 'Display Over Other Apps',
-                    description: 'Displays Truecaller-style caller ID and after-call outcome dialogs over phone dialer.',
-                    icon: Icons.layers_rounded,
-                    isGranted: widget.syncService.hasOverlayPermission,
-                    onRequest: () => widget.syncService.openOverlaySettings(),
-                  ),
+                    // Android 4. SMS
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'SMS Message Logs',
+                      description: 'Captures incoming and outgoing SMS text interactions with CRM clients.',
+                      icon: Icons.sms_rounded,
+                      isGranted: widget.syncService.hasSmsPermission,
+                      onRequest: () => widget.syncService.requestPermission('sms'),
+                    ),
+
+                    // Android 5. WhatsApp Call Access
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'WhatsApp Call Access',
+                      description: 'Notification Listener permission to capture WhatsApp & WhatsApp Business calls.',
+                      icon: Icons.mark_chat_unread_rounded,
+                      isGranted: widget.syncService.hasWhatsAppAccessPermission,
+                      onRequest: () => widget.syncService.openNotificationListenerSettings(),
+                    ),
+
+                    // Android 6. Recordings Audio & Storage
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Audio & Storage Access',
+                      description: 'Storage permission to detect, link, and upload call audio recordings (.m4a, .mp3, .wav).',
+                      icon: Icons.audio_file_rounded,
+                      isGranted: widget.syncService.hasRecordingsFolderPermission,
+                      onRequest: () => widget.syncService.requestPermission('audio'),
+                    ),
+
+                    // Android 7. Battery Unrestricted
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Battery Background Exemption',
+                      description: 'Prevents the Android OS from suspending background telemetry synchronization.',
+                      icon: Icons.battery_charging_full_rounded,
+                      isGranted: widget.syncService.hasBatteryOptimizationExemption,
+                      onRequest: () => widget.syncService.openBatterySettings(),
+                    ),
+
+                    // Android 8. Truecaller Overlay (Display Over Other Apps)
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Display Over Other Apps',
+                      description: 'Displays Truecaller-style caller ID and after-call outcome dialogs over phone dialer.',
+                      icon: Icons.layers_rounded,
+                      isGranted: widget.syncService.hasOverlayPermission,
+                      onRequest: () => widget.syncService.openOverlaySettings(),
+                    ),
+                  ],
                 ],
               ),
             ),

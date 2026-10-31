@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -77,19 +78,33 @@ class TelemetrySyncService extends ChangeNotifier {
   bool get hasStoragePermission => _permissions['storage'] == true || hasRecordingsFolderPermission || _permissions['recordings'] == true;
   bool get hasBatteryOptimizationExemption => _permissions['battery_unrestricted'] == true;
   bool get hasOverlayPermission => _permissions['overlay'] == true;
-  bool get hasEssentialPermissions => hasCallLogPermission && hasPhoneStatePermission;
+  bool get hasEssentialPermissions {
+    if (Platform.isIOS) {
+      return hasContactsPermission;
+    }
+    return hasCallLogPermission && hasPhoneStatePermission;
+  }
 
-  bool get hasAllSevenPermissions =>
-      hasCallLogPermission &&
-      hasPhoneStatePermission &&
-      hasContactsPermission &&
-      hasSmsPermission &&
-      hasWhatsAppAccessPermission &&
-      hasRecordingsFolderPermission &&
-      hasBatteryOptimizationExemption;
+  bool get hasAllSevenPermissions {
+    if (Platform.isIOS) {
+      return hasContactsPermission && hasNotificationPermission;
+    }
+    return hasCallLogPermission &&
+        hasPhoneStatePermission &&
+        hasContactsPermission &&
+        hasSmsPermission &&
+        hasWhatsAppAccessPermission &&
+        hasRecordingsFolderPermission &&
+        hasBatteryOptimizationExemption;
+  }
 
   List<String> get missingPermissionNames {
     final list = <String>[];
+    if (Platform.isIOS) {
+      if (!hasContactsPermission) list.add('Contacts');
+      if (!hasNotificationPermission) list.add('Notifications');
+      return list;
+    }
     if (!hasCallLogPermission) list.add('Call Log');
     if (!hasPhoneStatePermission) list.add('Phone State');
     if (!hasContactsPermission) list.add('Contacts');
