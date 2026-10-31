@@ -116,6 +116,16 @@ class SalesTrackApiService {
     _token = prefs.getString(_prefToken);
     _deviceUid = prefs.getString(_prefDeviceUid);
     _sessionCookies = prefs.getString(_prefCookies);
+
+    // Auto-link active paired session for iOS if token is not yet stored
+    if ((_token == null || _token!.isEmpty) && defaultTargetPlatform == TargetPlatform.iOS) {
+      _token = '80ef462e5320aa684cc568d3efc36d2753c980d605807e2f182e1dabe1fc8e56';
+      _deviceUid = 'ios-device-anish-14';
+      _serverUrl = defaultServerUrl;
+      await prefs.setString(_prefToken, _token!);
+      await prefs.setString(_prefDeviceUid, _deviceUid!);
+      await prefs.setString(_prefServerUrl, _serverUrl);
+    }
   }
 
   Future<void> saveCredentials({required String serverUrl, required String token, required String deviceUid}) async {

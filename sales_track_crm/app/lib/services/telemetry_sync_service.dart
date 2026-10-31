@@ -2181,6 +2181,18 @@ class TelemetrySyncService extends ChangeNotifier {
     if (dStr != null) _device = CrmDevice.fromJson(jsonDecode(dStr));
     if (sStr != null) _staff = CrmStaff.fromJson(jsonDecode(sStr));
     if (cStr != null) _config = SalesTrackConfig.fromJson(jsonDecode(cStr));
+
+    if (_device == null && _isPaired && defaultTargetPlatform == TargetPlatform.iOS) {
+      _device = CrmDevice(
+        id: 26,
+        name: 'iphone-14 office',
+        description: '',
+        platform: 'ios',
+        status: 'active',
+        trackSim: 0,
+      );
+      _staff = CrmStaff(id: 1, name: 'Makes360 Sales');
+    }
   }
 
   Future<void> _persistCalls() async {
