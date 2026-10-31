@@ -746,7 +746,8 @@ class SalesTrackApiService {
   // 10. OPEN CRM WEBVIEW SESSION
   /// Requests a one-time 60-second sign-in link to open the CRM portal directly inside the app.
   /// POST /webview
-  Future<SalesTrackApiResponse<Map<String, dynamic>>> openCrmSession() async {
+  /// Optional [page] parameter to open a specific CRM route (e.g. 'admin/leads', 'admin/mks_sales_track/whatsapp_messages')
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> openCrmSession({String? page}) async {
     if (!isPaired) {
       return SalesTrackApiResponse(
         success: false,
@@ -757,10 +758,15 @@ class SalesTrackApiService {
     }
     try {
       final endpoint = '$apiBaseUrl/webview';
+      final payload = <String, dynamic>{};
+      if (page != null && page.trim().isNotEmpty) {
+        payload['page'] = page.trim();
+      }
+
       final response = await http.post(
         Uri.parse(endpoint),
         headers: _buildHeaders(),
-        body: jsonEncode({}),
+        body: jsonEncode(payload),
       ).timeout(const Duration(seconds: 15));
 
       _saveCookiesFromResponse(response);

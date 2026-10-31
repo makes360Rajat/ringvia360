@@ -8,12 +8,14 @@ class CrmWebviewScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
   final bool isTabMode;
   final VoidCallback? onBackToSales;
+  final String? initialPage;
 
   const CrmWebviewScreen({
     super.key,
     required this.syncService,
     this.isTabMode = false,
     this.onBackToSales,
+    this.initialPage,
   });
 
   @override
@@ -37,7 +39,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     _initWebviewSession();
   }
 
-  Future<void> _initWebviewSession() async {
+  Future<void> _initWebviewSession([String? targetPage]) async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
@@ -46,7 +48,9 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
       _loadingProgress = 10;
     });
 
-    final res = await widget.syncService.api.openCrmSession();
+    final res = await widget.syncService.api.openCrmSession(
+      page: targetPage ?? widget.initialPage,
+    );
 
     if (!mounted) return;
 
@@ -531,3 +535,4 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     );
   }
 }
+
