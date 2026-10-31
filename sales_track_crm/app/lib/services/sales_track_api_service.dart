@@ -764,39 +764,53 @@ class SalesTrackApiService {
         payload['page'] = page.trim();
       }
 
-      debugPrint('[CRM API /webview] Requesting dynamic webview session from $endpoint (payload: $payload)');
+      final headers = _buildHeaders();
+      final jsonPayload = jsonEncode(payload);
+
+      debugPrint('==================== [CRM API REQUEST /webview] ====================');
+      debugPrint('HTTP METHOD   : POST');
+      debugPrint('ENDPOINT      : $endpoint');
+      debugPrint('HEADERS       : $headers');
+      debugPrint('PAYLOAD JSON  : $jsonPayload');
+      debugPrint('=====================================================================');
 
       final response = await http.post(
         Uri.parse(endpoint),
-        headers: _buildHeaders(),
-        body: jsonEncode(payload),
+        headers: headers,
+        body: jsonPayload,
       ).timeout(const Duration(seconds: 15));
 
       _saveCookiesFromResponse(response);
 
+      debugPrint('==================== [CRM API RESPONSE /webview] ===================');
+      debugPrint('HTTP STATUS   : ${response.statusCode}');
+      debugPrint('RESP HEADERS  : ${response.headers}');
+      debugPrint('RAW BODY      : ${response.body}');
+      debugPrint('=====================================================================');
+
       Map<String, dynamic> body = {};
       try {
         body = jsonDecode(response.body) as Map<String, dynamic>;
-      } catch (_) {}
-
-      debugPrint('[CRM API /webview] Server HTTP ${response.statusCode} response: $body');
+      } catch (e) {
+        debugPrint('[CRM API /webview] JSON parse error: $e');
+      }
 
       if (response.statusCode == 200 && body['success'] == true) {
         final dynamicUrl = body['url']?.toString();
         final dynamicPage = body['page']?.toString();
-        debugPrint('====================================================');
-        debugPrint('>>> [CRM API DYNAMIC WEBVIEW URL FROM CRM]');
-        debugPrint('>>> Dynamic URL: $dynamicUrl');
-        debugPrint('>>> Dynamic Start Page: $dynamicPage');
-        debugPrint('>>> Expires in: ${body['expires_in']}s');
-        debugPrint('====================================================');
+        debugPrint('=====================================================================');
+        debugPrint('>>> [CRM API DYNAMIC AUTHENTIC URL FROM CRM]');
+        debugPrint('>>> URL         : $dynamicUrl');
+        debugPrint('>>> PAGE        : $dynamicPage');
+        debugPrint('>>> EXPIRES IN  : ${body['expires_in']}s');
+        debugPrint('=====================================================================');
         return SalesTrackApiResponse(
           success: true,
           data: body,
           statusCode: response.statusCode,
         );
       } else {
-        debugPrint('>>> [CRM API /webview] Error from server: ${body['error']} - ${body['message']}');
+        debugPrint('>>> [CRM API /webview FAILED]: error=${body['error']}, message=${body['message']}');
         return SalesTrackApiResponse(
           success: false,
           error: body['error']?.toString() ?? 'webview_failed',

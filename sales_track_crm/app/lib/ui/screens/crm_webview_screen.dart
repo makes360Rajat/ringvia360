@@ -32,23 +32,12 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   bool _canGoForward = false;
   bool _isAutoLoginWorking = false;
 
+  String? _errorType;
+
   @override
   void initState() {
     super.initState();
     _initWebviewSession();
-  }
-
-  /// Resolves the URL dynamically from the CRM server URL and route.
-  /// If the target is already a complete URL returned by the CRM API, it is used directly.
-  /// No domain or page is hardcoded.
-  String _getDynamicUrl([String? target]) {
-    if (target != null && (target.startsWith('http://') || target.startsWith('https://'))) {
-      return target;
-    }
-    final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
-    final path = (target ?? widget.initialPage ?? widget.syncService.config.crmStartPage ?? 'admin')
-        .replaceAll(RegExp(r'^/+'), '');
-    return '$base/$path';
   }
 
   Future<void> _initWebviewSession([String? targetPage]) async {
@@ -56,11 +45,14 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _errorType = null;
       _loadingProgress = 15;
     });
 
     final requestedPage = targetPage ?? widget.initialPage ?? widget.syncService.config.crmStartPage;
+    debugPrint('=====================================================================');
     debugPrint('[CRM WebView] Requesting webview session for dynamic route: $requestedPage');
+    debugPrint('=====================================================================');
 
     final res = await widget.syncService.api.openCrmSession(
       page: requestedPage,
@@ -68,7 +60,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
     if (!mounted) return;
 
-    // 1. Check for the COMPLETE URL string directly coming from the CRM API
+    // 1. Extract the authentic URL directly from the CRM API response
     String? completeUrlFromCrm;
     if (res.data != null) {
       final rawUrl = res.data!['url']?.toString().trim();
@@ -84,51 +76,52 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
     if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
       _isAutoLoginWorking = true;
-      debugPrint('====================================================');
-      debugPrint('[CRM WebView] >>> OPENING COMPLETE URL STRING FROM CRM API:');
+      debugPrint('=====================================================================');
+      debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM URL (FROM CRM API, NOT FABRICATED):');
       debugPrint('>>> URL: $completeUrlFromCrm');
-      debugPrint('====================================================');
+      debugPrint('=====================================================================');
       _setupWebViewController(completeUrlFromCrm);
       return;
     }
 
-    // 2. If no complete URL in API response, use dynamic fallback URL
+    // 2. NO URL was returned by the CRM API (e.g. webview_disabled in CRM settings, admin blocked, or error)
+    // DO NOT fabricate any fake URL. Report the exact error from CRM API.
     _isAutoLoginWorking = false;
-    final dynamicFallbackUrl = _getDynamicUrl(res.data?['page']?.toString() ?? targetPage);
-    debugPrint('[CRM WebView] Fallback dynamic CRM URL from server: $dynamicFallbackUrl');
-    _setupWebViewController(dynamicFallbackUrl);
+    debugPrint('=====================================================================');
+    debugPrint('[CRM WebView] >>> CRM API DID NOT RETURN A WEBVIEW URL:');
+    debugPrint('>>> ERROR   : ${res.error}');
+    debugPrint('>>> MESSAGE : ${res.message}');
+    debugPrint('>>> STATUS  : ${res.statusCode}');
+    debugPrint('=====================================================================');
 
-    // If setting is disabled in CRM, inform the rep once via a subtle floating snackbar
-    if (res.error == 'webview_disabled') {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('CRM Auto-Sign-In is switched off in CRM settings. Browsing directly inside app.'),
-              duration: Duration(seconds: 4),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      });
-    } else if (res.error == 'webview_admin_blocked') {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Administrator account: browsing CRM directly inside app.'),
-              duration: Duration(seconds: 4),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      });
+    setState(() {
+      _isLoading = false;
+      _errorType = res.error;
+      _errorMessage = res.message ?? _buildUserFriendlyErrorMessage(res.error);
+    });
+  }
+
+  String _buildUserFriendlyErrorMessage(String? error) {
+    switch (error) {
+      case 'webview_disabled':
+        return 'Opening the CRM in the app is switched off in CRM settings.\n\nAsk your CRM Administrator to turn on "Open CRM in the App" under CallVia360 > Settings > Devices And App.';
+      case 'webview_admin_blocked':
+        return 'Administrator accounts open the CRM in a browser.\n\nAsk your CRM Administrator to enable "Also for Administrators" in CRM settings.';
+      case 'staff_inactive':
+        return 'Your CRM staff account is inactive. Please contact your CRM Administrator.';
+      case 'device_revoked':
+      case 'invalid_token':
+        return 'Device pairing was lost or revoked. Please pair the phone again.';
+      case 'update_required':
+        return 'An app update is required by the CRM server.';
+      default:
+        return 'CRM server did not return a webview URL. Please check server settings and retry.';
     }
   }
 
   void _setupWebViewController(String url) {
     final cleanUrl = url.trim();
-    debugPrint('[CRM WebView] >>> OPENING COMPLETE URL IN WEBVIEW: $cleanUrl');
+    debugPrint('[CRM WebView] >>> OPENING EXACT CRM URL IN WEBVIEW: $cleanUrl');
 
     if (_controller != null) {
       try {
@@ -262,16 +255,6 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     return true;
   }
 
-  void _loadCrmPage(String route) {
-    final fullUrl = _getDynamicUrl(route);
-    debugPrint('[CRM WebView] Navigating to dynamic route: $fullUrl');
-    if (_controller != null) {
-      _controller!.loadRequest(Uri.parse(fullUrl));
-    } else {
-      _setupWebViewController(fullUrl);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.stColors;
@@ -372,13 +355,13 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               ),
               onSelected: (val) {
                 if (val == 'dashboard') {
-                  _loadCrmPage('admin');
+                  _initWebviewSession('admin');
                 } else if (val == 'leads') {
-                  _loadCrmPage('admin/leads');
+                  _initWebviewSession('admin/leads');
                 } else if (val == 'calls') {
-                  _loadCrmPage('admin/mks_sales_track/calls');
+                  _initWebviewSession('admin/mks_sales_track/calls');
                 } else if (val == 'whatsapp') {
-                  _loadCrmPage('admin/mks_sales_track/whatsapp_messages');
+                  _initWebviewSession('admin/mks_sales_track/whatsapp_messages');
                 } else if (val == 'retry_auto_login') {
                   _initWebviewSession();
                 }
@@ -504,6 +487,17 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   Widget _buildErrorView(SalesTrackColors colors) {
+    final isDisabled = _errorType == 'webview_disabled';
+    final isAdminBlocked = _errorType == 'webview_admin_blocked';
+
+    final Color statusColor = (isDisabled || isAdminBlocked) ? colors.warning : colors.danger;
+    final IconData statusIcon = isDisabled
+        ? Icons.lock_outline_rounded
+        : (isAdminBlocked ? Icons.admin_panel_settings_rounded : Icons.cloud_off_rounded);
+    final String statusTitle = isDisabled
+        ? 'CRM In-App Portal Disabled'
+        : (isAdminBlocked ? 'CRM Administrator Account' : 'Connection Error');
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -529,17 +523,17 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                 height: 64,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: colors.danger.withOpacity(0.12),
+                  color: statusColor.withOpacity(0.12),
                 ),
                 child: Icon(
-                  Icons.cloud_off_rounded,
-                  color: colors.danger,
+                  statusIcon,
+                  color: statusColor,
                   size: 32,
                 ),
               ),
               const SizedBox(height: 18),
               Text(
-                'Connection Error',
+                statusTitle,
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
