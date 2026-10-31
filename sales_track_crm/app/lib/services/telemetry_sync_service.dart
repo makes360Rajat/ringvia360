@@ -227,16 +227,29 @@ class TelemetrySyncService extends ChangeNotifier {
     return null;
   }
 
-  Future<void> openWhatsAppChat(String number) async {
+  Future<void> openWhatsAppChat(String number, [String? name]) async {
     try {
-      await _platform.invokeMethod('launchWhatsAppChat', {'number': number});
+      await _platform.invokeMethod('launchWhatsAppChat', {'number': number, 'name': name ?? ''});
     } catch (_) {}
   }
 
-  Future<void> dialPhoneNumber(String number) async {
+  Future<void> dialPhoneNumber(String number, [String? name]) async {
     try {
-      await _platform.invokeMethod('dialPhoneNumber', {'number': number});
+      await _platform.invokeMethod('dialPhoneNumber', {'number': number, 'name': name ?? ''});
     } catch (_) {}
+  }
+
+  Future<bool> sendSms({required String number, String text = '', String? name}) async {
+    try {
+      final res = await _platform.invokeMethod('sendSms', {
+        'number': number,
+        'text': text,
+        'name': name ?? '',
+      });
+      return res == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<Uint8List?> getContactPhotoBytes({String? photoUri, String? phoneNumber}) async {

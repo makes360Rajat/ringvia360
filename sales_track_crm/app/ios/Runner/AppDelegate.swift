@@ -3,6 +3,8 @@ import UIKit
 import Contacts
 import AVFoundation
 import UserNotifications
+import CallKit
+import MessageUI
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -15,6 +17,7 @@ import UserNotifications
     if let registrar = self.registrar(forPlugin: "TelemetryBridgePlugin") {
       TelemetryBridgePlugin.register(with: registrar)
     }
+    CallKitObserver.shared.startObserving()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -23,9 +26,116 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "TelemetryBridgePlugin") {
       TelemetryBridgePlugin.register(with: registrar)
     }
+    CallKitObserver.shared.startObserving()
   }
 }
 
+// MARK: - CallKit Cellular Call Observer for iOS
+class CallKitObserver: NSObject, CXCallObserverDelegate {
+  static let shared = CallKitObserver()
+  private let observer = CXCallObserver()
+  private var activeCallStartTime: Date?
+  private var activeCallConnectTime: Date?
+  private var currentCallNumber: String = ""
+  private var currentCallName: String = ""
+  private var isObserving = false
+
+  func startObserving() {
+    guard !isObserving else { return }
+    isObserving = true
+    observer.setDelegate(self, queue: nil)
+  }
+
+  func setLastDialed(number: String, name: String) {
+    self.currentCallNumber = number
+    self.currentCallName = name
+  }
+
+  func callObserver(_ callObserver: CXCallObserver, callChanged call: CXCall) {
+    let now = Date()
+    let timestamp = Int(now.timeIntervalSince1970 * 1000)
+
+    if !call.hasConnected && !call.hasEnded {
+      // Call Ringing or Dialing
+      activeCallStartTime = now
+      let direction = call.isOutgoing ? "outgoing" : "incoming"
+      let eventType = call.isOutgoing ? "outgoing_call_dialing" : "incoming_call_ringing"
+
+      let resolvedNumber = currentCallNumber.isEmpty ? "Cellular Call" : currentCallNumber
+      let resolvedName = currentCallName.isEmpty ? (call.isOutgoing ? "Outgoing Call" : "Incoming Call") : currentCallName
+
+      TelemetryBridgePlugin.sendEvent([
+        "type": eventType,
+        "direction": direction,
+        "phoneNumber": resolvedNumber,
+        "contactName": resolvedName,
+        "time": timestamp
+      ])
+    } else if call.hasConnected && !call.hasEnded {
+      // Call Answered
+      activeCallConnectTime = now
+    } else if call.hasEnded {
+      // Call Disconnected
+      let duration: Int
+      if let connected = activeCallConnectTime {
+        duration = max(1, Int(now.timeIntervalSince(connected)))
+      } else {
+        duration = 0
+      }
+
+      let direction = call.isOutgoing ? "outgoing" : "incoming"
+      let resolvedNumber = currentCallNumber.isEmpty ? "Cellular Call" : currentCallNumber
+      let resolvedName = currentCallName.isEmpty ? (call.isOutgoing ? "Outgoing Client" : "Incoming Client") : currentCallName
+
+      TelemetryBridgePlugin.sendEvent([
+        "type": "call_completed",
+        "uid": "ios-call-\(timestamp)",
+        "kind": "call",
+        "time": timestamp,
+        "direction": direction,
+        "number": resolvedNumber,
+        "name": resolvedName,
+        "duration": duration,
+        "recording": false,
+        "source": "auto"
+      ])
+
+      // Reset for next call
+      activeCallStartTime = nil
+      activeCallConnectTime = nil
+      currentCallNumber = ""
+      currentCallName = ""
+    }
+  }
+}
+
+// MARK: - SMS Compose Delegate for iOS
+class SMSDelegate: NSObject, MFMessageComposeViewControllerDelegate {
+  static let shared = SMSDelegate()
+  var lastRecipient: String = ""
+  var lastRecipientName: String = ""
+  var lastText: String = ""
+
+  func messageComposeViewController(_ controller: MFMessageComposeViewController, didFinishWith result: MessageComposeResult) {
+    controller.dismiss(animated: true, completion: nil)
+    if result == .sent {
+      let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+      TelemetryBridgePlugin.sendEvent([
+        "type": "sms",
+        "uid": "ios-sms-\(timestamp)",
+        "kind": "sms",
+        "time": timestamp,
+        "direction": "outgoing",
+        "number": lastRecipient,
+        "name": lastRecipientName.isEmpty ? "SMS Contact" : lastRecipientName,
+        "text": lastText.isEmpty ? "SMS interaction sent from iOS" : lastText,
+        "source": "auto"
+      ])
+    }
+  }
+}
+
+// MARK: - Telemetry Bridge Plugin
 public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
   private static var eventSink: FlutterEventSink?
 
@@ -231,7 +341,23 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     case "launchWhatsAppChat":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
+      let name = (call.arguments as? [String: Any])?["name"] as? String ?? "WhatsApp Contact"
       let clean = rawNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+      let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+
+      // Emit real-time WhatsApp interaction event!
+      TelemetryBridgePlugin.sendEvent([
+        "type": "whatsapp_message",
+        "uid": "ios-wa-\(timestamp)",
+        "kind": "whatsapp_message",
+        "time": timestamp,
+        "direction": "outgoing",
+        "number": clean.isEmpty ? rawNumber : clean,
+        "name": name,
+        "text": "Initiated WhatsApp interaction",
+        "source": "auto"
+      ])
+
       DispatchQueue.main.async {
         if let appUrl = URL(string: "whatsapp://send?phone=\(clean)"), UIApplication.shared.canOpenURL(appUrl) {
           UIApplication.shared.open(appUrl, options: [:], completionHandler: nil)
@@ -246,9 +372,43 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     case "dialPhoneNumber":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
+      let name = (call.arguments as? [String: Any])?["name"] as? String ?? ""
       let clean = rawNumber.components(separatedBy: CharacterSet(charactersIn: "+0123456789").inverted).joined()
+
+      CallKitObserver.shared.setLastDialed(number: clean, name: name)
+
       DispatchQueue.main.async {
         if let url = URL(string: "tel://\(clean)") {
+          UIApplication.shared.open(url, options: [:], completionHandler: nil)
+          result(true)
+        } else {
+          result(false)
+        }
+      }
+
+    case "sendSms":
+      let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
+      let text = (call.arguments as? [String: Any])?["text"] as? String ?? ""
+      let name = (call.arguments as? [String: Any])?["name"] as? String ?? "Client"
+      let clean = rawNumber.components(separatedBy: CharacterSet(charactersIn: "+0123456789").inverted).joined()
+
+      DispatchQueue.main.async {
+        if MFMessageComposeViewController.canSendText() {
+          let composeVC = MFMessageComposeViewController()
+          composeVC.recipients = [clean]
+          composeVC.body = text
+          composeVC.messageComposeDelegate = SMSDelegate.shared
+          SMSDelegate.shared.lastRecipient = clean
+          SMSDelegate.shared.lastRecipientName = name
+          SMSDelegate.shared.lastText = text
+
+          if let rootVC = UIApplication.shared.windows.first?.rootViewController {
+            rootVC.present(composeVC, animated: true, completion: nil)
+            result(true)
+          } else {
+            result(false)
+          }
+        } else if let url = URL(string: "sms:\(clean)") {
           UIApplication.shared.open(url, options: [:], completionHandler: nil)
           result(true)
         } else {
