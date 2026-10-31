@@ -30,7 +30,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   String _pageTitle = 'CRM Portal';
   bool _canGoBack = false;
   bool _canGoForward = false;
-  bool _isAutoLoginWorking = false;
+  bool _isRequestingSession = false;
 
   String? _errorType;
 
@@ -58,7 +58,9 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   Future<void> _initWebviewSession([String? targetPage]) async {
-    if (!mounted) return;
+    if (!mounted || _isRequestingSession) return;
+    _isRequestingSession = true;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -66,89 +68,98 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
       _loadingProgress = 15;
     });
 
-    final requestedPage = targetPage ?? widget.initialPage ?? widget.syncService.config.crmStartPage;
-    debugPrint('=====================================================================');
-    debugPrint('[CRM WebView] Requesting webview session for dynamic route: $requestedPage');
-    debugPrint('=====================================================================');
-
-    final res = await widget.syncService.api.openCrmSession(
-      page: requestedPage,
-    );
-
-    if (!mounted) return;
-
-    // 1. Extract the authentic URL directly from the CRM API response
-    String? completeUrlFromCrm;
-    if (res.data != null) {
-      final rawUrl = res.data!['url']?.toString().trim();
-      if (rawUrl != null && rawUrl.isNotEmpty) {
-        completeUrlFromCrm = _resolveFullUrl(rawUrl);
-      } else {
-        final rawPage = res.data!['page']?.toString().trim();
-        if (rawPage != null && rawPage.isNotEmpty) {
-          completeUrlFromCrm = _resolveFullUrl(rawPage);
+    try {
+      // Do not pass /admin/authentication as requested page: let CRM open its configured start page!
+      String? requestedPage = targetPage ?? widget.initialPage;
+      if (requestedPage != null) {
+        final clean = requestedPage.trim();
+        if (clean.isEmpty || clean.contains('admin/authentication')) {
+          requestedPage = null;
         }
       }
-    }
-
-    if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
-      _isAutoLoginWorking = true;
-      debugPrint('=====================================================================');
-      debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM URL (FROM CRM API):');
-      debugPrint('>>> URL: $completeUrlFromCrm');
-      debugPrint('=====================================================================');
-      _setupWebViewController(completeUrlFromCrm);
-      return;
-    }
-
-    // 2. If the CRM API returned 'webview_admin_blocked' or 'webview_disabled':
-    // Directly open the CRM web portal in this in-app webview so the user is never blocked!
-    if (res.error == 'webview_admin_blocked' || res.error == 'webview_disabled') {
-      _isAutoLoginWorking = false;
-      final rawTarget = res.data?['page']?.toString() ??
-          targetPage ??
-          widget.initialPage ??
-          widget.syncService.config.crmStartPage;
-
-      final directCrmUrl = _resolveFullUrl(rawTarget);
 
       debugPrint('=====================================================================');
-      debugPrint('[CRM WebView] >>> ${res.error}: DIRECTLY OPENING CRM IN APP WEBVIEW:');
-      debugPrint('>>> URL: $directCrmUrl');
+      debugPrint('[CRM WebView] Requesting webview session for dynamic route: $requestedPage');
       debugPrint('=====================================================================');
 
-      _setupWebViewController(directCrmUrl);
+      final res = await widget.syncService.api.openCrmSession(
+        page: requestedPage,
+      );
 
-      if (res.error == 'webview_admin_blocked') {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Admin Account: Opened CRM in app. (To enable 1-click token login, turn on "Also for Administrators" in CRM Settings).'),
-                duration: Duration(seconds: 5),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
+      if (!mounted) return;
+
+      // 1. Extract the authentic URL directly from the CRM API response
+      String? completeUrlFromCrm;
+      if (res.data != null) {
+        final rawUrl = res.data!['url']?.toString().trim();
+        if (rawUrl != null && rawUrl.isNotEmpty) {
+          completeUrlFromCrm = _resolveFullUrl(rawUrl);
+        } else {
+          final rawPage = res.data!['page']?.toString().trim();
+          if (rawPage != null && rawPage.isNotEmpty) {
+            completeUrlFromCrm = _resolveFullUrl(rawPage);
           }
-        });
+        }
       }
-      return;
+
+      if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
+        debugPrint('=====================================================================');
+        debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM URL (FROM CRM API):');
+        debugPrint('>>> URL: $completeUrlFromCrm');
+        debugPrint('=====================================================================');
+        _setupWebViewController(completeUrlFromCrm);
+        return;
+      }
+
+      // 2. If the CRM API returned 'webview_admin_blocked' or 'webview_disabled':
+      // Directly open the CRM web portal in this in-app webview so the user is never blocked!
+      if (res.error == 'webview_admin_blocked' || res.error == 'webview_disabled') {
+        final rawTarget = res.data?['page']?.toString() ??
+            targetPage ??
+            widget.initialPage ??
+            widget.syncService.config.crmStartPage;
+
+        final directCrmUrl = _resolveFullUrl(rawTarget);
+
+        debugPrint('=====================================================================');
+        debugPrint('[CRM WebView] >>> ${res.error}: DIRECTLY OPENING CRM IN APP WEBVIEW:');
+        debugPrint('>>> URL: $directCrmUrl');
+        debugPrint('=====================================================================');
+
+        _setupWebViewController(directCrmUrl);
+
+        if (res.error == 'webview_admin_blocked') {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Admin Account: Opened CRM in app. (To enable 1-click token login, turn on "Also for Administrators" in CRM Settings).'),
+                  duration: Duration(seconds: 5),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          });
+        }
+        return;
+      }
+
+      // 3. For true connection or revoked errors: report error state
+      debugPrint('=====================================================================');
+      debugPrint('[CRM WebView] >>> CRM API DID NOT RETURN A WEBVIEW URL:');
+      debugPrint('>>> ERROR   : ${res.error}');
+      debugPrint('>>> MESSAGE : ${res.message}');
+      debugPrint('>>> STATUS  : ${res.statusCode}');
+      debugPrint('=====================================================================');
+
+      setState(() {
+        _isLoading = false;
+        _errorType = res.error;
+        _errorMessage = res.message ?? _buildUserFriendlyErrorMessage(res.error);
+      });
+    } finally {
+      _isRequestingSession = false;
     }
-
-    // 3. For true connection or revoked errors: report error state
-    _isAutoLoginWorking = false;
-    debugPrint('=====================================================================');
-    debugPrint('[CRM WebView] >>> CRM API DID NOT RETURN A WEBVIEW URL:');
-    debugPrint('>>> ERROR   : ${res.error}');
-    debugPrint('>>> MESSAGE : ${res.message}');
-    debugPrint('>>> STATUS  : ${res.statusCode}');
-    debugPrint('=====================================================================');
-
-    setState(() {
-      _isLoading = false;
-      _errorType = res.error;
-      _errorMessage = res.message ?? _buildUserFriendlyErrorMessage(res.error);
-    });
   }
 
   String _buildUserFriendlyErrorMessage(String? error) {
@@ -190,6 +201,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     try {
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setUserAgent('Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36')
         ..setNavigationDelegate(
           NavigationDelegate(
             onProgress: (progress) {
@@ -248,14 +260,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                 return NavigationDecision.prevent;
               }
 
-              // 2. If session expired & auto-login is active on server, try auto-login once
-              if (destUrl.contains('/admin/authentication') && _isAutoLoginWorking) {
-                _isAutoLoginWorking = false; // avoid loop
-                _initWebviewSession();
-                return NavigationDecision.prevent;
-              }
-
-              // 3. Keep all web browsing strictly inside the in-app webview
+              // 2. Keep all web browsing strictly inside the in-app webview without blocking
               return NavigationDecision.navigate;
             },
           ),
