@@ -175,7 +175,7 @@ void main() {
     });
 
     test('SalesTrackApiService normalizes server URL correctly', () {
-      expect(SalesTrackApiService.defaultServerUrl, equals(''));
+      expect(SalesTrackApiService.defaultServerUrl, equals('https://crm.make360.in'));
       expect(SalesTrackApiService.normalizeServerUrl('crm.example.com'), equals('https://crm.example.com'));
       expect(SalesTrackApiService.normalizeServerUrl('https://crm.example.com/admin/'), equals('https://crm.example.com'));
     });

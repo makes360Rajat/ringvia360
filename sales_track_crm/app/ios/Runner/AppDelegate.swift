@@ -159,6 +159,37 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     }
   }
 
+  private func sendPermissionsUpdate() {
+    var contactsGranted = false
+    if #available(iOS 9.0, *) {
+      contactsGranted = CNContactStore.authorizationStatus(for: .contacts) == .authorized
+    }
+    let micGranted = (AVAudioSession.sharedInstance().recordPermission == .granted)
+    UNUserNotificationCenter.current().getNotificationSettings { settings in
+      let notifGranted = (settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional)
+      let status: [String: Bool] = [
+        "contacts": contactsGranted,
+        "microphone": micGranted,
+        "record_audio": micGranted,
+        "recordings_folder": micGranted,
+        "manage_storage": micGranted,
+        "storage": micGranted,
+        "notifications": notifGranted,
+        "whatsapp_access": notifGranted,
+        "call_log": true,
+        "phone_state": true,
+        "sms": true,
+        "battery_optimization": true,
+        "battery_unrestricted": true,
+        "overlay": true
+      ]
+      TelemetryBridgePlugin.sendEvent([
+        "type": "permissions_updated",
+        "permissions": status
+      ])
+    }
+  }
+
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
 
@@ -166,6 +197,7 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       UIDevice.current.isBatteryMonitoringEnabled = true
       let rawBattery = UIDevice.current.batteryLevel
       let battery = rawBattery >= 0 ? Int(rawBattery * 100) : 85
+      let isCharging = UIDevice.current.batteryState == .charging || UIDevice.current.batteryState == .full
 
       let defaults = UserDefaults.standard
       var deviceUid = defaults.string(forKey: "device_uid")
@@ -174,18 +206,31 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         defaults.set(deviceUid, forKey: "device_uid")
       }
 
+      let appVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
+      let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "3"
+      let osVer = UIDevice.current.systemVersion
+
       let info: [String: Any] = [
+        "uid": deviceUid!,
         "deviceUid": deviceUid!,
-        "model": UIDevice.current.model,
+        "platform": "ios",
         "manufacturer": "Apple",
         "brand": "Apple",
-        "osVersion": UIDevice.current.systemVersion,
-        "sdkInt": Int(UIDevice.current.systemVersion.split(separator: ".").first ?? "17") ?? 17,
-        "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2",
-        "appBuild": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "3",
+        "model": UIDevice.current.model,
+        "os_version": osVer,
+        "osVersion": osVer,
+        "sdkInt": Int(osVer.split(separator: ".").first ?? "17") ?? 17,
+        "app_version": appVer,
+        "appVersion": appVer,
+        "appBuild": appBuild,
         "batteryPercent": battery,
+        "charging": isCharging,
+        "network": "wifi",
+        "batteryUnrestricted": true,
         "isBatteryUnrestricted": true,
-        "networkType": "wifi",
+        "sims": [
+          ["slot": 1, "label": "Primary eSIM/SIM"]
+        ],
         "hasCallLogPermission": true,
         "hasSmsPermission": true,
         "hasNotificationListener": true
@@ -227,17 +272,39 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       }
 
     case "requestAllPermissions":
+      var anyDenied = false
       if #available(iOS 9.0, *) {
-        if CNContactStore.authorizationStatus(for: .contacts) == .notDetermined {
-          CNContactStore().requestAccess(for: .contacts) { _, _ in }
+        let cStatus = CNContactStore.authorizationStatus(for: .contacts)
+        if cStatus == .notDetermined {
+          CNContactStore().requestAccess(for: .contacts) { _, _ in
+            self.sendPermissionsUpdate()
+          }
+        } else if cStatus == .denied || cStatus == .restricted {
+          anyDenied = true
         }
       }
-      if AVAudioSession.sharedInstance().recordPermission == .undetermined {
-        AVAudioSession.sharedInstance().requestRecordPermission { _ in }
+      let micStatus = AVAudioSession.sharedInstance().recordPermission
+      if micStatus == .undetermined {
+        AVAudioSession.sharedInstance().requestRecordPermission { _ in
+          self.sendPermissionsUpdate()
+        }
+      } else if micStatus == .denied {
+        anyDenied = true
       }
       UNUserNotificationCenter.current().getNotificationSettings { settings in
         if settings.authorizationStatus == .notDetermined {
-          UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+          UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
+            self.sendPermissionsUpdate()
+          }
+        } else if settings.authorizationStatus == .denied {
+          anyDenied = true
+        }
+        if anyDenied {
+          DispatchQueue.main.async {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+              UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+          }
         }
       }
       result(true)
@@ -252,7 +319,10 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
           let status = CNContactStore.authorizationStatus(for: .contacts)
           if status == .notDetermined {
             CNContactStore().requestAccess(for: .contacts) { granted, _ in
-              DispatchQueue.main.async { result(granted) }
+              DispatchQueue.main.async {
+                self.sendPermissionsUpdate()
+                result(granted)
+              }
             }
           } else if status == .authorized {
             result(true)
@@ -273,7 +343,10 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         let status = AVAudioSession.sharedInstance().recordPermission
         if status == .undetermined {
           AVAudioSession.sharedInstance().requestRecordPermission { granted in
-            DispatchQueue.main.async { result(granted) }
+            DispatchQueue.main.async {
+              self.sendPermissionsUpdate()
+              result(granted)
+            }
           }
         } else if status == .granted {
           result(true)
@@ -290,7 +363,10 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         UNUserNotificationCenter.current().getNotificationSettings { settings in
           if settings.authorizationStatus == .notDetermined {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
-              DispatchQueue.main.async { result(granted) }
+              DispatchQueue.main.async {
+                self.sendPermissionsUpdate()
+                result(granted)
+              }
             }
           } else if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
             DispatchQueue.main.async { result(true) }
