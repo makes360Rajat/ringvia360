@@ -13,10 +13,6 @@ import MessageUI
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    if let registrar = self.registrar(forPlugin: "TelemetryBridgePlugin") {
-      TelemetryBridgePlugin.register(with: registrar)
-    }
     CallKitObserver.shared.startObserving()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -26,7 +22,6 @@ import MessageUI
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "TelemetryBridgePlugin") {
       TelemetryBridgePlugin.register(with: registrar)
     }
-    CallKitObserver.shared.startObserving()
   }
 }
 
@@ -444,6 +439,9 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
           }
         }
       }
+
+    case "fetchDeviceCallLogs", "fetchDeviceSms", "fetchLocalCallRecordings", "fetchActiveWhatsAppNotifications":
+      result([])
 
     case "pauseAudio", "resumeAudio", "stopAudio", "seekAudio":
       result(true)
