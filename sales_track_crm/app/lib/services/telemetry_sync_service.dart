@@ -327,6 +327,8 @@ class TelemetrySyncService extends ChangeNotifier {
             await syncDeviceSms();
           }
           await scanLocalRecordings();
+          await syncActiveWhatsAppNotifications();
+          await syncServerEvents();
           await fetchCallLists();
           await syncNow();
         } catch (e) {
@@ -1209,7 +1211,8 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> syncDeviceCallLogs() async {
     if (!hasCallLogPermission) return;
     try {
-      final rawLogs = await _platform.invokeListMethod<Map<dynamic, dynamic>>('fetchDeviceCallLogs');
+      final dynamic raw = await _platform.invokeMethod('fetchDeviceCallLogs');
+      final rawLogs = (raw as List?)?.whereType<Map>().toList();
       if (rawLogs != null && rawLogs.isNotEmpty) {
         int newCount = 0;
 
@@ -1353,7 +1356,8 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> syncDeviceSms() async {
     if (!hasSmsPermission) return;
     try {
-      final rawSms = await _platform.invokeListMethod<Map<dynamic, dynamic>>('fetchDeviceSms');
+      final dynamic raw = await _platform.invokeMethod('fetchDeviceSms');
+      final rawSms = (raw as List?)?.whereType<Map>().toList();
       if (rawSms != null && rawSms.isNotEmpty) {
         for (final item in rawSms) {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
@@ -1391,7 +1395,8 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> syncActiveWhatsAppNotifications() async {
     try {
-      final rawList = await _platform.invokeListMethod<Map<dynamic, dynamic>>('fetchActiveWhatsAppNotifications');
+      final dynamic raw = await _platform.invokeMethod('fetchActiveWhatsAppNotifications');
+      final rawList = (raw as List?)?.whereType<Map>().toList();
       if (rawList != null && rawList.isNotEmpty) {
         int newCount = 0;
         for (final item in rawList) {
@@ -1447,6 +1452,67 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
+  Future<void> syncServerEvents() async {
+    if (!_isPaired) return;
+    try {
+      final res = await api.fetchEvents(limit: 100);
+      if (res.success && res.data != null) {
+        final rawEvents = res.data!['events'] as List? ?? [];
+        if (rawEvents.isNotEmpty) {
+          for (final raw in rawEvents) {
+            if (raw is Map) {
+              final ev = SalesTrackEvent.fromJson(Map<String, dynamic>.from(raw));
+              ev.syncStatus = 'synced';
+              if (ev.kind == 'call') {
+                final idx = _calls.indexWhere((c) => isSameCall(c, ev) || c.uid == ev.uid);
+                if (idx >= 0) {
+                  _calls[idx] = ev;
+                } else {
+                  _calls.add(ev);
+                }
+              } else if (ev.kind == 'sms') {
+                final idx = _smsList.indexWhere((s) => isSameSms(s, ev) || s.uid == ev.uid);
+                if (idx >= 0) {
+                  _smsList[idx] = ev;
+                } else {
+                  _smsList.add(ev);
+                }
+              } else if (ev.kind == 'whatsapp_call' || ev.kind == 'whatsapp_message') {
+                final idx = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, ev) || w.uid == ev.uid);
+                if (idx >= 0) {
+                  _whatsappEvents[idx] = ev;
+                } else {
+                  _whatsappEvents.add(ev);
+                }
+              }
+            }
+          }
+          final cleanCalls = dedupCallsList(_calls);
+          _calls.clear();
+          _calls.addAll(cleanCalls);
+
+          final cleanSms = dedupSmsList(_smsList);
+          _smsList.clear();
+          _smsList.addAll(cleanSms);
+
+          final cleanWa = dedupWhatsAppList(_whatsappEvents);
+          _whatsappEvents.clear();
+          _whatsappEvents.addAll(cleanWa);
+
+          await LocalDatabaseService.instance.saveEvents(_calls);
+          await LocalDatabaseService.instance.saveEvents(_smsList);
+          await LocalDatabaseService.instance.saveEvents(_whatsappEvents);
+          await _persistCalls();
+          await _persistSms();
+          await _persistWhatsApp();
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error syncing server events: $e');
+    }
+  }
+
   // Combined one-tap sync for UI refresh button
   Future<void> syncAllLocalAndRemote() async {
     if (_isSyncing) return;
@@ -1477,6 +1543,7 @@ class TelemetrySyncService extends ChangeNotifier {
       _syncProgressMessage = 'Checking WhatsApp notifications...';
       notifyListeners();
       await syncActiveWhatsAppNotifications();
+      await syncServerEvents();
 
       _syncProgress = 0.55;
       _syncProgressMessage = 'Scanning call audio recordings...';
@@ -2366,6 +2433,7 @@ class TelemetrySyncService extends ChangeNotifier {
       _syncProgressMessage = 'Checking WhatsApp notifications...';
       notifyListeners();
       await syncActiveWhatsAppNotifications();
+      await syncServerEvents();
 
       _statusMessage = 'Refreshed ${_calls.length} calls & ${_localRecordings.length} recordings';
       _syncProgress = 1.0;

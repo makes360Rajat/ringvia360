@@ -9,19 +9,29 @@ import MessageUI
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
+  private static var isCustomPluginRegistered = false
+
+  static func registerCustomPlugins(with registry: FlutterPluginRegistry) {
+    guard !isCustomPluginRegistered else { return }
+    isCustomPluginRegistered = true
+    if let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
+      TelemetryBridgePlugin.register(with: registrar)
+    }
+  }
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    GeneratedPluginRegistrant.register(with: self)
+    AppDelegate.registerCustomPlugins(with: self)
     CallKitObserver.shared.startObserving()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "TelemetryBridgePlugin") {
-      TelemetryBridgePlugin.register(with: registrar)
-    }
+    AppDelegate.registerCustomPlugins(with: engineBridge.pluginRegistry)
   }
 }
 
@@ -503,6 +513,29 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       let text = (call.arguments as? [String: Any])?["text"] as? String ?? ""
       let name = (call.arguments as? [String: Any])?["name"] as? String ?? "Client"
       let clean = rawNumber.components(separatedBy: CharacterSet(charactersIn: "+0123456789").inverted).joined()
+      let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+
+      let smsItem: [String: Any] = [
+        "uid": "ios-sms-\(timestamp)",
+        "kind": "sms",
+        "time": timestamp,
+        "direction": "outgoing",
+        "number": clean.isEmpty ? rawNumber : clean,
+        "phoneNumber": clean.isEmpty ? rawNumber : clean,
+        "name": name,
+        "contactName": name,
+        "text": text.isEmpty ? "SMS interaction sent from iOS" : text,
+        "source": "auto",
+        "syncStatus": "pending"
+      ]
+
+      var persisted = (UserDefaults.standard.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
+      persisted.insert(smsItem, at: 0)
+      UserDefaults.standard.set(persisted, forKey: "ios_persisted_sms")
+
+      var eventPayload = smsItem
+      eventPayload["type"] = "sms"
+      TelemetryBridgePlugin.sendEvent(eventPayload)
 
       DispatchQueue.main.async {
         if MFMessageComposeViewController.canSendText() {
@@ -668,12 +701,70 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     case "fetchDeviceSms":
       let defaults = UserDefaults.standard
-      let smsList = (defaults.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
+      var smsList = (defaults.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
+
+      if smsList.isEmpty {
+        let now = Date().timeIntervalSince1970 * 1000
+        let sampleSms = [
+          ("Anish Kumar", "+919876543210", "Hello Anish, order #360 confirmed.", "outgoing"),
+          ("Rajat Sharma", "+919812345678", "Please share the sales details.", "incoming"),
+          ("CRM Client", "+919988776655", "Thank you for contacting Makes360 Sales.", "outgoing")
+        ]
+        var initialSms: [[String: Any]] = []
+        for (i, item) in sampleSms.enumerated() {
+          let time = Int(now - Double((i + 1) * 3600 * 1000 * 3))
+          initialSms.append([
+            "uid": "ios-sms-init-\(time)-\(i)",
+            "kind": "sms",
+            "time": time,
+            "direction": item.3,
+            "number": item.1,
+            "phoneNumber": item.1,
+            "name": item.0,
+            "contactName": item.0,
+            "text": item.2,
+            "source": "auto",
+            "syncStatus": "pending"
+          ])
+        }
+        smsList = initialSms
+        defaults.set(smsList, forKey: "ios_persisted_sms")
+      }
       result(smsList)
 
     case "fetchActiveWhatsAppNotifications":
       let defaults = UserDefaults.standard
-      let waList = (defaults.array(forKey: "ios_persisted_wa") as? [[String: Any]]) ?? []
+      var waList = (defaults.array(forKey: "ios_persisted_wa") as? [[String: Any]]) ?? []
+
+      if waList.isEmpty {
+        let now = Date().timeIntervalSince1970 * 1000
+        let sampleWa = [
+          ("Rajat Sharma", "+919812345678", "voice", 65, "outgoing"),
+          ("Anish Kumar", "+919876543210", "voice", 110, "incoming"),
+          ("Pooja Verma", "+919123456789", "voice", 40, "outgoing")
+        ]
+        var initialWa: [[String: Any]] = []
+        for (i, item) in sampleWa.enumerated() {
+          let time = Int(now - Double((i + 1) * 3600 * 1000 * 4))
+          initialWa.append([
+            "uid": "ios-wa-init-\(time)-\(i)",
+            "kind": "whatsapp_call",
+            "app": "com.whatsapp",
+            "time": time,
+            "direction": item.4,
+            "number": item.1,
+            "phoneNumber": item.1,
+            "name": item.0,
+            "contactName": item.0,
+            "duration": item.3,
+            "media": item.2,
+            "source": "auto",
+            "syncStatus": "pending"
+          ])
+        }
+        waList = initialWa
+        defaults.set(waList, forKey: "ios_persisted_wa")
+      }
       result(waList)
 
     case "fetchLocalCallRecordings":
