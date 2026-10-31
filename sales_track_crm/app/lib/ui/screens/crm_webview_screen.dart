@@ -38,10 +38,17 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     _initWebviewSession();
   }
 
-  String _getFallbackUrl([String? page]) {
+  /// Resolves the URL dynamically from the CRM server URL and route.
+  /// If the target is already a complete URL returned by the CRM API, it is used directly.
+  /// No domain or page is hardcoded.
+  String _getDynamicUrl([String? target]) {
+    if (target != null && (target.startsWith('http://') || target.startsWith('https://'))) {
+      return target;
+    }
     final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
-    final target = (page ?? widget.initialPage ?? 'admin').replaceAll(RegExp(r'^/+'), '');
-    return '$base/$target';
+    final path = (target ?? widget.initialPage ?? widget.syncService.config.crmStartPage ?? 'admin')
+        .replaceAll(RegExp(r'^/+'), '');
+    return '$base/$path';
   }
 
   Future<void> _initWebviewSession([String? targetPage]) async {
@@ -52,14 +59,24 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
       _loadingProgress = 15;
     });
 
+    final requestedPage = targetPage ?? widget.initialPage ?? widget.syncService.config.crmStartPage;
+    debugPrint('[CRM WebView] Requesting webview session for dynamic route: $requestedPage');
+
     final res = await widget.syncService.api.openCrmSession(
-      page: targetPage ?? widget.initialPage,
+      page: requestedPage,
     );
 
     if (!mounted) return;
 
     if (res.success && res.data != null && res.data!['url'] != null) {
       final sessionUrl = res.data!['url'].toString();
+      final pageUrl = res.data?['page']?.toString();
+      debugPrint('====================================================');
+      debugPrint('[CRM WebView] DYNAMIC ONE-TIME SIGN-IN URL: $sessionUrl');
+      if (pageUrl != null) {
+        debugPrint('[CRM WebView] DYNAMIC START PAGE: $pageUrl');
+      }
+      debugPrint('====================================================');
       if (sessionUrl.isNotEmpty) {
         _isAutoLoginWorking = true;
         _setupWebViewController(sessionUrl);
@@ -69,10 +86,11 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
     // If auto-login fails (e.g. webview_disabled in CRM settings, admin blocked, etc.)
     // DO NOT block the user or send to external browser!
-    // Fall back to loading the CRM portal directly inside this in-app webview.
+    // Fall back to loading the dynamic CRM URL directly inside this in-app webview.
     _isAutoLoginWorking = false;
-    final directUrl = _getFallbackUrl(targetPage);
-    _setupWebViewController(directUrl);
+    final dynamicFallbackUrl = _getDynamicUrl(res.data?['page']?.toString() ?? targetPage);
+    debugPrint('[CRM WebView] Fallback dynamic CRM URL from server: $dynamicFallbackUrl');
+    _setupWebViewController(dynamicFallbackUrl);
 
     // If setting is disabled in CRM, inform the rep once via a subtle floating snackbar
     if (res.error == 'webview_disabled') {
@@ -103,6 +121,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   void _setupWebViewController(String url) {
+    debugPrint('[CRM WebView] Initializing WebViewController with dynamic URL: $url');
     try {
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -120,6 +139,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               }
             },
             onPageStarted: (pageUrl) {
+              debugPrint('[CRM WebView] Page started: $pageUrl');
               if (mounted) {
                 setState(() {
                   _isLoading = true;
@@ -129,6 +149,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               }
             },
             onPageFinished: (pageUrl) {
+              debugPrint('[CRM WebView] Page finished loading: $pageUrl');
               if (mounted) {
                 setState(() {
                   _isLoading = false;
@@ -142,6 +163,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               if (error.errorCode == -999 || error.description.contains('net::ERR_ABORTED')) {
                 return;
               }
+              debugPrint('[CRM WebView] WebResourceError: ${error.errorCode} - ${error.description}');
               if (mounted && _controller != null) {
                 setState(() {
                   _isLoading = false;
@@ -153,6 +175,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
             },
             onNavigationRequest: (NavigationRequest request) {
               final destUrl = request.url;
+              debugPrint('[CRM WebView] Navigation request: $destUrl');
 
               // 1. Non-web intents (tel:, mailto:, whatsapp:, intent:, geo:) -> open in native apps
               if (!destUrl.startsWith('http://') && !destUrl.startsWith('https://')) {
@@ -179,6 +202,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
         _currentUrl = url;
       });
     } catch (e) {
+      debugPrint('[CRM WebView] Error initializing webview: $e');
       setState(() {
         _isLoading = false;
         _errorMessage = 'Could not initialize in-app webview: $e';
@@ -217,7 +241,8 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   void _loadCrmPage(String route) {
-    final fullUrl = _getFallbackUrl(route);
+    final fullUrl = _getDynamicUrl(route);
+    debugPrint('[CRM WebView] Navigating to dynamic route: $fullUrl');
     if (_controller != null) {
       _controller!.loadRequest(Uri.parse(fullUrl));
     } else {

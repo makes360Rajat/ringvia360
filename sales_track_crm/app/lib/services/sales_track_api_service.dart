@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sales_track_models.dart';
@@ -763,6 +764,8 @@ class SalesTrackApiService {
         payload['page'] = page.trim();
       }
 
+      debugPrint('[CRM API /webview] Requesting dynamic webview session from $endpoint (payload: $payload)');
+
       final response = await http.post(
         Uri.parse(endpoint),
         headers: _buildHeaders(),
@@ -776,13 +779,24 @@ class SalesTrackApiService {
         body = jsonDecode(response.body) as Map<String, dynamic>;
       } catch (_) {}
 
+      debugPrint('[CRM API /webview] Server HTTP ${response.statusCode} response: $body');
+
       if (response.statusCode == 200 && body['success'] == true) {
+        final dynamicUrl = body['url']?.toString();
+        final dynamicPage = body['page']?.toString();
+        debugPrint('====================================================');
+        debugPrint('>>> [CRM API DYNAMIC WEBVIEW URL FROM CRM]');
+        debugPrint('>>> Dynamic URL: $dynamicUrl');
+        debugPrint('>>> Dynamic Start Page: $dynamicPage');
+        debugPrint('>>> Expires in: ${body['expires_in']}s');
+        debugPrint('====================================================');
         return SalesTrackApiResponse(
           success: true,
           data: body,
           statusCode: response.statusCode,
         );
       } else {
+        debugPrint('>>> [CRM API /webview] Error from server: ${body['error']} - ${body['message']}');
         return SalesTrackApiResponse(
           success: false,
           error: body['error']?.toString() ?? 'webview_failed',

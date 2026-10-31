@@ -199,6 +199,7 @@ class SalesTrackConfig {
   final String version;
   final AppUpdateInfo appInfo;
   final bool webview;
+  final String? crmStartPage;
 
   SalesTrackConfig({
     required this.trackingCalls,
@@ -233,6 +234,7 @@ class SalesTrackConfig {
     required this.version,
     this.appInfo = const AppUpdateInfo(),
     this.webview = false,
+    this.crmStartPage,
   });
 
   factory SalesTrackConfig.defaultConfig() {
@@ -274,6 +276,7 @@ class SalesTrackConfig {
       version: '1.0.0',
       appInfo: const AppUpdateInfo(),
       webview: false,
+      crmStartPage: null,
     );
   }
 
@@ -350,11 +353,13 @@ class SalesTrackConfig {
       version: json['version']?.toString() ?? '',
       appInfo: AppUpdateInfo.fromJson(app),
       webview: json['webview'] == true,
+      crmStartPage: json['start_page']?.toString() ?? json['crm_start_page']?.toString() ?? json['webview_page']?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'webview': webview,
+    'start_page': crmStartPage,
     'tracking': {
       'calls': trackingCalls,
       'recordings': trackingRecordings,
