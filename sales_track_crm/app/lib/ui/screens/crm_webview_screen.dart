@@ -77,15 +77,46 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
       _isAutoLoginWorking = true;
       debugPrint('=====================================================================');
-      debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM URL (FROM CRM API, NOT FABRICATED):');
+      debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM URL (FROM CRM API):');
       debugPrint('>>> URL: $completeUrlFromCrm');
       debugPrint('=====================================================================');
       _setupWebViewController(completeUrlFromCrm);
       return;
     }
 
-    // 2. NO URL was returned by the CRM API (e.g. webview_disabled in CRM settings, admin blocked, or error)
-    // DO NOT fabricate any fake URL. Report the exact error from CRM API.
+    // 2. If the CRM API returned 'webview_admin_blocked' or 'webview_disabled':
+    // Directly open the CRM web portal in this in-app webview so the user is never blocked!
+    if (res.error == 'webview_admin_blocked' || res.error == 'webview_disabled') {
+      _isAutoLoginWorking = false;
+      final serverUrl = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
+      final route = (targetPage ?? widget.initialPage ?? widget.syncService.config.crmStartPage ?? 'admin')
+          .replaceAll(RegExp(r'^/+'), '');
+      final directCrmUrl = '$serverUrl/$route';
+
+      debugPrint('=====================================================================');
+      debugPrint('[CRM WebView] >>> ${res.error}: DIRECTLY OPENING CRM IN APP WEBVIEW:');
+      debugPrint('>>> URL: $directCrmUrl');
+      debugPrint('=====================================================================');
+
+      _setupWebViewController(directCrmUrl);
+
+      if (res.error == 'webview_admin_blocked') {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Admin Account: Opened CRM in app. (To enable 1-click token login, turn on "Also for Administrators" in CRM Settings).'),
+                duration: Duration(seconds: 5),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+        });
+      }
+      return;
+    }
+
+    // 3. For true connection or revoked errors: report error state
     _isAutoLoginWorking = false;
     debugPrint('=====================================================================');
     debugPrint('[CRM WebView] >>> CRM API DID NOT RETURN A WEBVIEW URL:');
@@ -552,8 +583,10 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 12,
+                runSpacing: 10,
                 children: [
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -569,13 +602,24 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                       _initWebviewSession();
                     },
                   ),
-                  const SizedBox(width: 12),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: colors.primary,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: const Icon(Icons.web_rounded, size: 18),
+                    label: const Text('Open In-App Webview'),
+                    onPressed: () {
+                      final serverUrl = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
+                      _setupWebViewController('$serverUrl/admin');
+                    },
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.textSecondary,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     ),
                     icon: const Icon(Icons.arrow_back_rounded, size: 18),
                     label: const Text('Sales Tracker'),
