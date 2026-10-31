@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/theme/sales_track_theme.dart';
-import '../../services/sales_track_api_service.dart';
 import '../../services/telemetry_sync_service.dart';
 
 class CrmWebviewScreen extends StatefulWidget {
@@ -27,11 +26,11 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   bool _isLoading = true;
   int _loadingProgress = 0;
   String? _errorMessage;
-  String? _errorType;
   String _currentUrl = '';
   String _pageTitle = 'CRM Portal';
   bool _canGoBack = false;
   bool _canGoForward = false;
+  bool _isAutoLoginWorking = false;
 
   @override
   void initState() {
@@ -39,13 +38,18 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     _initWebviewSession();
   }
 
+  String _getFallbackUrl([String? page]) {
+    final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
+    final target = (page ?? widget.initialPage ?? 'admin').replaceAll(RegExp(r'^/+'), '');
+    return '$base/$target';
+  }
+
   Future<void> _initWebviewSession([String? targetPage]) async {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _errorType = null;
-      _loadingProgress = 10;
+      _loadingProgress = 15;
     });
 
     final res = await widget.syncService.api.openCrmSession(
@@ -54,56 +58,47 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
     if (!mounted) return;
 
-    if (!res.success) {
-      _handleSessionError(res);
-      return;
+    if (res.success && res.data != null && res.data!['url'] != null) {
+      final sessionUrl = res.data!['url'].toString();
+      if (sessionUrl.isNotEmpty) {
+        _isAutoLoginWorking = true;
+        _setupWebViewController(sessionUrl);
+        return;
+      }
     }
 
-    final sessionUrl = res.data?['url']?.toString() ?? '';
-    if (sessionUrl.isEmpty) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Invalid CRM sign-in link received. Please try again.';
+    // If auto-login fails (e.g. webview_disabled in CRM settings, admin blocked, etc.)
+    // DO NOT block the user or send to external browser!
+    // Fall back to loading the CRM portal directly inside this in-app webview.
+    _isAutoLoginWorking = false;
+    final directUrl = _getFallbackUrl(targetPage);
+    _setupWebViewController(directUrl);
+
+    // If setting is disabled in CRM, inform the rep once via a subtle floating snackbar
+    if (res.error == 'webview_disabled') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('CRM Auto-Sign-In is switched off in CRM settings. Browsing directly inside app.'),
+              duration: Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       });
-      return;
-    }
-
-    _setupWebViewController(sessionUrl);
-  }
-
-  void _handleSessionError(SalesTrackApiResponse<Map<String, dynamic>> res) {
-    setState(() {
-      _isLoading = false;
-      _errorType = res.error;
-    });
-
-    switch (res.error) {
-      case 'webview_disabled':
-        _errorMessage =
-            'Opening the CRM in the app is switched off.\n\nAsk your CRM Administrator to enable "Open CRM in the App" under Settings > Devices And App.';
-        break;
-      case 'webview_admin_blocked':
-        _errorMessage =
-            'Administrator accounts open the CRM in a browser.\n\nYour CRM account has administrator privileges. You can open the CRM directly in your web browser.';
-        break;
-      case 'staff_inactive':
-        _errorMessage = 'Your CRM staff account is inactive. Please contact your CRM Administrator.';
-        break;
-      case 'device_revoked':
-      case 'invalid_token':
-      case 'device_mismatch':
-        _errorMessage = 'Device pairing was lost or revoked. Please unpair and re-pair with the CRM.';
-        widget.syncService.unpair();
-        break;
-      case 'update_required':
-        _errorMessage = 'An app update is required to access the CRM portal. Please update your app.';
-        widget.syncService.checkForAppUpdate(manual: true);
-        break;
-      default:
-        _errorMessage = res.message?.isNotEmpty == true
-            ? res.message!
-            : 'Unable to connect to CRM. Please check your internet connection and try again.';
-        break;
+    } else if (res.error == 'webview_admin_blocked') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Administrator account: browsing CRM directly inside app.'),
+              duration: Duration(seconds: 4),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      });
     }
   }
 
@@ -150,24 +145,29 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               if (mounted && _controller != null) {
                 setState(() {
                   _isLoading = false;
+                  if (_currentUrl.isEmpty) {
+                    _errorMessage = 'Could not load CRM page: ${error.description}';
+                  }
                 });
               }
             },
             onNavigationRequest: (NavigationRequest request) {
               final destUrl = request.url;
 
-              // 1. Non-web intents (tel:, mailto:, whatsapp:, intent:, geo:) -> open externally
+              // 1. Non-web intents (tel:, mailto:, whatsapp:, intent:, geo:) -> open in native apps
               if (!destUrl.startsWith('http://') && !destUrl.startsWith('https://')) {
                 widget.syncService.launchAppUpdateUrl(destUrl);
                 return NavigationDecision.prevent;
               }
 
-              // 2. Session expired (redirected to Perfex CRM login page) -> auto re-authenticate
-              if (destUrl.contains('/admin/authentication')) {
+              // 2. If session expired & auto-login is active on server, try auto-login once
+              if (destUrl.contains('/admin/authentication') && _isAutoLoginWorking) {
+                _isAutoLoginWorking = false; // avoid loop
                 _initWebviewSession();
                 return NavigationDecision.prevent;
               }
 
+              // 3. Keep all web browsing strictly inside the in-app webview
               return NavigationDecision.navigate;
             },
           ),
@@ -181,7 +181,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     } catch (e) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Could not load webview: $e';
+        _errorMessage = 'Could not initialize in-app webview: $e';
       });
     }
   }
@@ -214,6 +214,15 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
       return false;
     }
     return true;
+  }
+
+  void _loadCrmPage(String route) {
+    final fullUrl = _getFallbackUrl(route);
+    if (_controller != null) {
+      _controller!.loadRequest(Uri.parse(fullUrl));
+    } else {
+      _setupWebViewController(fullUrl);
+    }
   }
 
   @override
@@ -293,10 +302,10 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               onPressed: _canGoForward ? () => _controller?.goForward() : null,
             ),
 
-            // Refresh / Reload session
+            // Refresh / Reload current page
             IconButton(
               icon: Icon(Icons.refresh_rounded, color: colors.textPrimary, size: 22),
-              tooltip: 'Refresh CRM',
+              tooltip: 'Refresh Page',
               onPressed: () {
                 if (_controller != null) {
                   _controller!.reload();
@@ -306,7 +315,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               },
             ),
 
-            // More Options (Open in browser, fresh sign-in)
+            // Quick Navigation Menu inside In-App Webview
             PopupMenuButton<String>(
               color: colors.cardBackground,
               icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
@@ -315,33 +324,67 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                 side: BorderSide(color: colors.border),
               ),
               onSelected: (val) {
-                if (val == 'open_browser') {
-                  final target = _currentUrl.isNotEmpty
-                      ? _currentUrl
-                      : widget.syncService.api.serverUrl;
-                  widget.syncService.launchAppUpdateUrl(target);
-                } else if (val == 'new_session') {
+                if (val == 'dashboard') {
+                  _loadCrmPage('admin');
+                } else if (val == 'leads') {
+                  _loadCrmPage('admin/leads');
+                } else if (val == 'calls') {
+                  _loadCrmPage('admin/mks_sales_track/calls');
+                } else if (val == 'whatsapp') {
+                  _loadCrmPage('admin/mks_sales_track/whatsapp_messages');
+                } else if (val == 'retry_auto_login') {
                   _initWebviewSession();
                 }
               },
               itemBuilder: (ctx) => [
                 PopupMenuItem(
-                  value: 'new_session',
+                  value: 'dashboard',
                   child: Row(
                     children: [
-                      Icon(Icons.vpn_key_rounded, color: colors.primary, size: 20),
+                      Icon(Icons.dashboard_rounded, color: colors.primary, size: 20),
                       const SizedBox(width: 10),
-                      Text('Get Fresh Sign-in Link', style: TextStyle(color: colors.textPrimary)),
+                      Text('CRM Dashboard', style: TextStyle(color: colors.textPrimary)),
                     ],
                   ),
                 ),
                 PopupMenuItem(
-                  value: 'open_browser',
+                  value: 'leads',
                   child: Row(
                     children: [
-                      Icon(Icons.open_in_browser_rounded, color: colors.primary, size: 20),
+                      Icon(Icons.people_rounded, color: colors.primary, size: 20),
                       const SizedBox(width: 10),
-                      Text('Open in Browser', style: TextStyle(color: colors.textPrimary)),
+                      Text('Leads', style: TextStyle(color: colors.textPrimary)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'calls',
+                  child: Row(
+                    children: [
+                      Icon(Icons.call_rounded, color: colors.primary, size: 20),
+                      const SizedBox(width: 10),
+                      Text('Call Via 360 Calls', style: TextStyle(color: colors.textPrimary)),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'whatsapp',
+                  child: Row(
+                    children: [
+                      Icon(Icons.chat_rounded, color: colors.primary, size: 20),
+                      const SizedBox(width: 10),
+                      Text('WhatsApp Messages', style: TextStyle(color: colors.textPrimary)),
+                    ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'retry_auto_login',
+                  child: Row(
+                    children: [
+                      Icon(Icons.vpn_key_rounded, color: colors.primary, size: 20),
+                      const SizedBox(width: 10),
+                      Text('Auto Sign-in Link', style: TextStyle(color: colors.textPrimary)),
                     ],
                   ),
                 ),
@@ -363,7 +406,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                   minHeight: 3,
                 ),
 
-              // Main Web Content or Error/Disabled Card
+              // Main Web Content or Connection Error
               Expanded(
                 child: _errorMessage != null
                     ? _buildErrorView(colors)
@@ -393,7 +436,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Opening secure CRM session...',
+            'Opening CRM Portal in App...',
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -402,7 +445,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Authenticating via one-time token',
+            'Loading webview interface',
             style: TextStyle(
               fontSize: 12,
               color: colors.textSecondary,
@@ -414,9 +457,6 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   Widget _buildErrorView(SalesTrackColors colors) {
-    final isAdminBlocked = _errorType == 'webview_admin_blocked';
-    final isDisabled = _errorType == 'webview_disabled';
-
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
@@ -442,24 +482,17 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                 height: 64,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: (isAdminBlocked ? colors.primary : (isDisabled ? colors.warning : colors.danger))
-                      .withOpacity(0.12),
+                  color: colors.danger.withOpacity(0.12),
                 ),
                 child: Icon(
-                  isAdminBlocked
-                      ? Icons.admin_panel_settings_rounded
-                      : (isDisabled ? Icons.lock_outline_rounded : Icons.cloud_off_rounded),
-                  color: isAdminBlocked
-                      ? colors.primary
-                      : (isDisabled ? colors.warning : colors.danger),
+                  Icons.cloud_off_rounded,
+                  color: colors.danger,
                   size: 32,
                 ),
               ),
               const SizedBox(height: 18),
               Text(
-                isAdminBlocked
-                    ? 'CRM Administrator Account'
-                    : (isDisabled ? 'CRM In-App Portal Disabled' : 'Connection Error'),
+                'Connection Error',
                 style: TextStyle(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
@@ -469,7 +502,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                _errorMessage ?? 'Unable to connect to CRM.',
+                _errorMessage ?? 'Unable to connect to CRM. Check your internet connection.',
                 style: TextStyle(
                   fontSize: 13.5,
                   height: 1.45,
@@ -481,51 +514,38 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (isAdminBlocked) ...[
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: colors.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.open_in_browser_rounded, size: 18),
-                      label: const Text('Open in Browser', style: TextStyle(fontWeight: FontWeight.w600)),
-                      onPressed: () {
-                        widget.syncService.launchAppUpdateUrl(widget.syncService.api.serverUrl);
-                      },
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.textPrimary,
+                      side: BorderSide(color: colors.border),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                  ] else ...[
-                    OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: colors.textPrimary,
-                        side: BorderSide(color: colors.border),
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.refresh_rounded, size: 18),
-                      label: const Text('Try Again'),
-                      onPressed: _initWebviewSession,
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('Try Again'),
+                    onPressed: () {
+                      setState(() => _errorMessage = null);
+                      _initWebviewSession();
+                    },
+                  ),
+                  const SizedBox(width: 12),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: colors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: colors.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                      label: const Text('Sales Tracker'),
-                      onPressed: () {
-                        if (widget.onBackToSales != null) {
-                          widget.onBackToSales!();
-                        } else if (Navigator.of(context).canPop()) {
-                          Navigator.of(context).pop();
-                        }
-                      },
-                    ),
-                  ],
+                    icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                    label: const Text('Sales Tracker'),
+                    onPressed: () {
+                      if (widget.onBackToSales != null) {
+                        widget.onBackToSales!();
+                      } else if (Navigator.of(context).canPop()) {
+                        Navigator.of(context).pop();
+                      }
+                    },
+                  ),
                 ],
               ),
             ],
@@ -535,4 +555,3 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
     );
   }
 }
-
