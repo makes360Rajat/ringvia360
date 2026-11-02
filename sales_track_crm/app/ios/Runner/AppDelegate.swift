@@ -9,11 +9,12 @@ import MessageUI
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
-  private static var isCustomPluginRegistered = false
+  private static var arePluginsRegistered = false
 
-  static func registerCustomPlugins(with registry: FlutterPluginRegistry) {
-    guard !isCustomPluginRegistered else { return }
-    isCustomPluginRegistered = true
+  static func registerAllPlugins(with registry: FlutterPluginRegistry) {
+    guard !arePluginsRegistered else { return }
+    arePluginsRegistered = true
+    GeneratedPluginRegistrant.register(with: registry)
     if let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
       TelemetryBridgePlugin.register(with: registrar)
     }
@@ -23,15 +24,16 @@ import MessageUI
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    AppDelegate.registerCustomPlugins(with: self)
     CallKitObserver.shared.startObserving()
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    if !AppDelegate.arePluginsRegistered {
+      AppDelegate.registerAllPlugins(with: self)
+    }
+    return result
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    AppDelegate.registerCustomPlugins(with: engineBridge.pluginRegistry)
+    AppDelegate.registerAllPlugins(with: engineBridge.pluginRegistry)
   }
 }
 
