@@ -83,7 +83,10 @@
 	<array>
 		<string>fetch</string>
 		<string>remote-notification</string>
-		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).telemetry-sync</string>
 	</array>
 </dict>
 </plist>
