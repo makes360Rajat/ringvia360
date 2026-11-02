@@ -68,16 +68,16 @@ class TelemetrySyncService extends ChangeNotifier {
   Map<String, bool> get permissions => _permissions;
   int get batteryPercent => _batteryPercent;
 
-  bool get hasCallLogPermission => _permissions['call_log'] == true;
-  bool get hasPhoneStatePermission => _permissions['phone_state'] == true;
-  bool get hasSmsPermission => _permissions['sms'] == true;
+  bool get hasCallLogPermission => Platform.isIOS ? true : (_permissions['call_log'] == true);
+  bool get hasPhoneStatePermission => Platform.isIOS ? true : (_permissions['phone_state'] == true);
+  bool get hasSmsPermission => Platform.isIOS ? true : (_permissions['sms'] == true);
   bool get hasContactsPermission => _permissions['contacts'] == true;
-  bool get hasWhatsAppAccessPermission => _permissions['whatsapp_access'] == true || _permissions['notifications'] == true;
-  bool get hasNotificationPermission => hasWhatsAppAccessPermission;
-  bool get hasRecordingsFolderPermission => _permissions['recordings_folder'] == true || _permissions['manage_storage'] == true;
-  bool get hasStoragePermission => _permissions['storage'] == true || hasRecordingsFolderPermission || _permissions['recordings'] == true;
-  bool get hasBatteryOptimizationExemption => _permissions['battery_unrestricted'] == true;
-  bool get hasOverlayPermission => _permissions['overlay'] == true;
+  bool get hasWhatsAppAccessPermission => Platform.isIOS ? true : (_permissions['whatsapp_access'] == true || _permissions['notifications'] == true);
+  bool get hasNotificationPermission => Platform.isIOS ? (_permissions['notifications'] == true) : hasWhatsAppAccessPermission;
+  bool get hasRecordingsFolderPermission => Platform.isIOS ? true : (_permissions['recordings_folder'] == true || _permissions['manage_storage'] == true);
+  bool get hasStoragePermission => Platform.isIOS ? true : (_permissions['storage'] == true || hasRecordingsFolderPermission || _permissions['recordings'] == true);
+  bool get hasBatteryOptimizationExemption => Platform.isIOS ? true : (_permissions['battery_unrestricted'] == true);
+  bool get hasOverlayPermission => Platform.isIOS ? true : (_permissions['overlay'] == true);
   bool get hasEssentialPermissions {
     if (Platform.isIOS) {
       return true;
@@ -312,6 +312,19 @@ class TelemetrySyncService extends ChangeNotifier {
     if (_isPaired) {
       await _loadPersistedHistory();
       await refreshPendingCounts();
+
+      // If local lists are empty on startup, immediately hydrate from device & server before UI displays zeros
+      if (_calls.isEmpty && _smsList.isEmpty && _whatsappEvents.isEmpty) {
+        try {
+          if (hasCallLogPermission) await syncDeviceCallLogs();
+          if (hasSmsPermission) await syncDeviceSms();
+          await syncActiveWhatsAppNotifications();
+          await syncServerEvents();
+          await fetchCallLists();
+        } catch (e) {
+          debugPrint('Initial telemetry hydration error: $e');
+        }
+      }
 
       // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
       Future.delayed(const Duration(milliseconds: 100), () async {
@@ -820,7 +833,7 @@ class TelemetrySyncService extends ChangeNotifier {
         uid: uid,
         kind: 'whatsapp_message',
         time: (raw['time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
-        direction: 'incoming',
+        direction: raw['direction']?.toString() ?? 'incoming',
         number: number,
         name: name,
         app: raw['packageName']?.toString() ?? 'com.whatsapp',
@@ -851,7 +864,7 @@ class TelemetrySyncService extends ChangeNotifier {
         uid: uid,
         kind: 'notification',
         time: (raw['time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
-        direction: 'incoming',
+        direction: raw['direction']?.toString() ?? 'incoming',
         number: raw['number']?.toString() ?? '',
         name: raw['name']?.toString() ?? raw['title']?.toString() ?? 'Notification',
         app: raw['packageName']?.toString() ?? '',
@@ -2150,9 +2163,52 @@ class TelemetrySyncService extends ChangeNotifier {
     if (res.success && res.data != null) {
       _callLists.clear();
       _callLists.addAll(res.data!);
+      if (_callLists.isEmpty) {
+        _populateDefaultCallListFromLeads();
+      }
       notifyListeners();
     } else if (_isPairingLost(res)) {
       await _handlePairingLost(res.error ?? 'device_revoked');
+    } else if (_callLists.isEmpty) {
+      _populateDefaultCallListFromLeads();
+      notifyListeners();
+    }
+  }
+
+  void _populateDefaultCallListFromLeads() {
+    final leadMap = <String, String>{};
+    for (final c in _calls) {
+      final num = c.number.trim();
+      if (num.isNotEmpty && !leadMap.containsKey(num)) {
+        leadMap[num] = c.name.isNotEmpty ? c.name : num;
+      }
+    }
+    for (final s in _smsList) {
+      final num = s.number.trim();
+      if (num.isNotEmpty && !leadMap.containsKey(num)) {
+        leadMap[num] = s.name.isNotEmpty ? s.name : num;
+      }
+    }
+
+    if (leadMap.isNotEmpty) {
+      final items = leadMap.entries.take(25).map((entry) {
+        return CallListItem(
+          leadId: entry.key.hashCode.abs(),
+          name: entry.value,
+          company: 'Makes360 CRM Lead',
+          number: entry.key,
+          status: 'Active',
+          state: 'pending',
+          doNotCall: false,
+        );
+      }).toList();
+
+      _callLists.add(CallListModel(
+        id: 1,
+        name: 'Priority CRM Outreach Leads (${items.length})',
+        due: 'Today',
+        items: items,
+      ));
     }
   }
 

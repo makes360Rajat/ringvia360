@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
@@ -92,6 +93,10 @@ class _HomeScreenState extends State<HomeScreen>
         widget.syncService.syncDeviceSms();
       }
       widget.syncService.scanLocalRecordings();
+      if (Platform.isIOS) {
+        widget.syncService.syncActiveWhatsAppNotifications();
+        widget.syncService.syncServerEvents();
+      }
       widget.syncService.syncNow();
       _onServiceChanged();
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
@@ -1861,6 +1866,16 @@ class _HomeScreenState extends State<HomeScreen>
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
+                    IconButton(
+                      onPressed: () => service.sendSms(number: call.number, name: call.name),
+                      icon: Icon(Icons.sms_rounded, size: 16, color: colors.secondary),
+                      tooltip: 'Send SMS',
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        backgroundColor: colors.secondary.withOpacity(0.12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
                   ],
                 ),
 
@@ -2197,6 +2212,15 @@ class _HomeScreenState extends State<HomeScreen>
     final colors = context.stColors;
 
     if (service.whatsappEvents.isEmpty) {
+      if (Platform.isIOS) {
+        return _buildEmptyState(
+          icon: Icons.chat_rounded,
+          title: 'No WhatsApp Activity Sensed',
+          subtitle: 'Track WhatsApp calls and chat interactions with CRM leads and clients.',
+          actionLabel: 'New WhatsApp Chat',
+          onAction: () => _showStartWhatsAppDialog(context, service),
+        );
+      }
       return _buildEmptyState(
         icon: Icons.chat_rounded,
         title: 'No WhatsApp Activity Sensed',
@@ -2220,7 +2244,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Column(
       children: [
-        if (!service.hasWhatsAppAccessPermission)
+        if (!Platform.isIOS && !service.hasWhatsAppAccessPermission)
           Container(
             margin: const EdgeInsets.fromLTRB(14, 8, 14, 6),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -2295,6 +2319,20 @@ class _HomeScreenState extends State<HomeScreen>
                   foregroundColor: colors.textSecondary,
                   side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () => _showStartWhatsAppDialog(context, service),
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 15),
+                label: const Text('New Chat', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.whatsappGreen,
+                  side: BorderSide(color: colors.whatsappGreen),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -2557,7 +2595,7 @@ class _HomeScreenState extends State<HomeScreen>
     final colors = context.stColors;
 
     if (service.smsList.isEmpty) {
-      if (!service.hasSmsPermission) {
+      if (!Platform.isIOS && !service.hasSmsPermission) {
         return _buildEmptyState(
           icon: Icons.sms_failed_rounded,
           title: 'SMS Permission Required',
@@ -2569,9 +2607,9 @@ class _HomeScreenState extends State<HomeScreen>
       return _buildEmptyState(
         icon: Icons.sms_rounded,
         title: 'No SMS Messages Loaded',
-        subtitle: 'Carrier SMS logs can be scanned and displayed here.',
-        actionLabel: 'Scan Device SMS',
-        onAction: () => service.syncDeviceSms(),
+        subtitle: 'Carrier SMS logs and interactions can be composed and synced here.',
+        actionLabel: 'Compose SMS',
+        onAction: () => _showComposeSmsDialog(context, service),
       );
     }
 
@@ -2607,6 +2645,20 @@ class _HomeScreenState extends State<HomeScreen>
                   foregroundColor: colors.textSecondary,
                   side: BorderSide(color: colors.border),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () => _showComposeSmsDialog(context, service),
+                icon: const Icon(Icons.add_comment_rounded, size: 15),
+                label: const Text('New SMS', style: TextStyle(fontSize: 12)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: colors.secondary,
+                  side: BorderSide(color: colors.secondary),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -3560,6 +3612,142 @@ class _HomeScreenState extends State<HomeScreen>
           IconButton(
             icon: Icon(Icons.close_rounded, color: colors.textMuted, size: 20),
             onPressed: () => service.stopRecording(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showComposeSmsDialog(BuildContext context, TelemetrySyncService service, {String? defaultNumber, String? defaultName}) {
+    final colors = context.stColors;
+    final numController = TextEditingController(text: defaultNumber ?? '');
+    final textController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: colors.cardBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.sms_rounded, color: colors.secondary, size: 22),
+            const SizedBox(width: 8),
+            Text('Compose SMS', style: TextStyle(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Phone Number', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: colors.textSecondary)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: numController,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(
+                hintText: '+91 98765 43210',
+                filled: true,
+                fillColor: colors.surfaceColor,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: colors.border)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text('Message', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: colors.textSecondary)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: textController,
+              maxLines: 3,
+              decoration: InputDecoration(
+                hintText: 'Type your message...',
+                filled: true,
+                fillColor: colors.surfaceColor,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: colors.border)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text('Cancel', style: TextStyle(color: colors.textSecondary)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              final number = numController.text.trim();
+              final text = textController.text.trim();
+              if (number.isEmpty) return;
+              Navigator.pop(dialogCtx);
+              await service.sendSms(number: number, text: text, name: defaultName);
+            },
+            icon: const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Send SMS'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.secondary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showStartWhatsAppDialog(BuildContext context, TelemetrySyncService service, {String? defaultNumber}) {
+    final colors = context.stColors;
+    final numController = TextEditingController(text: defaultNumber ?? '');
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: colors.cardBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.chat_rounded, color: colors.whatsappGreen, size: 22),
+            const SizedBox(width: 8),
+            Text('Start WhatsApp Chat', style: TextStyle(color: colors.textPrimary, fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Client Phone Number', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: colors.textSecondary)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: numController,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(
+                hintText: '+91 98765 43210',
+                filled: true,
+                fillColor: colors.surfaceColor,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: colors.border)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text('Cancel', style: TextStyle(color: colors.textSecondary)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () async {
+              final number = numController.text.trim();
+              if (number.isEmpty) return;
+              Navigator.pop(dialogCtx);
+              await service.openWhatsAppChat(number);
+            },
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: const Text('Open WhatsApp'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.whatsappGreen,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
           ),
         ],
       ),

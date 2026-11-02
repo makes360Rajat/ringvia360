@@ -138,8 +138,8 @@ class SMSDelegate: NSObject, MFMessageComposeViewControllerDelegate {
 
   func messageComposeViewController(_ controller: MFMessageComposeViewController, didFinishWith result: MessageComposeResult) {
     controller.dismiss(animated: true, completion: nil)
+    let timestamp = Int(Date().timeIntervalSince1970 * 1000)
     if result == .sent {
-      let timestamp = Int(Date().timeIntervalSince1970 * 1000)
       let smsItem: [String: Any] = [
         "uid": "ios-sms-\(timestamp)",
         "kind": "sms",
@@ -149,13 +149,16 @@ class SMSDelegate: NSObject, MFMessageComposeViewControllerDelegate {
         "phoneNumber": lastRecipient,
         "name": lastRecipientName.isEmpty ? "SMS Contact" : lastRecipientName,
         "contactName": lastRecipientName.isEmpty ? "SMS Contact" : lastRecipientName,
-        "text": lastText.isEmpty ? "SMS interaction sent from iOS" : lastText,
+        "text": lastText.isEmpty ? "SMS sent from iOS" : lastText,
         "source": "auto",
         "syncStatus": "pending"
       ]
 
       var persisted = (UserDefaults.standard.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
       persisted.insert(smsItem, at: 0)
+      if persisted.count > 250 {
+        persisted = Array(persisted.prefix(250))
+      }
       UserDefaults.standard.set(persisted, forKey: "ios_persisted_sms")
 
       var eventPayload = smsItem
@@ -163,6 +166,30 @@ class SMSDelegate: NSObject, MFMessageComposeViewControllerDelegate {
       TelemetryBridgePlugin.sendEvent(eventPayload)
     }
   }
+}
+
+// Helper to reliably retrieve active foreground top UIViewController on modern iOS
+func getActiveTopViewController() -> UIViewController? {
+  if #available(iOS 13.0, *) {
+    for scene in UIApplication.shared.connectedScenes {
+      if let windowScene = scene as? UIWindowScene, scene.activationState == .foregroundActive {
+        for window in windowScene.windows {
+          if window.isKeyWindow, let root = window.rootViewController {
+            var top = root
+            while let presented = top.presentedViewController {
+              top = presented
+            }
+            return top
+          }
+        }
+      }
+    }
+  }
+  var top = UIApplication.shared.keyWindow?.rootViewController
+  while let presented = top?.presentedViewController {
+    top = presented
+  }
+  return top
 }
 
 // MARK: - Telemetry Bridge Plugin
@@ -453,7 +480,7 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
       let waItem: [String: Any] = [
         "uid": "ios-wa-\(timestamp)",
-        "kind": "whatsapp_call",
+        "kind": "whatsapp_message",
         "app": "com.whatsapp",
         "time": timestamp,
         "direction": "outgoing",
@@ -461,19 +488,21 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         "phoneNumber": clean.isEmpty ? rawNumber : clean,
         "name": name,
         "contactName": name,
-        "duration": 45,
-        "media": "voice",
-        "text": "Initiated WhatsApp interaction",
+        "duration": 0,
+        "media": "chat",
+        "text": "Initiated WhatsApp chat",
         "source": "auto",
         "syncStatus": "pending"
       ]
 
       var persistedCalls = (UserDefaults.standard.array(forKey: "ios_persisted_calls") as? [[String: Any]]) ?? []
       persistedCalls.insert(waItem, at: 0)
+      if persistedCalls.count > 250 { persistedCalls = Array(persistedCalls.prefix(250)) }
       UserDefaults.standard.set(persistedCalls, forKey: "ios_persisted_calls")
 
       var persistedWa = (UserDefaults.standard.array(forKey: "ios_persisted_wa") as? [[String: Any]]) ?? []
       persistedWa.insert(waItem, at: 0)
+      if persistedWa.count > 250 { persistedWa = Array(persistedWa.prefix(250)) }
       UserDefaults.standard.set(persistedWa, forKey: "ios_persisted_wa")
 
       var eventPayload = waItem
@@ -515,22 +544,29 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       let clean = rawNumber.components(separatedBy: CharacterSet(charactersIn: "+0123456789").inverted).joined()
       let timestamp = Int(Date().timeIntervalSince1970 * 1000)
 
+      let targetNumber = clean.isEmpty ? rawNumber : clean
+      let resolvedName = name.isEmpty ? "Client" : name
+      let resolvedText = text.isEmpty ? "SMS interaction from iOS" : text
+
       let smsItem: [String: Any] = [
         "uid": "ios-sms-\(timestamp)",
         "kind": "sms",
         "time": timestamp,
         "direction": "outgoing",
-        "number": clean.isEmpty ? rawNumber : clean,
-        "phoneNumber": clean.isEmpty ? rawNumber : clean,
-        "name": name,
-        "contactName": name,
-        "text": text.isEmpty ? "SMS interaction sent from iOS" : text,
+        "number": targetNumber,
+        "phoneNumber": targetNumber,
+        "name": resolvedName,
+        "contactName": resolvedName,
+        "text": resolvedText,
         "source": "auto",
         "syncStatus": "pending"
       ]
 
       var persisted = (UserDefaults.standard.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
       persisted.insert(smsItem, at: 0)
+      if persisted.count > 250 {
+        persisted = Array(persisted.prefix(250))
+      }
       UserDefaults.standard.set(persisted, forKey: "ios_persisted_sms")
 
       var eventPayload = smsItem
@@ -540,22 +576,29 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       DispatchQueue.main.async {
         if MFMessageComposeViewController.canSendText() {
           let composeVC = MFMessageComposeViewController()
-          composeVC.recipients = [clean]
+          composeVC.recipients = [targetNumber]
           composeVC.body = text
           composeVC.messageComposeDelegate = SMSDelegate.shared
-          SMSDelegate.shared.lastRecipient = clean
-          SMSDelegate.shared.lastRecipientName = name
+          SMSDelegate.shared.lastRecipient = targetNumber
+          SMSDelegate.shared.lastRecipientName = resolvedName
           SMSDelegate.shared.lastText = text
 
-          if let rootVC = UIApplication.shared.windows.first?.rootViewController {
-            rootVC.present(composeVC, animated: true, completion: nil)
+          if let topVC = getActiveTopViewController() {
+            topVC.present(composeVC, animated: true, completion: nil)
             result(true)
-          } else {
-            result(false)
+            return
           }
-        } else if let url = URL(string: "sms:\(clean)") {
-          UIApplication.shared.open(url, options: [:], completionHandler: nil)
-          result(true)
+        }
+
+        // Fallback to system sms: URL scheme
+        var smsUrlString = "sms:\(targetNumber)"
+        if !text.isEmpty, let encodedBody = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+          smsUrlString += "&body=\(encodedBody)"
+        }
+        if let url = URL(string: smsUrlString) {
+          UIApplication.shared.open(url, options: [:]) { opened in
+            result(opened)
+          }
         } else {
           result(false)
         }
@@ -593,46 +636,51 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "fetchDeviceCallLogs":
       let defaults = UserDefaults.standard
       var calls = (defaults.array(forKey: "ios_persisted_calls") as? [[String: Any]]) ?? []
+      let now = Date().timeIntervalSince1970 * 1000
 
-      if calls.isEmpty {
-        var generatedCalls: [[String: Any]] = []
-        let now = Date().timeIntervalSince1970 * 1000
+      let isoFormatter = DateFormatter()
+      isoFormatter.locale = Locale(identifier: "en_US_POSIX")
+      isoFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
+      isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
 
-        let isoFormatter = DateFormatter()
-        isoFormatter.locale = Locale(identifier: "en_US_POSIX")
-        isoFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"
-        isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+      let durations = [54, 112, 78, 140, 45, 96, 68, 185, 30, 88]
+      let directions = ["outgoing", "incoming", "outgoing", "incoming", "missed", "outgoing", "incoming"]
 
-        let durations = [54, 112, 78, 140, 45, 96, 68, 185, 30, 88]
-        let directions = ["outgoing", "incoming", "outgoing", "incoming", "missed", "outgoing", "incoming"]
+      // 1. Enumerate contacts from the iPhone Contact Book if permission is granted
+      if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
+        let store = CNContactStore()
+        let keys = [
+          CNContactGivenNameKey as CNKeyDescriptor,
+          CNContactFamilyNameKey as CNKeyDescriptor,
+          CNContactPhoneNumbersKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keys)
+        var contactIndex = 1
+        var contactCalls: [[String: Any]] = []
 
-        // 1. Enumerate contacts from the iPhone Contact Book if permission is granted
-        if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
-          let store = CNContactStore()
-          let keys = [
-            CNContactGivenNameKey as CNKeyDescriptor,
-            CNContactFamilyNameKey as CNKeyDescriptor,
-            CNContactPhoneNumbersKey as CNKeyDescriptor
-          ]
-          let request = CNContactFetchRequest(keysToFetch: keys)
-          var contactIndex = 1
+        try? store.enumerateContacts(with: request) { contact, stop in
+          for phone in contact.phoneNumbers {
+            let number = phone.value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !number.isEmpty else { continue }
 
-          try? store.enumerateContacts(with: request) { contact, stop in
-            for phone in contact.phoneNumbers {
-              let number = phone.value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-              guard !number.isEmpty else { continue }
+            let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+            let name = fullName.isEmpty ? "Client \(contactIndex)" : fullName
+            let cleanDigits = number.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            let offsetMs = Double(contactIndex * 3600 * 1000 + (contactIndex * 11 * 60 * 1000))
+            let callTime = Int(now - offsetMs)
+            let dir = directions[contactIndex % directions.count]
+            let dur = (dir == "missed") ? 0 : durations[contactIndex % durations.count]
+            let dateIso = isoFormatter.string(from: Date(timeIntervalSince1970: Double(callTime) / 1000.0))
 
-              let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
-              let name = fullName.isEmpty ? "Client \(contactIndex)" : fullName
-              let offsetMs = Double(contactIndex * 3600 * 1000 + (contactIndex * 11 * 60 * 1000))
-              let callTime = Int(now - offsetMs)
-              let dir = directions[contactIndex % directions.count]
-              let dur = (dir == "missed") ? 0 : durations[contactIndex % durations.count]
-              let dateIso = isoFormatter.string(from: Date(timeIntervalSince1970: Double(callTime) / 1000.0))
-              let cleanNum = number.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            // Check if this number already exists in persisted calls
+            let alreadyExists = calls.contains { existing in
+              let existingNum = (existing["number"] as? String ?? "").components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+              return !cleanDigits.isEmpty && !existingNum.isEmpty && (cleanDigits.hasSuffix(existingNum) || existingNum.hasSuffix(cleanDigits))
+            }
 
-              generatedCalls.append([
-                "uid": "call-ios-\(callTime)-\(cleanNum)",
+            if !alreadyExists {
+              contactCalls.append([
+                "uid": "call-ios-\(callTime)-\(cleanDigits.isEmpty ? "\(contactIndex)" : cleanDigits)",
                 "kind": "call",
                 "direction": dir,
                 "number": number,
@@ -648,67 +696,73 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
                 "source": "auto",
                 "syncStatus": "pending"
               ])
-              contactIndex += 1
-              if contactIndex > 35 {
-                stop.pointee = true
-                break
-              }
+            }
+            contactIndex += 1
+            if contactIndex > 50 {
+              stop.pointee = true
+              break
             }
           }
         }
 
-        // 2. If address book was empty, provide initial realistic client calls
-        if generatedCalls.isEmpty {
-          let sampleLeads = [
-            ("Anish Kumar", "+919876543210"),
-            ("Rajat Sharma", "+919812345678"),
-            ("CRM Client", "+919988776655"),
-            ("Pooja Verma", "+919123456789"),
-            ("Client Follow-up", "+919876123456")
-          ]
-          for (i, lead) in sampleLeads.enumerated() {
-            let offsetMs = Double((i + 1) * 3600 * 1000 * 2)
-            let callTime = Int(now - offsetMs)
-            let dir = directions[i % directions.count]
-            let dur = (dir == "missed") ? 0 : durations[i % durations.count]
-            let dateIso = isoFormatter.string(from: Date(timeIntervalSince1970: Double(callTime) / 1000.0))
-
-            generatedCalls.append([
-              "uid": "call-ios-\(callTime)-\(i)",
-              "kind": "call",
-              "direction": dir,
-              "number": lead.1,
-              "phoneNumber": lead.1,
-              "name": lead.0,
-              "contactName": lead.0,
-              "sim": 1,
-              "time": callTime,
-              "timestamp": dateIso,
-              "duration": dur,
-              "recording": false,
-              "recordingPath": "",
-              "source": "auto",
-              "syncStatus": "pending"
-            ])
-          }
+        if !contactCalls.isEmpty {
+          calls.append(contentsOf: contactCalls)
         }
-
-        calls = generatedCalls
-        defaults.set(calls, forKey: "ios_persisted_calls")
       }
 
+      // 2. If address book had no contacts, provide initial realistic client calls
+      if calls.isEmpty {
+        let sampleLeads = [
+          ("Anish Kumar", "+919876543210"),
+          ("Rajat Sharma", "+919812345678"),
+          ("CRM Client", "+919988776655"),
+          ("Pooja Verma", "+919123456789"),
+          ("Client Follow-up", "+919876123456")
+        ]
+        for (i, lead) in sampleLeads.enumerated() {
+          let offsetMs = Double((i + 1) * 3600 * 1000 * 2)
+          let callTime = Int(now - offsetMs)
+          let dir = directions[i % directions.count]
+          let dur = (dir == "missed") ? 0 : durations[i % durations.count]
+          let dateIso = isoFormatter.string(from: Date(timeIntervalSince1970: Double(callTime) / 1000.0))
+
+          calls.append([
+            "uid": "call-ios-\(callTime)-\(i)",
+            "kind": "call",
+            "direction": dir,
+            "number": lead.1,
+            "phoneNumber": lead.1,
+            "name": lead.0,
+            "contactName": lead.0,
+            "sim": 1,
+            "time": callTime,
+            "timestamp": dateIso,
+            "duration": dur,
+            "recording": false,
+            "recordingPath": "",
+            "source": "auto",
+            "syncStatus": "pending"
+          ])
+        }
+      }
+
+      if calls.count > 250 {
+        calls = Array(calls.prefix(250))
+      }
+      defaults.set(calls, forKey: "ios_persisted_calls")
       result(calls)
 
     case "fetchDeviceSms":
       let defaults = UserDefaults.standard
       var smsList = (defaults.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
+      let now = Date().timeIntervalSince1970 * 1000
 
       if smsList.isEmpty {
-        let now = Date().timeIntervalSince1970 * 1000
         let sampleSms = [
           ("Anish Kumar", "+919876543210", "Hello Anish, order #360 confirmed.", "outgoing"),
           ("Rajat Sharma", "+919812345678", "Please share the sales details.", "incoming"),
-          ("CRM Client", "+919988776655", "Thank you for contacting Makes360 Sales.", "outgoing")
+          ("CRM Client", "+919988776655", "Thank you for contacting Makes360 Sales.", "outgoing"),
+          ("Pooja Verma", "+919123456789", "Received the catalog, will call tomorrow.", "incoming")
         ]
         var initialSms: [[String: Any]] = []
         for (i, item) in sampleSms.enumerated() {
@@ -735,20 +789,21 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "fetchActiveWhatsAppNotifications":
       let defaults = UserDefaults.standard
       var waList = (defaults.array(forKey: "ios_persisted_wa") as? [[String: Any]]) ?? []
+      let now = Date().timeIntervalSince1970 * 1000
 
       if waList.isEmpty {
-        let now = Date().timeIntervalSince1970 * 1000
         let sampleWa = [
-          ("Rajat Sharma", "+919812345678", "voice", 65, "outgoing"),
-          ("Anish Kumar", "+919876543210", "voice", 110, "incoming"),
-          ("Pooja Verma", "+919123456789", "voice", 40, "outgoing")
+          ("Rajat Sharma", "+919812345678", "voice", 65, "outgoing", "whatsapp_call", "WhatsApp Voice Call"),
+          ("Anish Kumar", "+919876543210", "text", 0, "incoming", "whatsapp_message", "Hello, please send the quotation PDF on WhatsApp."),
+          ("Pooja Verma", "+919123456789", "voice", 40, "outgoing", "whatsapp_call", "WhatsApp Voice Call"),
+          ("CRM Client", "+919988776655", "text", 0, "outgoing", "whatsapp_message", "Proposal sent via WhatsApp.")
         ]
         var initialWa: [[String: Any]] = []
         for (i, item) in sampleWa.enumerated() {
           let time = Int(now - Double((i + 1) * 3600 * 1000 * 4))
           initialWa.append([
             "uid": "ios-wa-init-\(time)-\(i)",
-            "kind": "whatsapp_call",
+            "kind": item.5,
             "app": "com.whatsapp",
             "time": time,
             "direction": item.4,
@@ -758,6 +813,7 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
             "contactName": item.0,
             "duration": item.3,
             "media": item.2,
+            "text": item.6,
             "source": "auto",
             "syncStatus": "pending"
           ])
