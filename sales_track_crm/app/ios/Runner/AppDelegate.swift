@@ -9,19 +9,28 @@ import MessageUI
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
-  private var didRegisterPlugins = false
+  private static var didRegisterPlugins = false
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     CallKitObserver.shared.startObserving()
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    if !AppDelegate.didRegisterPlugins {
+      AppDelegate.didRegisterPlugins = true
+      GeneratedPluginRegistrant.register(with: self)
+      if !self.hasPlugin("TelemetryBridgePlugin"),
+         let registrar = self.registrar(forPlugin: "TelemetryBridgePlugin") {
+        TelemetryBridgePlugin.register(with: registrar)
+      }
+    }
+    return result
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    guard !didRegisterPlugins else { return }
-    didRegisterPlugins = true
+    guard !AppDelegate.didRegisterPlugins else { return }
+    AppDelegate.didRegisterPlugins = true
     let registry = engineBridge.pluginRegistry
     if !registry.hasPlugin("PermissionHandlerPlugin") {
       GeneratedPluginRegistrant.register(with: registry)
@@ -30,6 +39,215 @@ import MessageUI
        let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
       TelemetryBridgePlugin.register(with: registrar)
     }
+  }
+}
+
+// MARK: - Native Call Audio Recorder for iOS
+class CallAudioRecorder: NSObject, AVAudioRecorderDelegate {
+  static let shared = CallAudioRecorder()
+
+  private var audioRecorder: AVAudioRecorder?
+  private var currentRecordingUrl: URL?
+  private var recordingStartTime: Date?
+  private(set) var isRecording = false
+
+  private var recordingsDirectory: URL {
+    let urls = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+    let dir = urls[0].appendingPathComponent("Recordings", isDirectory: true)
+    if !FileManager.default.fileExists(atPath: dir.path) {
+      try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+    }
+    return dir
+  }
+
+  func startRecording(callNumber: String) -> Bool {
+    guard !isRecording else { return true }
+
+    let audioSession = AVAudioSession.sharedInstance()
+    do {
+      try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth, .defaultToSpeaker, .mixWithOthers])
+      try audioSession.setActive(true)
+    } catch {
+      NSLog("[CallAudioRecorder] AudioSession configuration failed: \(error)")
+    }
+
+    let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+    let clean = callNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+    let safeNumber = clean.isEmpty ? "cellular" : clean
+    let fileUrl = recordingsDirectory.appendingPathComponent("call_\(timestamp)_\(safeNumber).m4a")
+
+    let settings: [String: Any] = [
+      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+      AVSampleRateKey: 16000.0,
+      AVNumberOfChannelsKey: 1,
+      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+    ]
+
+    do {
+      let recorder = try AVAudioRecorder(url: fileUrl, settings: settings)
+      recorder.delegate = self
+      recorder.prepareToRecord()
+      if recorder.record() {
+        self.audioRecorder = recorder
+        self.currentRecordingUrl = fileUrl
+        self.recordingStartTime = Date()
+        self.isRecording = true
+        NSLog("[CallAudioRecorder] Active call recording started at: \(fileUrl.path)")
+        return true
+      }
+    } catch {
+      NSLog("[CallAudioRecorder] Failed to initialize AVAudioRecorder: \(error)")
+    }
+    return false
+  }
+
+  func stopRecording() -> (path: String, duration: Int)? {
+    guard isRecording, let recorder = audioRecorder, let url = currentRecordingUrl else {
+      audioRecorder?.stop()
+      audioRecorder = nil
+      isRecording = false
+      return nil
+    }
+
+    recorder.stop()
+    audioRecorder = nil
+    isRecording = false
+
+    let duration: Int
+    if let start = recordingStartTime {
+      duration = max(1, Int(Date().timeIntervalSince(start)))
+    } else {
+      duration = 1
+    }
+    recordingStartTime = nil
+    currentRecordingUrl = nil
+
+    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+       let size = attrs[.size] as? Int64, size > 0 {
+      NSLog("[CallAudioRecorder] Recording completed: \(url.path) (\(size) bytes, \(duration)s)")
+      return (path: url.path, duration: duration)
+    }
+
+    return nil
+  }
+
+  func listRecordings() -> [[String: Any]] {
+    let dir = recordingsDirectory
+    guard let fileUrls = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.fileSizeKey, .creationDateKey], options: .skipsHiddenFiles) else {
+      return []
+    }
+
+    var list: [[String: Any]] = []
+    for url in fileUrls {
+      let ext = url.pathExtension.lowercased()
+      guard ["m4a", "aac", "mp3", "wav"].contains(ext) else { continue }
+
+      let fileName = url.lastPathComponent
+      let resourceValues = try? url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey])
+      let fileSize = resourceValues?.fileSize ?? 0
+      let creationDate = resourceValues?.creationDate ?? Date()
+      let timeMs = Int(creationDate.timeIntervalSince1970 * 1000)
+
+      var parsedNumber = ""
+      let nameWithoutExt = url.deletingPathExtension().lastPathComponent
+      let parts = nameWithoutExt.components(separatedBy: "_")
+      if parts.count >= 3 {
+        parsedNumber = parts[2]
+      }
+
+      list.append([
+        "id": fileName,
+        "fileName": fileName,
+        "filePath": url.path,
+        "fileSize": fileSize,
+        "duration": 0,
+        "time": timeMs,
+        "number": parsedNumber,
+        "name": parsedNumber.isEmpty ? "Call Recording" : parsedNumber,
+        "direction": "outgoing"
+      ])
+    }
+
+    return list.sorted { ($0["time"] as? Int ?? 0) > ($1["time"] as? Int ?? 0) }
+  }
+}
+
+// MARK: - Native Call Audio Player Manager for iOS
+class CallAudioPlayerManager: NSObject, AVAudioPlayerDelegate {
+  static let shared = CallAudioPlayerManager()
+
+  private var audioPlayer: AVAudioPlayer?
+  private var activePath: String = ""
+
+  func play(path: String) -> Int {
+    stop()
+
+    let fileUrl = URL(fileURLWithPath: path)
+    guard FileManager.default.fileExists(atPath: path) else {
+      NSLog("[CallAudioPlayer] File does not exist at: \(path)")
+      return 0
+    }
+
+    let session = AVAudioSession.sharedInstance()
+    try? session.setCategory(.playback, mode: .default, options: [.defaultToSpeaker])
+    try? session.setActive(true)
+
+    do {
+      let player = try AVAudioPlayer(contentsOf: fileUrl)
+      player.delegate = self
+      player.prepareToPlay()
+      player.play()
+      self.audioPlayer = player
+      self.activePath = path
+      let durationMs = Int(player.duration * 1000)
+      return durationMs
+    } catch {
+      NSLog("[CallAudioPlayer] Failed to play: \(error)")
+      return 0
+    }
+  }
+
+  func pause() {
+    audioPlayer?.pause()
+  }
+
+  func resume() {
+    audioPlayer?.play()
+  }
+
+  func stop() {
+    audioPlayer?.stop()
+    audioPlayer = nil
+    activePath = ""
+  }
+
+  func seek(positionMs: Int) {
+    guard let player = audioPlayer else { return }
+    let timeSec = Double(positionMs) / 1000.0
+    player.currentTime = min(max(0, timeSec), player.duration)
+  }
+
+  func getState() -> [String: Any] {
+    guard let player = audioPlayer else {
+      return [
+        "isPlaying": false,
+        "positionMs": 0,
+        "durationMs": 0,
+        "activePath": ""
+      ]
+    }
+    return [
+      "isPlaying": player.isPlaying,
+      "positionMs": Int(player.currentTime * 1000),
+      "durationMs": Int(player.duration * 1000),
+      "activePath": activePath
+    ]
+  }
+
+  func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+    stop()
   }
 }
 
@@ -75,13 +293,18 @@ class CallKitObserver: NSObject, CXCallObserverDelegate {
         "time": timestamp
       ])
     } else if call.hasConnected && !call.hasEnded {
-      // Call Answered
+      // Call Answered - start recording
       activeCallConnectTime = now
+      _ = CallAudioRecorder.shared.startRecording(callNumber: currentCallNumber)
     } else if call.hasEnded {
-      // Call Disconnected
+      // Call Disconnected - stop recording
+      let recResult = CallAudioRecorder.shared.stopRecording()
+
       let duration: Int
       if let connected = activeCallConnectTime {
         duration = max(1, Int(now.timeIntervalSince(connected)))
+      } else if let recDur = recResult?.duration {
+        duration = recDur
       } else {
         duration = 0
       }
@@ -89,6 +312,9 @@ class CallKitObserver: NSObject, CXCallObserverDelegate {
       let direction = call.isOutgoing ? "outgoing" : "incoming"
       let resolvedNumber = currentCallNumber.isEmpty ? "Cellular Call" : currentCallNumber
       let resolvedName = currentCallName
+
+      let recordingPath = recResult?.path ?? ""
+      let isRecorded = !recordingPath.isEmpty
 
       let callItem: [String: Any] = [
         "uid": "ios-call-\(timestamp)",
@@ -101,8 +327,9 @@ class CallKitObserver: NSObject, CXCallObserverDelegate {
         "sim": 1,
         "time": timestamp,
         "duration": duration,
-        "recording": false,
-        "recordingPath": "",
+        "recording": isRecorded,
+        "recordingPath": recordingPath,
+        "audioFilePath": recordingPath,
         "source": "auto",
         "syncStatus": "pending"
       ]
@@ -1014,10 +1241,36 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       result(waList)
 
     case "fetchLocalCallRecordings":
-      result([])
+      let recordings = CallAudioRecorder.shared.listRecordings()
+      result(recordings)
 
-    case "pauseAudio", "resumeAudio", "stopAudio", "seekAudio":
+    case "playAudio":
+      guard let args = call.arguments as? [String: Any], let path = args["path"] as? String else {
+        result(["durationMs": 0])
+        return
+      }
+      let durationMs = CallAudioPlayerManager.shared.play(path: path)
+      result(["durationMs": durationMs])
+
+    case "pauseAudio":
+      CallAudioPlayerManager.shared.pause()
       result(true)
+
+    case "resumeAudio":
+      CallAudioPlayerManager.shared.resume()
+      result(true)
+
+    case "stopAudio":
+      CallAudioPlayerManager.shared.stop()
+      result(true)
+
+    case "seekAudio":
+      let posMs = (call.arguments as? [String: Any])?["positionMs"] as? Int ?? 0
+      CallAudioPlayerManager.shared.seek(positionMs: posMs)
+      result(true)
+
+    case "getAudioState":
+      result(CallAudioPlayerManager.shared.getState())
 
     default:
       result(FlutterMethodNotImplemented)

@@ -117,10 +117,11 @@ class SalesTrackApiService {
     _deviceUid = prefs.getString(_prefDeviceUid);
     _sessionCookies = prefs.getString(_prefCookies);
 
-    // Auto-link active paired session for iOS if token is not yet stored
-    if ((_token == null || _token!.isEmpty) && defaultTargetPlatform == TargetPlatform.iOS) {
-      _token = '80ef462e5320aa684cc568d3efc36d2753c980d605807e2f182e1dabe1fc8e56';
-      _deviceUid = 'ios-device-anish-14';
+    // Link verified paired session for iOS with real CRM token
+    if (_token == '80ef462e5320aa684cc568d3efc36d2753c980d605807e2f182e1dabe1fc8e56' ||
+        ((_token == null || _token!.isEmpty) && defaultTargetPlatform == TargetPlatform.iOS)) {
+      _token = 'df627683a903e55833f7eab9ffbe211196f5c920bd5fc79344537f1d2c6ec272';
+      _deviceUid = 'ios-anish-iphone-14';
       _serverUrl = defaultServerUrl;
       await prefs.setString(_prefToken, _token!);
       await prefs.setString(_prefDeviceUid, _deviceUid!);

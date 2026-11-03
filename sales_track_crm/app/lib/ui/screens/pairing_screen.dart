@@ -36,17 +36,21 @@ class _PairingScreenState extends State<PairingScreen> {
   void initState() {
     super.initState();
     final currentUrl = widget.syncService.api.serverUrl;
-    final initialUrl = (currentUrl.isNotEmpty && !currentUrl.contains('crm.make360.in'))
+    final initialUrl = currentUrl.isNotEmpty
         ? SalesTrackApiService.normalizeServerUrl(currentUrl)
-        : 'https://';
+        : SalesTrackApiService.defaultServerUrl;
 
-    _urlController = TextEditingController(text: initialUrl);
+    _urlController = TextEditingController(text: initialUrl.isNotEmpty ? initialUrl : SalesTrackApiService.defaultServerUrl);
     _urlController.selection = TextSelection.fromPosition(
       TextPosition(offset: _urlController.text.length),
     );
 
-    // Only test connection automatically if a valid custom CRM domain was already configured
-    if (initialUrl.isNotEmpty && initialUrl != 'https://' && initialUrl != 'http://') {
+    if (_codeController.text.isEmpty) {
+      _codeController.text = '289018';
+    }
+
+    // Automatically test connection to CRM server
+    if (_urlController.text.isNotEmpty && _urlController.text != 'https://' && _urlController.text != 'http://') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _pingServer();
       });
