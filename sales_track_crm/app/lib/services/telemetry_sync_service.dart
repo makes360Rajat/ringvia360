@@ -310,23 +310,15 @@ class TelemetrySyncService extends ChangeNotifier {
       _listenToNativeEvents();
       await checkPermissions();
 
+      // Always load local device data and persisted history upfront
+      await _loadPersistedHistory();
+      await scanLocalRecordings();
+      if (hasCallLogPermission) await syncDeviceCallLogs();
+      if (hasSmsPermission) await syncDeviceSms();
+      await syncActiveWhatsAppNotifications();
+      await refreshPendingCounts();
+
       if (_isPaired) {
-        await _loadPersistedHistory();
-        await refreshPendingCounts();
-
-        // Hydrate from device and sync in background without blocking initial UI render
-        Future.microtask(() async {
-          try {
-            if (hasCallLogPermission) await syncDeviceCallLogs();
-            if (hasSmsPermission) await syncDeviceSms();
-            await syncActiveWhatsAppNotifications();
-            await syncServerEvents();
-            await fetchCallLists();
-          } catch (e) {
-            debugPrint('Initial telemetry hydration error: $e');
-          }
-        });
-
         // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
         Future.delayed(const Duration(milliseconds: 100), () async {
           await fetchPlatformDeviceInfo();
@@ -334,14 +326,6 @@ class TelemetrySyncService extends ChangeNotifier {
           _startHeartbeatLoop();
 
           try {
-            if (hasCallLogPermission) {
-              await syncDeviceCallLogs();
-            }
-            if (hasSmsPermission) {
-              await syncDeviceSms();
-            }
-            await scanLocalRecordings();
-            await syncActiveWhatsAppNotifications();
             await syncServerEvents();
             await fetchCallLists();
             await syncNow();

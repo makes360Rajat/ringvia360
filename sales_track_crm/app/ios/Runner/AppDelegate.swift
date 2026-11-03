@@ -858,6 +858,52 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         }
       }
 
+    case "fetchDeviceContacts":
+      DispatchQueue.global(qos: .userInitiated).async {
+        var list: [[String: Any]] = []
+        if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
+          let store = CNContactStore()
+          let keys = [CNContactGivenNameKey as CNKeyDescriptor, CNContactFamilyNameKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
+          let request = CNContactFetchRequest(keysToFetch: keys)
+          try? store.enumerateContacts(with: request) { contact, _ in
+            let name = [contact.givenName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+            for phone in contact.phoneNumbers {
+              let number = phone.value.stringValue
+              list.append(["name": name.isEmpty ? number : name, "phoneNumber": number])
+            }
+          }
+        }
+        DispatchQueue.main.async {
+          result(list)
+        }
+      }
+
+    case "resolveContactName":
+      let rawNumber = (call.arguments as? [String: Any])?["phoneNumber"] as? String ?? ""
+      let clean = rawNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+      DispatchQueue.global(qos: .userInitiated).async {
+        var resolved: String? = nil
+        if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized, !clean.isEmpty {
+          let store = CNContactStore()
+          let keys = [CNContactGivenNameKey as CNKeyDescriptor, CNContactFamilyNameKey as CNKeyDescriptor, CNContactPhoneNumbersKey as CNKeyDescriptor]
+          let request = CNContactFetchRequest(keysToFetch: keys)
+          try? store.enumerateContacts(with: request) { contact, stop in
+            for phone in contact.phoneNumbers {
+              let digits = phone.value.stringValue.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+              if digits.hasSuffix(clean) || clean.hasSuffix(digits) {
+                let name = [contact.givenName, contact.familyName].filter { !$0.isEmpty }.joined(separator: " ")
+                resolved = name.isEmpty ? nil : name
+                stop.pointee = true
+                break
+              }
+            }
+          }
+        }
+        DispatchQueue.main.async {
+          result(resolved)
+        }
+      }
+
     case "fetchDeviceCallLogs":
       let defaults = UserDefaults.standard
       var calls = (defaults.array(forKey: "ios_persisted_calls") as? [[String: Any]]) ?? []
