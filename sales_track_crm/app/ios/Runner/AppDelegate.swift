@@ -15,7 +15,7 @@ import MessageUI
     guard !arePluginsRegistered else { return }
     arePluginsRegistered = true
     GeneratedPluginRegistrant.register(with: registry)
-    if let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
+    if !registry.hasPlugin("TelemetryBridgePlugin"), let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
       TelemetryBridgePlugin.register(with: registrar)
     }
   }
