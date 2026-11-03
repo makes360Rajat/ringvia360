@@ -411,6 +411,7 @@ class TelemetrySyncService extends ChangeNotifier {
       if (hasSmsPermission) {
         await syncDeviceSms();
       }
+      await syncActiveWhatsAppNotifications();
       await scanLocalRecordings();
     } catch (e) {
       debugPrint('Error requesting permissions: $e');
@@ -428,6 +429,7 @@ class TelemetrySyncService extends ChangeNotifier {
       if (hasSmsPermission) {
         await syncDeviceSms();
       }
+      await syncActiveWhatsAppNotifications();
       await scanLocalRecordings();
     } catch (e) {
       debugPrint('Error requesting permission $permissionGroup: $e');
@@ -549,7 +551,14 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     } catch (_) {}
 
-    final steps = <Future<void> Function()>[syncDeviceCallLogs, syncDeviceSms, scanLocalRecordings, fetchCallLists, syncNow];
+    final steps = <Future<void> Function()>[
+      syncDeviceCallLogs,
+      syncDeviceSms,
+      syncActiveWhatsAppNotifications,
+      scanLocalRecordings,
+      fetchCallLists,
+      syncNow
+    ];
     for (final step in steps) {
       try {
         await step();
@@ -2386,48 +2395,54 @@ class TelemetrySyncService extends ChangeNotifier {
         _pendingQueue.addAll(pendingFromDb);
         _pendingUids.clear();
         _pendingUids.addAll(pendingFromDb.map((e) => e.uid).where((u) => u.isNotEmpty));
-        return;
+        if (_calls.isNotEmpty && _whatsappEvents.isNotEmpty && _smsList.isNotEmpty) {
+          return;
+        }
       }
     } catch (e) {
       debugPrint('SQLite initial read error: $e');
     }
 
-    // 2. Migration fallback from SharedPreferences if SQLite was freshly initialized
+    // 2. Migration fallback from SharedPreferences if SQLite was freshly initialized or missing items
     final prefs = await SharedPreferences.getInstance();
 
-    final cachedCalls = prefs.getStringList('mks_cached_calls') ?? [];
-    final tempCalls = <SalesTrackEvent>[];
-    for (final str in cachedCalls) {
-      try {
-        tempCalls.add(SalesTrackEvent.fromJson(jsonDecode(str)));
-      } catch (_) {}
-    }
-    _calls.clear();
-    _calls.addAll(dedupCallsList(tempCalls));
-    if (_calls.isNotEmpty) {
-      await LocalDatabaseService.instance.saveEvents(_calls);
-    }
-
-    final cachedSms = prefs.getStringList('mks_cached_sms') ?? [];
-    _smsList.clear();
-    for (final str in cachedSms) {
-      try {
-        _smsList.add(SalesTrackEvent.fromJson(jsonDecode(str)));
-      } catch (_) {}
-    }
-    if (_smsList.isNotEmpty) {
-      await LocalDatabaseService.instance.saveEvents(_smsList);
+    if (_calls.isEmpty) {
+      final cachedCalls = prefs.getStringList('mks_cached_calls') ?? [];
+      final tempCalls = <SalesTrackEvent>[];
+      for (final str in cachedCalls) {
+        try {
+          tempCalls.add(SalesTrackEvent.fromJson(jsonDecode(str)));
+        } catch (_) {}
+      }
+      _calls.clear();
+      _calls.addAll(dedupCallsList(tempCalls));
+      if (_calls.isNotEmpty) {
+        await LocalDatabaseService.instance.saveEvents(_calls);
+      }
     }
 
-    final cachedWa = prefs.getStringList('mks_cached_whatsapp') ?? [];
-    _whatsappEvents.clear();
-    for (final str in cachedWa) {
-      try {
-        _whatsappEvents.add(SalesTrackEvent.fromJson(jsonDecode(str)));
-      } catch (_) {}
+    if (_smsList.isEmpty) {
+      final cachedSms = prefs.getStringList('mks_cached_sms') ?? [];
+      for (final str in cachedSms) {
+        try {
+          _smsList.add(SalesTrackEvent.fromJson(jsonDecode(str)));
+        } catch (_) {}
+      }
+      if (_smsList.isNotEmpty) {
+        await LocalDatabaseService.instance.saveEvents(_smsList);
+      }
     }
-    if (_whatsappEvents.isNotEmpty) {
-      await LocalDatabaseService.instance.saveEvents(_whatsappEvents);
+
+    if (_whatsappEvents.isEmpty) {
+      final cachedWa = prefs.getStringList('mks_cached_whatsapp') ?? [];
+      for (final str in cachedWa) {
+        try {
+          _whatsappEvents.add(SalesTrackEvent.fromJson(jsonDecode(str)));
+        } catch (_) {}
+      }
+      if (_whatsappEvents.isNotEmpty) {
+        await LocalDatabaseService.instance.saveEvents(_whatsappEvents);
+      }
     }
 
     final cachedRecs = prefs.getStringList('mks_cached_recordings') ?? [];

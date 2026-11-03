@@ -341,6 +341,8 @@ class _HomeScreenState extends State<HomeScreen>
         lower == 'unknown caller' ||
         lower == 'unsaved' ||
         lower == 'un saved' ||
+        lower == 'unsaved number' ||
+        lower == 'unsaved contact' ||
         lower == 'private number' ||
         lower == 'no caller id') {
       return false;
@@ -1272,7 +1274,7 @@ class _HomeScreenState extends State<HomeScreen>
       final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
       final qNorm = q.replaceAll(RegExp(r'\D'), '');
       final bool isSaved = _isSavedContact(c.name, c.number);
-      final String displayName = isSaved ? c.name : 'Un Saved';
+      final String displayName = isSaved ? c.name : 'Unsaved Number';
       if (displayName.toLowerCase().contains(q)) return true;
       if (c.number.toLowerCase().contains(q)) return true;
       if (qNorm.isNotEmpty &&
@@ -1298,7 +1300,7 @@ class _HomeScreenState extends State<HomeScreen>
     final contactName = filtered.isNotEmpty
         ? (_isSavedContact(filtered.first.name, filtered.first.number)
             ? filtered.first.name
-            : 'Un Saved')
+            : 'Unsaved Number')
         : '';
     final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
 
@@ -1896,7 +1898,7 @@ class _HomeScreenState extends State<HomeScreen>
     final String rawName = (call.name?.toString() ?? '').trim();
     final String number = (call.number?.toString() ?? '').trim();
     final bool isSaved = _isSavedContact(rawName, number);
-    final String title = isSaved ? rawName : 'Un Saved';
+    final String title = isSaved ? rawName : 'Unsaved Number';
     final bool synced = call.syncStatus == 'synced';
     final int sim = call.sim is int ? call.sim as int : 0;
     final int seconds = call.duration is int ? call.duration as int : 0;
@@ -1971,6 +1973,26 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                     ),
+                    if (!isSaved) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: colors.warning.withOpacity(0.14),
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(color: colors.warning.withOpacity(0.4)),
+                        ),
+                        child: Text(
+                          'UNSAVED',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                            color: colors.warning,
+                          ),
+                        ),
+                      ),
+                    ],
                     if (sim > 0) ...[
                       const SizedBox(width: 8),
                       Container(
@@ -2502,47 +2524,99 @@ class _HomeScreenState extends State<HomeScreen>
                               size: 20,
                             ),
                           ),
-                          title: Row(
+                          title: Builder(
+                            builder: (context) {
+                              final bool isSavedWa = _isSavedContact(ev.name, ev.number);
+                              final String waTitle = isSavedWa ? ev.name : 'Unsaved Number';
+                              return Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      waTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14.5,
+                                        color: colors.textPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                  if (!isSavedWa) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: colors.warning.withOpacity(0.14),
+                                        borderRadius: BorderRadius.circular(5),
+                                        border: Border.all(color: colors.warning.withOpacity(0.4)),
+                                      ),
+                                      child: Text(
+                                        'UNSAVED',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.3,
+                                          color: colors.warning,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: (isBusiness
+                                              ? colors.whatsappBusiness
+                                              : colors.whatsappGreen)
+                                          .withOpacity(0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      isBusiness ? 'BUSINESS' : 'PERSONAL',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: isBusiness
+                                            ? colors.whatsappBusiness
+                                            : colors.whatsappGreen,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  ev.name.isNotEmpty ? ev.name : 'WhatsApp Contact',
+                              if (ev.number.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  ev.number,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14.5,
-                                    color: colors.textPrimary,
+                                    fontSize: 12.5,
+                                    fontWeight: _isSavedContact(ev.name, ev.number)
+                                        ? FontWeight.w500
+                                        : FontWeight.w600,
+                                    color: _isSavedContact(ev.name, ev.number)
+                                        ? colors.textSecondary
+                                        : colors.textPrimary,
                                   ),
                                 ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: (isBusiness
-                                          ? colors.whatsappBusiness
-                                          : colors.whatsappGreen)
-                                      .withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  isBusiness ? 'BUSINESS' : 'PERSONAL',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                    color: isBusiness
-                                        ? colors.whatsappBusiness
-                                        : colors.whatsappGreen,
-                                  ),
-                                ),
+                              ],
+                              const SizedBox(height: 2),
+                              Text(
+                                isCall
+                                    ? 'WhatsApp Call (${_formatDuration(ev.duration)})'
+                                    : (ev.text ?? 'Message'),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12, color: colors.textSecondary),
                               ),
                             ],
-                          ),
-                          subtitle: Text(
-                            isCall
-                                ? 'WhatsApp Call (${_formatDuration(ev.duration)})'
-                                : (ev.text ?? 'Message'),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, color: colors.textSecondary),
                           ),
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -2731,19 +2805,76 @@ class _HomeScreenState extends State<HomeScreen>
                       backgroundColor: colors.secondary.withOpacity(0.15),
                       child: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
                     ),
-                    title: Text(
-                      sms.name.isNotEmpty ? sms.name : sms.number,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
-                        color: colors.textPrimary,
-                      ),
+                    title: Builder(
+                      builder: (context) {
+                        final bool isSavedSms = _isSavedContact(sms.name, sms.number);
+                        final String smsTitle = isSavedSms ? sms.name : 'Unsaved Number';
+                        return Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                smsTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14.5,
+                                  color: colors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            if (!isSavedSms) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: colors.warning.withOpacity(0.14),
+                                  borderRadius: BorderRadius.circular(5),
+                                  border: Border.all(color: colors.warning.withOpacity(0.4)),
+                                ),
+                                child: Text(
+                                  'UNSAVED',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.3,
+                                    color: colors.warning,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        );
+                      },
                     ),
-                    subtitle: Text(
-                      sms.text ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (sms.number.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            sms.number,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: _isSavedContact(sms.name, sms.number)
+                                  ? FontWeight.w500
+                                  : FontWeight.w600,
+                              color: _isSavedContact(sms.name, sms.number)
+                                  ? colors.textSecondary
+                                  : colors.textPrimary,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 2),
+                        Text(
+                          sms.text ?? '',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                        ),
+                      ],
                     ),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -3257,7 +3388,7 @@ class _HomeScreenState extends State<HomeScreen>
           size: 20,
         ),
         title: Text(
-          _isSavedContact(call.name, call.number) ? call.name : 'Un Saved',
+          _isSavedContact(call.name, call.number) ? call.name : 'Unsaved Number',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -3293,7 +3424,7 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.chat_rounded, color: colors.whatsappGreen, size: 20),
         title: Text(
-          wa.name.isNotEmpty ? wa.name : 'WhatsApp Contact',
+          _isSavedContact(wa.name, wa.number) ? wa.name : 'Unsaved Number',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -3301,7 +3432,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         subtitle: Text(
-          '${wa.text ?? "WhatsApp message"} • ${_formatDialerTime(wa.time as int)}',
+          '${wa.number.isNotEmpty ? "${wa.number} • " : ""}${wa.text ?? "WhatsApp message"} • ${_formatDialerTime(wa.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 11, color: colors.textSecondary),
@@ -3331,7 +3462,7 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
         title: Text(
-          sms.name.isNotEmpty ? sms.name : sms.number,
+          _isSavedContact(sms.name, sms.number) ? sms.name : 'Unsaved Number',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -3339,7 +3470,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         subtitle: Text(
-          '${sms.text ?? "SMS"} • ${_formatDialerTime(sms.time as int)}',
+          '${sms.number.isNotEmpty ? "${sms.number} • " : ""}${sms.text ?? "SMS"} • ${_formatDialerTime(sms.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 11, color: colors.textSecondary),

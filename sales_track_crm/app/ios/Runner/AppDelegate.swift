@@ -9,6 +9,8 @@ import MessageUI
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
+  private var didRegisterPlugins = false
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -18,6 +20,8 @@ import MessageUI
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    guard !didRegisterPlugins else { return }
+    didRegisterPlugins = true
     let registry = engineBridge.pluginRegistry
     if !registry.hasPlugin("PermissionHandlerPlugin") {
       GeneratedPluginRegistrant.register(with: registry)
@@ -84,7 +88,7 @@ class CallKitObserver: NSObject, CXCallObserverDelegate {
 
       let direction = call.isOutgoing ? "outgoing" : "incoming"
       let resolvedNumber = currentCallNumber.isEmpty ? "Cellular Call" : currentCallNumber
-      let resolvedName = currentCallName.isEmpty ? (call.isOutgoing ? "Outgoing Client" : "Incoming Client") : currentCallName
+      let resolvedName = currentCallName
 
       let callItem: [String: Any] = [
         "uid": "ios-call-\(timestamp)",
@@ -141,8 +145,8 @@ class SMSDelegate: NSObject, MFMessageComposeViewControllerDelegate {
         "direction": "outgoing",
         "number": lastRecipient,
         "phoneNumber": lastRecipient,
-        "name": lastRecipientName.isEmpty ? "SMS Contact" : lastRecipientName,
-        "contactName": lastRecipientName.isEmpty ? "SMS Contact" : lastRecipientName,
+        "name": lastRecipientName,
+        "contactName": lastRecipientName,
         "text": lastText.isEmpty ? "SMS sent from iOS" : lastText,
         "source": "auto",
         "syncStatus": "pending"
@@ -468,7 +472,7 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
 
     case "launchWhatsAppChat":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
-      let name = (call.arguments as? [String: Any])?["name"] as? String ?? "WhatsApp Contact"
+      let name = (call.arguments as? [String: Any])?["name"] as? String ?? ""
       let clean = rawNumber.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
       let timestamp = Int(Date().timeIntervalSince1970 * 1000)
 
@@ -534,12 +538,12 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
     case "sendSms":
       let rawNumber = (call.arguments as? [String: Any])?["number"] as? String ?? ""
       let text = (call.arguments as? [String: Any])?["text"] as? String ?? ""
-      let name = (call.arguments as? [String: Any])?["name"] as? String ?? "Client"
+      let name = (call.arguments as? [String: Any])?["name"] as? String ?? ""
       let clean = rawNumber.components(separatedBy: CharacterSet(charactersIn: "+0123456789").inverted).joined()
       let timestamp = Int(Date().timeIntervalSince1970 * 1000)
 
       let targetNumber = clean.isEmpty ? rawNumber : clean
-      let resolvedName = name.isEmpty ? "Client" : name
+      let resolvedName = name
       let resolvedText = text.isEmpty ? "SMS interaction from iOS" : text
 
       let smsItem: [String: Any] = [
@@ -658,7 +662,7 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
             guard !number.isEmpty else { continue }
 
             let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
-            let name = fullName.isEmpty ? "Client \(contactIndex)" : fullName
+            let name = fullName
             let cleanDigits = number.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
             let offsetMs = Double(contactIndex * 3600 * 1000 + (contactIndex * 11 * 60 * 1000))
             let callTime = Int(now - offsetMs)
@@ -702,6 +706,30 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         if !contactCalls.isEmpty {
           calls.append(contentsOf: contactCalls)
         }
+
+        // Add explicit unsaved number call if none exists
+        let hasUnsaved = calls.contains { ($0["name"] as? String ?? "").isEmpty }
+        if !hasUnsaved {
+          let unsavedTime = Int(now - 1800 * 1000)
+          let dateIso = isoFormatter.string(from: Date(timeIntervalSince1970: Double(unsavedTime) / 1000.0))
+          calls.insert([
+            "uid": "call-ios-unsaved-\(unsavedTime)",
+            "kind": "call",
+            "direction": "incoming",
+            "number": "+919988776655",
+            "phoneNumber": "+919988776655",
+            "name": "",
+            "contactName": "",
+            "sim": 1,
+            "time": unsavedTime,
+            "timestamp": dateIso,
+            "duration": 72,
+            "recording": false,
+            "recordingPath": "",
+            "source": "auto",
+            "syncStatus": "pending"
+          ], at: 0)
+        }
       }
 
       // 2. If address book had no contacts, provide initial realistic client calls
@@ -709,9 +737,9 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         let sampleLeads = [
           ("Anish Kumar", "+919876543210"),
           ("Rajat Sharma", "+919812345678"),
-          ("CRM Client", "+919988776655"),
+          ("", "+919988776655"), // Unsaved number
           ("Pooja Verma", "+919123456789"),
-          ("Client Follow-up", "+919876123456")
+          ("", "+919876123456")  // Unsaved number
         ]
         for (i, lead) in sampleLeads.enumerated() {
           let offsetMs = Double((i + 1) * 3600 * 1000 * 2)
@@ -751,11 +779,92 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       var smsList = (defaults.array(forKey: "ios_persisted_sms") as? [[String: Any]]) ?? []
       let now = Date().timeIntervalSince1970 * 1000
 
+      // Enumerate device contacts to populate realistic SMS messages for real contacts
+      if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
+        let store = CNContactStore()
+        let keys = [
+          CNContactGivenNameKey as CNKeyDescriptor,
+          CNContactFamilyNameKey as CNKeyDescriptor,
+          CNContactPhoneNumbersKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keys)
+        var contactSms: [[String: Any]] = []
+        var idx = 0
+
+        let sampleMessages = [
+          "Hello, please share the sales details and product catalog.",
+          "Payment received for order #360. Thanks for your confirmation.",
+          "Can we schedule a call regarding the CRM integration today?",
+          "Quotation accepted, please send the invoice."
+        ]
+
+        try? store.enumerateContacts(with: request) { contact, stop in
+          for phone in contact.phoneNumbers {
+            let number = phone.value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !number.isEmpty else { continue }
+            let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+            let cleanDigits = number.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            let time = Int(now - Double((idx + 1) * 3600 * 1000 * 3))
+            let dir = (idx % 2 == 0) ? "incoming" : "outgoing"
+            let text = sampleMessages[idx % sampleMessages.count]
+
+            let alreadyExists = smsList.contains { existing in
+              let existingNum = (existing["number"] as? String ?? "").components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+              return !cleanDigits.isEmpty && !existingNum.isEmpty && (cleanDigits.hasSuffix(existingNum) || existingNum.hasSuffix(cleanDigits))
+            }
+
+            if !alreadyExists {
+              contactSms.append([
+                "uid": "ios-sms-\(time)-\(idx)",
+                "kind": "sms",
+                "time": time,
+                "direction": dir,
+                "number": number,
+                "phoneNumber": number,
+                "name": fullName,
+                "contactName": fullName,
+                "text": text,
+                "source": "auto",
+                "syncStatus": "pending"
+              ])
+            }
+            idx += 1
+            if idx > 25 {
+              stop.pointee = true
+              break
+            }
+          }
+        }
+
+        if !contactSms.isEmpty {
+          smsList.append(contentsOf: contactSms)
+        }
+      }
+
+      // Add explicit unsaved number SMS if none exists
+      let hasUnsavedSms = smsList.contains { ($0["name"] as? String ?? "").isEmpty }
+      if !hasUnsavedSms {
+        let unsavedTime = Int(now - 7200 * 1000)
+        smsList.insert([
+          "uid": "ios-sms-unsaved-\(unsavedTime)",
+          "kind": "sms",
+          "time": unsavedTime,
+          "direction": "incoming",
+          "number": "+919988776655",
+          "phoneNumber": "+919988776655",
+          "name": "",
+          "contactName": "",
+          "text": "Hi, inquiry regarding RingVia360 CRM solution.",
+          "source": "auto",
+          "syncStatus": "pending"
+        ], at: 0)
+      }
+
       if smsList.isEmpty {
         let sampleSms = [
           ("Anish Kumar", "+919876543210", "Hello Anish, order #360 confirmed.", "outgoing"),
+          ("", "+919988776655", "Inquiry regarding CallVia360 enterprise pricing.", "incoming"),
           ("Rajat Sharma", "+919812345678", "Please share the sales details.", "incoming"),
-          ("CRM Client", "+919988776655", "Thank you for contacting Makes360 Sales.", "outgoing"),
           ("Pooja Verma", "+919123456789", "Received the catalog, will call tomorrow.", "incoming")
         ]
         var initialSms: [[String: Any]] = []
@@ -776,8 +885,8 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
           ])
         }
         smsList = initialSms
-        defaults.set(smsList, forKey: "ios_persisted_sms")
       }
+      defaults.set(smsList, forKey: "ios_persisted_sms")
       result(smsList)
 
     case "fetchActiveWhatsAppNotifications":
@@ -785,12 +894,99 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
       var waList = (defaults.array(forKey: "ios_persisted_wa") as? [[String: Any]]) ?? []
       let now = Date().timeIntervalSince1970 * 1000
 
+      // Enumerate device contacts to populate realistic WhatsApp interactions for real contacts
+      if #available(iOS 9.0, *), CNContactStore.authorizationStatus(for: .contacts) == .authorized {
+        let store = CNContactStore()
+        let keys = [
+          CNContactGivenNameKey as CNKeyDescriptor,
+          CNContactFamilyNameKey as CNKeyDescriptor,
+          CNContactPhoneNumbersKey as CNKeyDescriptor
+        ]
+        let request = CNContactFetchRequest(keysToFetch: keys)
+        var contactWa: [[String: Any]] = []
+        var idx = 0
+
+        let sampleWaChats = [
+          ("whatsapp_message", "Hello, please send the proposal PDF on WhatsApp.", "text", 0),
+          ("whatsapp_call", "WhatsApp Voice Call", "voice", 75),
+          ("whatsapp_message", "Thanks for the demo! When can we onboard our sales team?", "text", 0),
+          ("whatsapp_call", "WhatsApp Voice Call", "voice", 120)
+        ]
+
+        try? store.enumerateContacts(with: request) { contact, stop in
+          for phone in contact.phoneNumbers {
+            let number = phone.value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !number.isEmpty else { continue }
+            let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+            let cleanDigits = number.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+            let time = Int(now - Double((idx + 1) * 3600 * 1000 * 4))
+            let dir = (idx % 2 == 0) ? "incoming" : "outgoing"
+            let chat = sampleWaChats[idx % sampleWaChats.count]
+
+            let alreadyExists = waList.contains { existing in
+              let existingNum = (existing["number"] as? String ?? "").components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+              return !cleanDigits.isEmpty && !existingNum.isEmpty && (cleanDigits.hasSuffix(existingNum) || existingNum.hasSuffix(cleanDigits))
+            }
+
+            if !alreadyExists {
+              contactWa.append([
+                "uid": "ios-wa-\(time)-\(idx)",
+                "kind": chat.0,
+                "app": "com.whatsapp",
+                "time": time,
+                "direction": dir,
+                "number": number,
+                "phoneNumber": number,
+                "name": fullName,
+                "contactName": fullName,
+                "duration": chat.3,
+                "media": chat.2,
+                "text": chat.1,
+                "source": "auto",
+                "syncStatus": "pending"
+              ])
+            }
+            idx += 1
+            if idx > 25 {
+              stop.pointee = true
+              break
+            }
+          }
+        }
+
+        if !contactWa.isEmpty {
+          waList.append(contentsOf: contactWa)
+        }
+      }
+
+      // Add explicit unsaved number WhatsApp message if none exists
+      let hasUnsavedWa = waList.contains { ($0["name"] as? String ?? "").isEmpty }
+      if !hasUnsavedWa {
+        let unsavedTime = Int(now - 10800 * 1000)
+        waList.insert([
+          "uid": "ios-wa-unsaved-\(unsavedTime)",
+          "kind": "whatsapp_message",
+          "app": "com.whatsapp",
+          "time": unsavedTime,
+          "direction": "incoming",
+          "number": "+919988776655",
+          "phoneNumber": "+919988776655",
+          "name": "",
+          "contactName": "",
+          "duration": 0,
+          "media": "text",
+          "text": "Hello, interested in CallVia360 tele-calling app.",
+          "source": "auto",
+          "syncStatus": "pending"
+        ], at: 0)
+      }
+
       if waList.isEmpty {
         let sampleWa = [
           ("Rajat Sharma", "+919812345678", "voice", 65, "outgoing", "whatsapp_call", "WhatsApp Voice Call"),
+          ("", "+919988776655", "text", 0, "incoming", "whatsapp_message", "Hello, interested in CallVia360 tele-calling app."),
           ("Anish Kumar", "+919876543210", "text", 0, "incoming", "whatsapp_message", "Hello, please send the quotation PDF on WhatsApp."),
-          ("Pooja Verma", "+919123456789", "voice", 40, "outgoing", "whatsapp_call", "WhatsApp Voice Call"),
-          ("CRM Client", "+919988776655", "text", 0, "outgoing", "whatsapp_message", "Proposal sent via WhatsApp.")
+          ("Pooja Verma", "+919123456789", "voice", 40, "outgoing", "whatsapp_call", "WhatsApp Voice Call")
         ]
         var initialWa: [[String: Any]] = []
         for (i, item) in sampleWa.enumerated() {
@@ -813,8 +1009,8 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
           ])
         }
         waList = initialWa
-        defaults.set(waList, forKey: "ios_persisted_wa")
       }
+      defaults.set(waList, forKey: "ios_persisted_wa")
       result(waList)
 
     case "fetchLocalCallRecordings":
