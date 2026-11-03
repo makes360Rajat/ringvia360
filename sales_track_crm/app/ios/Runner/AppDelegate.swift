@@ -9,31 +9,23 @@ import MessageUI
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
 
-  private static var arePluginsRegistered = false
-
-  static func registerAllPlugins(with registry: FlutterPluginRegistry) {
-    guard !arePluginsRegistered else { return }
-    arePluginsRegistered = true
-    GeneratedPluginRegistrant.register(with: registry)
-    if !registry.hasPlugin("TelemetryBridgePlugin"), let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
-      TelemetryBridgePlugin.register(with: registrar)
-    }
-  }
-
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     CallKitObserver.shared.startObserving()
-    let result = super.application(application, didFinishLaunchingWithOptions: launchOptions)
-    if !AppDelegate.arePluginsRegistered {
-      AppDelegate.registerAllPlugins(with: self)
-    }
-    return result
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
-    AppDelegate.registerAllPlugins(with: engineBridge.pluginRegistry)
+    let registry = engineBridge.pluginRegistry
+    if !registry.hasPlugin("PermissionHandlerPlugin") {
+      GeneratedPluginRegistrant.register(with: registry)
+    }
+    if !registry.hasPlugin("TelemetryBridgePlugin"),
+       let registrar = registry.registrar(forPlugin: "TelemetryBridgePlugin") {
+      TelemetryBridgePlugin.register(with: registrar)
+    }
   }
 }
 

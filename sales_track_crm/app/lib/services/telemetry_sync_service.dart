@@ -294,66 +294,70 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> _init() async {
-    await api.init();
-    _isPaired = api.isPaired;
+    try {
+      await api.init();
+      _isPaired = api.isPaired;
 
-    api.onUpdateRequired = (info, isMandatory) {
-      _availableUpdate = info;
-      _isUpdateMandatory = isMandatory;
-      notifyListeners();
-    };
+      api.onUpdateRequired = (info, isMandatory) {
+        _availableUpdate = info;
+        _isUpdateMandatory = isMandatory;
+        notifyListeners();
+      };
 
-    checkForAppUpdate();
+      checkForAppUpdate();
 
-    await _loadSavedMeta();
-    _listenToNativeEvents();
-    await checkPermissions();
+      await _loadSavedMeta();
+      _listenToNativeEvents();
+      await checkPermissions();
 
-    if (_isPaired) {
-      await _loadPersistedHistory();
-      await refreshPendingCounts();
+      if (_isPaired) {
+        await _loadPersistedHistory();
+        await refreshPendingCounts();
 
-      // If local lists are empty on startup, immediately hydrate from device & server before UI displays zeros
-      if (_calls.isEmpty && _smsList.isEmpty && _whatsappEvents.isEmpty) {
-        try {
-          if (hasCallLogPermission) await syncDeviceCallLogs();
-          if (hasSmsPermission) await syncDeviceSms();
-          await syncActiveWhatsAppNotifications();
-          await syncServerEvents();
-          await fetchCallLists();
-        } catch (e) {
-          debugPrint('Initial telemetry hydration error: $e');
-        }
+        // Hydrate from device and sync in background without blocking initial UI render
+        Future.microtask(() async {
+          try {
+            if (hasCallLogPermission) await syncDeviceCallLogs();
+            if (hasSmsPermission) await syncDeviceSms();
+            await syncActiveWhatsAppNotifications();
+            await syncServerEvents();
+            await fetchCallLists();
+          } catch (e) {
+            debugPrint('Initial telemetry hydration error: $e');
+          }
+        });
+
+        // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
+        Future.delayed(const Duration(milliseconds: 100), () async {
+          await fetchPlatformDeviceInfo();
+          await sendHeartbeat();
+          _startHeartbeatLoop();
+
+          try {
+            if (hasCallLogPermission) {
+              await syncDeviceCallLogs();
+            }
+            if (hasSmsPermission) {
+              await syncDeviceSms();
+            }
+            await scanLocalRecordings();
+            await syncActiveWhatsAppNotifications();
+            await syncServerEvents();
+            await fetchCallLists();
+            await syncNow();
+          } catch (e) {
+            debugPrint('Background sync error: $e');
+          }
+        });
+      } else {
+        _statusMessage = 'Enter 6-digit pairing code to connect';
       }
-
-      // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
-      Future.delayed(const Duration(milliseconds: 100), () async {
-        await fetchPlatformDeviceInfo();
-        await sendHeartbeat();
-        _startHeartbeatLoop();
-
-        try {
-          if (hasCallLogPermission) {
-            await syncDeviceCallLogs();
-          }
-          if (hasSmsPermission) {
-            await syncDeviceSms();
-          }
-          await scanLocalRecordings();
-          await syncActiveWhatsAppNotifications();
-          await syncServerEvents();
-          await fetchCallLists();
-          await syncNow();
-        } catch (e) {
-          debugPrint('Background sync error: $e');
-        }
-      });
-    } else {
-      _statusMessage = 'Enter 6-digit pairing code to connect';
+    } catch (e, st) {
+      debugPrint('Error during TelemetrySyncService init: $e\n$st');
+    } finally {
+      _isInitialized = true;
+      notifyListeners();
     }
-
-    _isInitialized = true;
-    notifyListeners();
   }
 
   // ---------------------------------------------------------------------------
