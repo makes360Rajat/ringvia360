@@ -284,6 +284,7 @@ class TelemetrySyncService extends ChangeNotifier {
 
   StreamSubscription? _eventSubscription;
   Timer? _heartbeatTimer;
+  Timer? _iosLivePollingTimer;
 
   TelemetrySyncService() {
     // The CRM revoked or deleted this phone: stop and ask for a new pairing.
@@ -317,6 +318,17 @@ class TelemetrySyncService extends ChangeNotifier {
       if (hasSmsPermission) await syncDeviceSms();
       await syncActiveWhatsAppNotifications();
       await refreshPendingCounts();
+
+      if (Platform.isIOS) {
+        _iosLivePollingTimer?.cancel();
+        _iosLivePollingTimer = Timer.periodic(const Duration(seconds: 4), (_) async {
+          if (!_foreground) return;
+          try {
+            await syncActiveWhatsAppNotifications();
+            await syncDeviceSms();
+          } catch (_) {}
+        });
+      }
 
       if (_isPaired) {
         // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
@@ -630,6 +642,15 @@ class TelemetrySyncService extends ChangeNotifier {
 
   void _handleIncomingNativeEvent(Map<String, dynamic> raw) {
     final type = raw['type']?.toString();
+
+    if (type == 'telemetry_refreshed') {
+      if (Platform.isIOS) {
+        syncActiveWhatsAppNotifications();
+        syncDeviceSms();
+        syncDeviceCallLogs();
+      }
+      return;
+    }
 
     // Unpaired: calls, SMS and WhatsApp events are not kept or queued.
     if (!_isPaired && type != 'permissions_updated') return;
@@ -1929,8 +1950,16 @@ class TelemetrySyncService extends ChangeNotifier {
   /// The home screen says when the app comes to the screen or leaves it.
   void setForeground(bool value) {
     _foreground = value;
-    if (value && _isPaired) {
-      sendHeartbeat();
+    if (value) {
+      if (Platform.isIOS) {
+        syncActiveWhatsAppNotifications();
+        syncDeviceSms();
+        syncDeviceCallLogs();
+        scanLocalRecordings();
+      }
+      if (_isPaired) {
+        sendHeartbeat();
+      }
     }
   }
 
@@ -2509,6 +2538,8 @@ class TelemetrySyncService extends ChangeNotifier {
 
   @override
   void dispose() {
+    _iosLivePollingTimer?.cancel();
+    _periodicSyncTimer?.cancel();
     _eventSubscription?.cancel();
     _heartbeatTimer?.cancel();
     _quickCheckTimer?.cancel();

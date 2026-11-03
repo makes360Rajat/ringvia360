@@ -1274,7 +1274,7 @@ class _HomeScreenState extends State<HomeScreen>
       final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
       final qNorm = q.replaceAll(RegExp(r'\D'), '');
       final bool isSaved = _isSavedContact(c.name, c.number);
-      final String displayName = isSaved ? c.name : 'Unsaved Number';
+      final String displayName = isSaved ? c.name : (c.number.isNotEmpty ? c.number : 'Unsaved Number');
       if (displayName.toLowerCase().contains(q)) return true;
       if (c.number.toLowerCase().contains(q)) return true;
       if (qNorm.isNotEmpty &&
@@ -1300,7 +1300,7 @@ class _HomeScreenState extends State<HomeScreen>
     final contactName = filtered.isNotEmpty
         ? (_isSavedContact(filtered.first.name, filtered.first.number)
             ? filtered.first.name
-            : 'Unsaved Number')
+            : (filtered.first.number.isNotEmpty ? filtered.first.number : 'Unsaved Number'))
         : '';
     final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
 
@@ -1899,7 +1899,7 @@ class _HomeScreenState extends State<HomeScreen>
     final String rawName = (call.name?.toString() ?? '').trim();
     final String number = (call.number?.toString() ?? '').trim();
     final bool isSaved = _isSavedContact(rawName, number);
-    final String title = isSaved ? rawName : 'Unsaved Number';
+    final String title = isSaved ? rawName : (number.isNotEmpty ? number : 'Unsaved Number');
     final bool synced = call.syncStatus == 'synced';
     final int sim = call.sim is int ? call.sim as int : 0;
     final int seconds = call.duration is int ? call.duration as int : 0;
@@ -2015,7 +2015,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ],
                   ],
                 ),
-                if (number.isNotEmpty) ...[
+                if (number.isNotEmpty && isSaved) ...[
                   const SizedBox(height: 2),
                   Text(
                     number,
@@ -2514,7 +2514,11 @@ class _HomeScreenState extends State<HomeScreen>
                           title: Builder(
                             builder: (context) {
                               final bool isSavedWa = _isSavedContact(ev.name, ev.number);
-                              final String waTitle = isSavedWa ? ev.name : 'Unsaved Number';
+                              final String waTitle = isSavedWa
+                                  ? ev.name
+                                  : (ev.number.isNotEmpty
+                                      ? ev.number
+                                      : (ev.name.isNotEmpty ? ev.name : 'Unsaved Number'));
                               return Row(
                                 children: [
                                   Expanded(
@@ -2577,7 +2581,7 @@ class _HomeScreenState extends State<HomeScreen>
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (ev.number.isNotEmpty) ...[
+                              if (ev.number.isNotEmpty && _isSavedContact(ev.name, ev.number)) ...[
                                 const SizedBox(height: 2),
                                 Text(
                                   ev.number,
@@ -2585,12 +2589,8 @@ class _HomeScreenState extends State<HomeScreen>
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 12.5,
-                                    fontWeight: _isSavedContact(ev.name, ev.number)
-                                        ? FontWeight.w500
-                                        : FontWeight.w600,
-                                    color: _isSavedContact(ev.name, ev.number)
-                                        ? colors.textSecondary
-                                        : colors.textPrimary,
+                                    fontWeight: FontWeight.w500,
+                                    color: colors.textSecondary,
                                   ),
                                 ),
                               ],
@@ -2781,7 +2781,11 @@ class _HomeScreenState extends State<HomeScreen>
                     title: Builder(
                       builder: (context) {
                         final bool isSavedSms = _isSavedContact(sms.name, sms.number);
-                        final String smsTitle = isSavedSms ? sms.name : 'Unsaved Number';
+                        final String smsTitle = isSavedSms
+                            ? sms.name
+                            : (sms.number.isNotEmpty
+                                ? sms.number
+                                : (sms.name.isNotEmpty ? sms.name : 'Unsaved Number'));
                         return Row(
                           children: [
                             Expanded(
@@ -2823,7 +2827,7 @@ class _HomeScreenState extends State<HomeScreen>
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (sms.number.isNotEmpty) ...[
+                        if (sms.number.isNotEmpty && _isSavedContact(sms.name, sms.number)) ...[
                           const SizedBox(height: 2),
                           Text(
                             sms.number,
@@ -2831,12 +2835,8 @@ class _HomeScreenState extends State<HomeScreen>
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 12.5,
-                              fontWeight: _isSavedContact(sms.name, sms.number)
-                                  ? FontWeight.w500
-                                  : FontWeight.w600,
-                              color: _isSavedContact(sms.name, sms.number)
-                                  ? colors.textSecondary
-                                  : colors.textPrimary,
+                              fontWeight: FontWeight.w500,
+                              color: colors.textSecondary,
                             ),
                           ),
                         ],
@@ -3361,7 +3361,9 @@ class _HomeScreenState extends State<HomeScreen>
           size: 20,
         ),
         title: Text(
-          _isSavedContact(call.name, call.number) ? call.name : 'Unsaved Number',
+          _isSavedContact(call.name, call.number)
+              ? call.name
+              : (call.number.isNotEmpty ? call.number : 'Unsaved Number'),
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -3397,7 +3399,9 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.chat_rounded, color: colors.whatsappGreen, size: 20),
         title: Text(
-          _isSavedContact(wa.name, wa.number) ? wa.name : 'Unsaved Number',
+          _isSavedContact(wa.name, wa.number)
+              ? wa.name
+              : (wa.number.isNotEmpty ? wa.number : (wa.name.isNotEmpty ? wa.name : 'Unsaved Number')),
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -3435,7 +3439,9 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
         title: Text(
-          _isSavedContact(sms.name, sms.number) ? sms.name : 'Unsaved Number',
+          _isSavedContact(sms.name, sms.number)
+              ? sms.name
+              : (sms.number.isNotEmpty ? sms.number : (sms.name.isNotEmpty ? sms.name : 'Unsaved Number')),
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
