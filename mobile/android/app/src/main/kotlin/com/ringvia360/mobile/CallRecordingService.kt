@@ -155,6 +155,20 @@ class CallRecordingService : Service() {
             }
         } catch (_: Exception) {}
 
+        // 1b. Enqueue into Native Zero-Touch Sync Queue & trigger WorkManager
+        try {
+            CallSyncWorker.enqueueCall(
+                context = this,
+                callId = callId,
+                phoneNumber = phoneNumber,
+                duration = duration,
+                recordingPath = finalPath,
+                direction = "inbound",
+                timestamp = if (callStartMs > 0) callStartMs else System.currentTimeMillis()
+            )
+            CallSyncWorker.triggerImmediate(this)
+        } catch (_: Exception) {}
+
         // 2. Immediately notify Flutter event channel with initial metadata
         CallSensorChannel.notifyCallStateChanged(
             "disconnected",
@@ -181,6 +195,12 @@ class CallRecordingService : Service() {
                                     putString("pending_recording_path", readyPath)
                                     apply()
                                 }
+                            } catch (_: Exception) {}
+
+                            // Update in Zero-Touch queue and trigger immediate upload
+                            try {
+                                CallSyncWorker.updateRecordingPath(this@CallRecordingService, callId, readyPath)
+                                CallSyncWorker.triggerImmediate(this@CallRecordingService)
                             } catch (_: Exception) {}
 
                             // Notify Flutter layer that the call recording is ready and linked
