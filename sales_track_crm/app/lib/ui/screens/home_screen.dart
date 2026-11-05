@@ -1721,7 +1721,7 @@ class _HomeScreenState extends State<HomeScreen>
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(
-                        'SIM ${call.sim}',
+                        'SIM ${call.sim is int && call.sim > 0 ? call.sim : 1}',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -1899,9 +1899,9 @@ class _HomeScreenState extends State<HomeScreen>
     final String rawName = (call.name?.toString() ?? '').trim();
     final String number = (call.number?.toString() ?? '').trim();
     final bool isSaved = _isSavedContact(rawName, number);
-    final String title = isSaved ? rawName : (number.isNotEmpty ? number : 'Unsaved Number');
+    final String title = isSaved ? rawName : 'Un Saved';
     final bool synced = call.syncStatus == 'synced';
-    final int sim = call.sim is int ? call.sim as int : 0;
+    final int sim = (call.sim is int && (call.sim as int) > 0) ? (call.sim as int) : 1;
     final int seconds = call.duration is int ? call.duration as int : 0;
     final String direction = call.direction == 'incoming'
         ? 'Incoming call'
@@ -1974,60 +1974,38 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                     ),
-                    if (!isSaved) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: colors.warning.withOpacity(0.14),
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(color: colors.warning.withOpacity(0.4)),
-                        ),
-                        child: Text(
-                          'UNSAVED',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.3,
-                            color: colors.warning,
-                          ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceColor,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Text(
+                        'SIM $sim',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: colors.textSecondary,
                         ),
                       ),
-                    ],
-                    if (sim > 0) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: colors.surfaceColor,
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Text(
-                          'SIM $sim',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: colors.textSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
+                    ),
                   ],
                 ),
-                if (number.isNotEmpty && isSaved) ...[
-                  const SizedBox(height: 2),
+                if (number.isNotEmpty) ...[
+                  const SizedBox(height: 3),
                   Text(
                     number,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                    style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
                   ),
                 ],
-                const SizedBox(height: 5),
+                const SizedBox(height: 6),
                 Row(
                   children: [
-                    Icon(Icons.access_time_rounded, size: 13, color: colors.textMuted),
+                    Icon(Icons.access_time_rounded, size: 13, color: colors.textSecondary),
                     const SizedBox(width: 5),
                     Flexible(
                       child: Text(
@@ -2035,7 +2013,7 @@ class _HomeScreenState extends State<HomeScreen>
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 13,
                           fontWeight: FontWeight.w500,
                           color: colors.textSecondary,
                         ),
@@ -3361,9 +3339,7 @@ class _HomeScreenState extends State<HomeScreen>
           size: 20,
         ),
         title: Text(
-          _isSavedContact(call.name, call.number)
-              ? call.name
-              : (call.number.isNotEmpty ? call.number : 'Unsaved Number'),
+          _isSavedContact(call.name, call.number) ? call.name : 'Un Saved',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
