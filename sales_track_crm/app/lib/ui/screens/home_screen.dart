@@ -2492,60 +2492,34 @@ class _HomeScreenState extends State<HomeScreen>
                           title: Builder(
                             builder: (context) {
                               final bool isSavedWa = _isSavedContact(ev.name, ev.number);
-                              final String waTitle = isSavedWa
-                                  ? ev.name
-                                  : (ev.number.isNotEmpty
-                                      ? ev.number
-                                      : (ev.name.isNotEmpty ? ev.name : 'Unsaved Number'));
+                              final String waTitle = isSavedWa ? ev.name : 'Un Saved';
                               return Row(
                                 children: [
-                                  Expanded(
+                                  Flexible(
                                     child: Text(
                                       waTitle,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         fontWeight: FontWeight.w700,
-                                        fontSize: 14.5,
+                                        fontSize: 15,
                                         color: colors.textPrimary,
                                       ),
                                     ),
                                   ),
-                                  if (!isSavedWa) ...[
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: colors.warning.withOpacity(0.14),
-                                        borderRadius: BorderRadius.circular(5),
-                                        border: Border.all(color: colors.warning.withOpacity(0.4)),
-                                      ),
-                                      child: Text(
-                                        'UNSAVED',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: 0.3,
-                                          color: colors.warning,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  const SizedBox(width: 6),
+                                  const SizedBox(width: 8),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: (isBusiness
-                                              ? colors.whatsappBusiness
-                                              : colors.whatsappGreen)
-                                          .withOpacity(0.15),
-                                      borderRadius: BorderRadius.circular(6),
+                                      color: colors.surfaceColor,
+                                      borderRadius: BorderRadius.circular(5),
+                                      border: Border.all(color: colors.border),
                                     ),
                                     child: Text(
                                       isBusiness ? 'BUSINESS' : 'PERSONAL',
                                       style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w600,
                                         color: isBusiness
                                             ? colors.whatsappBusiness
                                             : colors.whatsappGreen,
@@ -2559,27 +2533,27 @@ class _HomeScreenState extends State<HomeScreen>
                           subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (ev.number.isNotEmpty && _isSavedContact(ev.name, ev.number)) ...[
-                                const SizedBox(height: 2),
+                              if (ev.number.isNotEmpty) ...[
+                                const SizedBox(height: 3),
                                 Text(
                                   ev.number,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: 12.5,
+                                    fontSize: 13.5,
                                     fontWeight: FontWeight.w500,
                                     color: colors.textSecondary,
                                   ),
                                 ),
                               ],
-                              const SizedBox(height: 2),
+                              const SizedBox(height: 3),
                               Text(
                                 isCall
                                     ? 'WhatsApp Call (${_formatDuration(ev.duration)})'
                                     : (ev.text ?? 'Message'),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                                style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                               ),
                             ],
                           ),
@@ -2593,28 +2567,34 @@ class _HomeScreenState extends State<HomeScreen>
                               ),
                               const SizedBox(height: 4),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                                 decoration: BoxDecoration(
-                                  color: ev.syncStatus == 'synced'
-                                      ? colors.success.withOpacity(0.12)
-                                      : colors.warning.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(4),
+                                  color: (ev.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                    color: ev.syncStatus == 'synced'
-                                        ? colors.success.withOpacity(0.3)
-                                        : colors.warning.withOpacity(0.3),
-                                    width: 0.8,
+                                    color: (ev.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.4),
+                                    width: 0.9,
                                   ),
                                 ),
-                                child: Text(
-                                  ev.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
-                                  style: TextStyle(
-                                    fontSize: 8.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: ev.syncStatus == 'synced'
-                                        ? colors.success
-                                        : colors.warning,
-                                  ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      ev.syncStatus == 'synced' ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                                      size: 11,
+                                      color: ev.syncStatus == 'synced' ? colors.success : colors.warning,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      ev.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.4,
+                                        color: ev.syncStatus == 'synced' ? colors.success : colors.warning,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
@@ -2759,45 +2739,39 @@ class _HomeScreenState extends State<HomeScreen>
                     title: Builder(
                       builder: (context) {
                         final bool isSavedSms = _isSavedContact(sms.name, sms.number);
-                        final String smsTitle = isSavedSms
-                            ? sms.name
-                            : (sms.number.isNotEmpty
-                                ? sms.number
-                                : (sms.name.isNotEmpty ? sms.name : 'Unsaved Number'));
+                        final String smsTitle = isSavedSms ? sms.name : 'Un Saved';
+                        final int smsSim = sms.sim > 0 ? sms.sim : 1;
                         return Row(
                           children: [
-                            Expanded(
+                            Flexible(
                               child: Text(
                                 smsTitle,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
-                                  fontSize: 14.5,
+                                  fontSize: 15,
                                   color: colors.textPrimary,
                                 ),
                               ),
                             ),
-                            if (!isSavedSms) ...[
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: colors.warning.withOpacity(0.14),
-                                  borderRadius: BorderRadius.circular(5),
-                                  border: Border.all(color: colors.warning.withOpacity(0.4)),
-                                ),
-                                child: Text(
-                                  'UNSAVED',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.3,
-                                    color: colors.warning,
-                                  ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: colors.surfaceColor,
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(color: colors.border),
+                              ),
+                              child: Text(
+                                'SIM $smsSim',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.textSecondary,
                                 ),
                               ),
-                            ],
+                            ),
                           ],
                         );
                       },
@@ -2805,25 +2779,25 @@ class _HomeScreenState extends State<HomeScreen>
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (sms.number.isNotEmpty && _isSavedContact(sms.name, sms.number)) ...[
-                          const SizedBox(height: 2),
+                        if (sms.number.isNotEmpty) ...[
+                          const SizedBox(height: 3),
                           Text(
                             sms.number,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 12.5,
+                              fontSize: 13.5,
                               fontWeight: FontWeight.w500,
                               color: colors.textSecondary,
                             ),
                           ),
                         ],
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 3),
                         Text(
                           sms.text ?? '',
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                          style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                         ),
                       ],
                     ),
@@ -2837,28 +2811,34 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                         const SizedBox(height: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                           decoration: BoxDecoration(
-                            color: sms.syncStatus == 'synced'
-                                ? colors.success.withOpacity(0.12)
-                                : colors.warning.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(4),
+                            color: (sms.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: sms.syncStatus == 'synced'
-                                  ? colors.success.withOpacity(0.3)
-                                  : colors.warning.withOpacity(0.3),
-                              width: 0.8,
+                              color: (sms.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.4),
+                              width: 0.9,
                             ),
                           ),
-                          child: Text(
-                            sms.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
-                            style: TextStyle(
-                              fontSize: 8.5,
-                              fontWeight: FontWeight.bold,
-                              color: sms.syncStatus == 'synced'
-                                  ? colors.success
-                                  : colors.warning,
-                            ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                sms.syncStatus == 'synced' ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                                size: 11,
+                                color: sms.syncStatus == 'synced' ? colors.success : colors.warning,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                sms.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.4,
+                                  color: sms.syncStatus == 'synced' ? colors.success : colors.warning,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -3375,9 +3355,7 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.chat_rounded, color: colors.whatsappGreen, size: 20),
         title: Text(
-          _isSavedContact(wa.name, wa.number)
-              ? wa.name
-              : (wa.number.isNotEmpty ? wa.number : (wa.name.isNotEmpty ? wa.name : 'Unsaved Number')),
+          _isSavedContact(wa.name, wa.number) ? wa.name : 'Un Saved',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -3415,9 +3393,7 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
         title: Text(
-          _isSavedContact(sms.name, sms.number)
-              ? sms.name
-              : (sms.number.isNotEmpty ? sms.number : (sms.name.isNotEmpty ? sms.name : 'Unsaved Number')),
+          _isSavedContact(sms.name, sms.number) ? sms.name : 'Un Saved',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,

@@ -88,7 +88,7 @@ class LocalDatabaseService {
 
         for (final ev in chunk) {
           final recSync = (ev.recordingPath != null && ev.recordingPath!.isNotEmpty)
-              ? (ev.syncStatus == 'synced' ? 'synced' : 'pending')
+              ? (ev.recordingSyncStatus == 'synced' ? 'synced' : 'pending')
               : 'none';
 
           batch.rawInsert('''
