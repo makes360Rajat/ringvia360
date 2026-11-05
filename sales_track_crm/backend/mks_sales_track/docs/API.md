@@ -5,6 +5,11 @@ Everything here is exercised by `tooling/e2e.php` and can be tried by hand with
 `tooling/phone.php`. How the app should behave around it is in
 APP_DEVELOPER.md.
 
+Changes in 1.8.5:
+- `events` endpoint (`GET/POST /mks_sales_track/api/v1/events`): allows clients and third-party systems to fetch synced events with filtering (`kind`, `since`, `limit`, `page`) and pagination, or POST batches for ingestion.
+- Comprehensive Save & Update: when events arrive, `mks_st_ingest()` updates existing records with complete data including duration, direction, contact name, text body, number, media, and SIM slot.
+- Full real-time synchronization for SMS (incoming/outgoing), WhatsApp messages, and calls.
+
 Changes in 1.8.2:
 - Supports `whatsapp_message` and `notification` event kinds with full body/text, sender, and package tracking.
 - Full historical sync: timestamps from year 2000 (`946684800000` ms) are accepted, enabling complete historical device sync.

@@ -523,7 +523,8 @@ class Mks_sales_track extends AdminController
             'commands'   => mks_st_decode($device['commands']),
             'activity'   => mks_st_device_activity($device['id']),
             'live_code'  => $live,
-            'live_qr'    => $live ? mks_st_qr_data_uri($this->mks_qr_payload($live['secret'], $device)) : '',
+            // Pairing is by the 6-digit code only: no QR is shown (1.9.2).
+            'live_qr'    => '',
             'can_manage' => mks_st_can('manage_devices'),
             'can_pair'   => mks_st_enabled('api_enabled'),
             'staff_options' => mks_st_can('manage_devices') ? mks_st_staff_options() : [],
@@ -1535,7 +1536,7 @@ class Mks_sales_track extends AdminController
         return [
             'code_id'    => $code['id'],
             'code'       => substr($code['code'], 0, 3) . ' ' . substr($code['code'], 3),
-            'qr'         => mks_st_qr_data_uri($this->mks_qr_payload($code['secret'], $device)),
+            'qr'         => '',
             'expires_in' => $code['expires'] - time(),
             'site'       => site_url(),
             'name'       => $device['label'],

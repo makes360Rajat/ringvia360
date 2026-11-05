@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.makes360.salestrack" "\0"
-            VALUE "FileDescription", "sales_track_crm" "\0"
+            VALUE "CompanyName", "com.CallVia360.app" "\0"
+            VALUE "FileDescription", "CallVia360" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "sales_track_crm" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.makes360.salestrack. All rights reserved." "\0"
-            VALUE "OriginalFilename", "sales_track_crm.exe" "\0"
-            VALUE "ProductName", "sales_track_crm" "\0"
+            VALUE "InternalName", "CallVia360" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.CallVia360.app. All rights reserved." "\0"
+            VALUE "OriginalFilename", "CallVia360.exe" "\0"
+            VALUE "ProductName", "CallVia360" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

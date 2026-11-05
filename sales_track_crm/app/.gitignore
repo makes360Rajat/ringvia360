@@ -33,10 +33,6 @@ migrate_working_dir/
 /build/
 /coverage/
 
-# Android release-signing secrets and keystore.
-/android/key.properties
-/android/app/*.jks
-
 # Symbolication related
 app.*.symbols
 

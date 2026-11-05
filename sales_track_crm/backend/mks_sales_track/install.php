@@ -308,5 +308,11 @@ if (function_exists('mks_st_ensure_upload_root')) {
 }
 
 if (function_exists('mks_st_cleanup_duplicate_events')) {
-    mks_st_cleanup_duplicate_events();
+    try {
+        mks_st_cleanup_duplicate_events();
+    } catch (\Throwable $e) {
+        if (function_exists('log_message')) {
+            log_message('error', 'mks_sales_track cleanup duplicate events skipped: ' . $e->getMessage());
+        }
+    }
 }

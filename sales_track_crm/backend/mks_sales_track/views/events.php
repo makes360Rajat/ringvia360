@@ -95,7 +95,7 @@ $mks_tile_count = $view === 'recordings' ? 4 : 5;
                     <label class="mks-sales-track-select">
                         <i class="fa-solid fa-arrows-rotate" aria-hidden="true"></i>
                         <select id="mks-st-direction" aria-label="<?= e(_l('mks_st_col_direction')); ?>">
-                            <option value=""><?= e(_l($view === 'whatsapp_calls' ? 'mks_st_all_calls' : 'mks_st_all_directions')); ?></option>
+                            <option value=""><?= e(_l('mks_st_all_directions')); ?></option>
                             <?php foreach ($directions as $mks_value => $mks_label) { ?>
                             <option value="<?= e($mks_value); ?>"><?= e($mks_label); ?></option>
                             <?php } ?>

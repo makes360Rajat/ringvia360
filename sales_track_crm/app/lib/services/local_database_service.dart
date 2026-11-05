@@ -145,7 +145,7 @@ class LocalDatabaseService {
   Future<List<SalesTrackEvent>> getEvents({
     String? kind,
     String? syncStatus,
-    int limit = 2000,
+    int limit = 50000,
     int offset = 0,
   }) async {
     final db = await database;
@@ -183,7 +183,7 @@ class LocalDatabaseService {
   }
 
   /// Retrieve all pending events for server sync
-  Future<List<SalesTrackEvent>> getPendingEvents({String? kind, int limit = 100}) async {
+  Future<List<SalesTrackEvent>> getPendingEvents({String? kind, int limit = 500}) async {
     final db = await database;
     if (db == null) return [];
     String query = "SELECT * FROM events WHERE sync_status != 'synced'";
@@ -463,6 +463,18 @@ class LocalDatabaseService {
     return removed;
   }
 
+  /// Everything kept for a CRM this phone is no longer paired with.
+  Future<void> clearAll() async {
+    final db = await database;
+    if (db == null) return;
+    try {
+      final tables = await db.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name <> 'android_metadata'");
+      for (final t in tables) {
+        await db.delete(t['name'] as String);
+      }
+    } catch (_) {}
+  }
+
   /// Offline outcome queue
   Future<void> saveOutcome(OutcomeSubmission submission) async {
     final db = await database;
@@ -511,6 +523,20 @@ class LocalDatabaseService {
     }).toList();
   }
 
+  Future<bool> hasOutcomeForUid(String uid) async {
+    if (uid.isEmpty) return false;
+    final db = await database;
+    if (db == null) return false;
+    final res = await db.query(
+      'outcomes',
+      columns: ['uid'],
+      where: 'uid = ?',
+      whereArgs: [uid],
+      limit: 1,
+    );
+    return res.isNotEmpty;
+  }
+
   Future<void> markOutcomesSynced(List<String> uids) async {
     if (uids.isEmpty) return;
     final db = await database;
@@ -519,6 +545,107 @@ class LocalDatabaseService {
     await db.rawUpdate('''
       UPDATE outcomes SET sync_status = 'synced' WHERE uid IN ($placeholders)
     ''', uids);
+  }
+
+  /// Fast local lookup for Truecaller-like caller ID detection
+  Future<Map<String, dynamic>?> lookupCallerInfo(String rawNumber) async {
+    final cleanDigits = rawNumber.replaceAll(RegExp(r'\D'), '');
+    if (cleanDigits.isEmpty) return null;
+    final last10 = cleanDigits.length >= 10 ? cleanDigits.substring(cleanDigits.length - 10) : cleanDigits;
+
+    final db = await database;
+    if (db == null) return null;
+
+    try {
+      final rows = await db.rawQuery('''
+        SELECT e.uid, e.kind, e.time, e.direction, e.number, e.name, e.duration,
+               o.outcome, o.note, o.follow_up_at, o.lead_status, o.create_lead
+        FROM events e
+        LEFT JOIN outcomes o ON e.uid = o.uid
+        WHERE (
+          e.number = ?
+          OR (
+            LENGTH(e.number) >= 10
+            AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(e.number, '+', ''), '-', ''), ' ', ''), '(', ''), ')', ''), -10) = ?
+          )
+        )
+        ORDER BY e.time DESC
+        LIMIT 10
+      ''', [rawNumber, last10]);
+
+      if (rows.isEmpty) return null;
+
+      final totalCallsRes = await db.rawQuery('''
+        SELECT COUNT(*) as total_calls FROM events
+        WHERE (
+          number = ?
+          OR (
+            LENGTH(number) >= 10
+            AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(number, '+', ''), '-', ''), ' ', ''), '(', ''), ')', ''), -10) = ?
+          )
+        )
+      ''', [rawNumber, last10]);
+
+      final totalCalls = Sqflite.firstIntValue(totalCallsRes) ?? rows.length;
+
+      String? resolvedName;
+      for (final r in rows) {
+        final name = (r['name'] as String?)?.trim();
+        if (name != null &&
+            name.isNotEmpty &&
+            name != rawNumber &&
+            !name.toLowerCase().contains('unknown') &&
+            !name.toLowerCase().contains('incoming caller')) {
+          resolvedName = name;
+          break;
+        }
+        if (r['create_lead'] != null) {
+          try {
+            final leadData = jsonDecode(r['create_lead'] as String);
+            if (leadData is Map && leadData['name'] != null && leadData['name'].toString().isNotEmpty) {
+              resolvedName = leadData['name'].toString();
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+
+      final latest = rows.first;
+      String? latestOutcome;
+      String? latestNote;
+      int? followUpAt;
+      int? leadStatus;
+
+      for (final r in rows) {
+        if (latestOutcome == null && r['outcome'] != null && (r['outcome'] as String).isNotEmpty) {
+          latestOutcome = r['outcome'] as String;
+        }
+        if (latestNote == null && r['note'] != null && (r['note'] as String).isNotEmpty) {
+          latestNote = r['note'] as String;
+        }
+        if (followUpAt == null && r['follow_up_at'] != null) {
+          followUpAt = (r['follow_up_at'] as num).toInt();
+        }
+        if (leadStatus == null && r['lead_status'] != null) {
+          leadStatus = (r['lead_status'] as num).toInt();
+        }
+      }
+
+      return {
+        'number': rawNumber,
+        'resolvedName': resolvedName,
+        'totalCalls': totalCalls,
+        'lastCallTime': (latest['time'] as num?)?.toInt(),
+        'lastDuration': (latest['duration'] as num?)?.toInt() ?? 0,
+        'lastDirection': (latest['direction'] as String?) ?? 'incoming',
+        'lastOutcome': latestOutcome,
+        'lastNote': latestNote,
+        'followUpAt': followUpAt,
+        'leadStatus': leadStatus,
+      };
+    } catch (_) {
+      return null;
+    }
   }
 
   SalesTrackEvent _rowToEvent(Map<String, dynamic> r) {

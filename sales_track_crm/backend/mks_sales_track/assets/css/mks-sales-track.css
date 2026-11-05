@@ -600,6 +600,30 @@
     white-space: nowrap;
 }
 
+.mks-sales-track-chip-chat {
+    background: #ecfdf5;
+    color: #065f46;
+}
+.mks-sales-track-chip-chat i {
+    color: #10b981;
+}
+
+.mks-sales-track-chip-video {
+    background: #f5f3ff;
+    color: #5b21b6;
+}
+.mks-sales-track-chip-video i {
+    color: #8b5cf6;
+}
+
+.mks-sales-track-chip-voice {
+    background: #eff6ff;
+    color: #1e40af;
+}
+.mks-sales-track-chip-voice i {
+    color: #3b82f6;
+}
+
 button.mks-sales-track-chip {
     cursor: pointer;
     transition: background-color 0.15s ease;

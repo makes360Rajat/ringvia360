@@ -859,11 +859,8 @@
             });
         }
 
-        if (data.qr) {
-            $panel.find('.mks-sales-track-pairing-qr').removeClass('mks-sales-track-is-hidden').html('<img src="' + esc(data.qr) + '" alt="">');
-        } else {
-            $panel.find('.mks-sales-track-pairing-qr').addClass('mks-sales-track-is-hidden').empty();
-        }
+        // Pairing is by the 6-digit code only: no QR is drawn.
+        $panel.find('.mks-sales-track-pairing-qr').addClass('mks-sales-track-is-hidden').empty();
 
         $panel.find('.mks-sales-track-pairing-code').text(data.code || '');
         $panel.find('.mks-sales-track-pairing-site').text(data.site || '');

@@ -111,6 +111,61 @@ class LeadStatusModel {
   Map<String, dynamic> toJson() => {'id': id, 'name': name, 'color': color};
 }
 
+class AppUpdateInfo {
+  final bool success;
+  final String latestVersion;
+  final String minVersion;
+  final String notes;
+  final String urlAndroid;
+  final String urlIos;
+
+  const AppUpdateInfo({
+    this.success = true,
+    this.latestVersion = '',
+    this.minVersion = '',
+    this.notes = '',
+    this.urlAndroid = '',
+    this.urlIos = '',
+  });
+
+  factory AppUpdateInfo.fromJson(Map<String, dynamic> json) {
+    return AppUpdateInfo(
+      success: json['success'] != false,
+      latestVersion: json['latest_version']?.toString() ?? '',
+      minVersion: json['min_version']?.toString() ?? '',
+      notes: json['notes']?.toString() ?? '',
+      urlAndroid: json['url_android']?.toString() ?? '',
+      urlIos: json['url_ios']?.toString() ?? '',
+    );
+  }
+
+  bool get isEmpty => latestVersion.isEmpty && minVersion.isEmpty;
+  bool get isNotEmpty => !isEmpty;
+}
+
+/// Compares two semantic version strings (e.g. "1.0.3" vs "1.0.2").
+/// Returns negative if v1 < v2, 0 if v1 == v2, positive if v1 > v2.
+int compareAppVersions(String v1, String v2) {
+  final clean1 = v1.trim().replaceFirst(RegExp(r'^v', caseSensitive: false), '').split('+').first;
+  final clean2 = v2.trim().replaceFirst(RegExp(r'^v', caseSensitive: false), '').split('+').first;
+
+  if (clean1.isEmpty && clean2.isEmpty) return 0;
+  if (clean1.isEmpty) return -1;
+  if (clean2.isEmpty) return 1;
+
+  final parts1 = clean1.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+  final parts2 = clean2.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+
+  final maxLen = parts1.length > parts2.length ? parts1.length : parts2.length;
+  for (int i = 0; i < maxLen; i++) {
+    final num1 = i < parts1.length ? parts1[i] : 0;
+    final num2 = i < parts2.length ? parts2[i] : 0;
+    if (num1 < num2) return -1;
+    if (num1 > num2) return 1;
+  }
+  return 0;
+}
+
 class SalesTrackConfig {
   final bool trackingCalls;
   final bool trackingRecordings;
@@ -142,6 +197,9 @@ class SalesTrackConfig {
   final List<OutcomeOptionModel> outcomesList;
   final List<LeadStatusModel> leadStatuses;
   final String version;
+  final AppUpdateInfo appInfo;
+  final bool webview;
+  final String? crmStartPage;
 
   SalesTrackConfig({
     required this.trackingCalls,
@@ -174,6 +232,9 @@ class SalesTrackConfig {
     required this.outcomesList,
     required this.leadStatuses,
     required this.version,
+    this.appInfo = const AppUpdateInfo(),
+    this.webview = false,
+    this.crmStartPage,
   });
 
   factory SalesTrackConfig.defaultConfig() {
@@ -213,6 +274,9 @@ class SalesTrackConfig {
       ],
       leadStatuses: [],
       version: '1.0.0',
+      appInfo: const AppUpdateInfo(),
+      webview: false,
+      crmStartPage: null,
     );
   }
 
@@ -287,10 +351,15 @@ class SalesTrackConfig {
       outcomesList: outcomesList.isNotEmpty ? outcomesList : SalesTrackConfig.defaultConfig().outcomesList,
       leadStatuses: leadStatuses,
       version: json['version']?.toString() ?? '',
+      appInfo: AppUpdateInfo.fromJson(app),
+      webview: json['webview'] == true,
+      crmStartPage: json['start_page']?.toString() ?? json['crm_start_page']?.toString() ?? json['webview_page']?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
+    'webview': webview,
+    'start_page': crmStartPage,
     'tracking': {
       'calls': trackingCalls,
       'recordings': trackingRecordings,
@@ -533,3 +602,44 @@ class CallListModel {
     );
   }
 }
+
+class CallerIdInfo {
+  final String phoneNumber;
+  final String direction; // 'incoming' or 'outgoing'
+  String name;
+  String? company;
+  String? leadStatus;
+  String? leadStatusColor;
+  String category; // 'lead', 'customer', 'staff', 'unsaved', 'contact'
+  String? photoUrl;
+  int totalPreviousCalls;
+  int? lastCallTime;
+  int? lastDuration;
+  String? lastOutcome;
+  String? lastNote;
+  int? followUpAt;
+  bool isSearching;
+  bool isUnsaved;
+
+  CallerIdInfo({
+    required this.phoneNumber,
+    this.direction = 'incoming',
+    required this.name,
+    this.company,
+    this.leadStatus,
+    this.leadStatusColor,
+    this.category = 'unsaved',
+    this.photoUrl,
+    this.totalPreviousCalls = 0,
+    this.lastCallTime,
+    this.lastDuration,
+    this.lastOutcome,
+    this.lastNote,
+    this.followUpAt,
+    this.isSearching = false,
+    this.isUnsaved = true,
+  });
+
+  bool get hasCrmLead => category == 'lead' || (leadStatus != null && leadStatus!.isNotEmpty);
+}
+

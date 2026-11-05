@@ -1,4 +1,6 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../services/telemetry_sync_service.dart';
 
@@ -21,52 +23,82 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
+
+    // Auto-prompt permission dialog immediately on screen entry
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!widget.syncService.hasEssentialPermissions) {
+        widget.syncService.requestAllPermissions();
+      }
+    });
+  }
+
+  void _onServiceChanged() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.syncService.removeListener(_onServiceChanged);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      widget.syncService.checkPermissions();
+      widget.syncService.checkPermissions().then((_) {
+        if (mounted) setState(() {});
+      });
     }
   }
 
   Widget _buildPermissionItem({
+    required BuildContext context,
     required String title,
     required String description,
     required IconData icon,
     required bool isGranted,
-    required VoidCallback onRequest,
+    VoidCallback? onRequest,
   }) {
+    final colors = context.stColors;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: SalesTrackTheme.cardBackground,
+        color: colors.cardBackground,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isGranted ? SalesTrackTheme.primary.withOpacity(0.4) : SalesTrackTheme.surfaceColor,
+          color: isGranted ? colors.primary.withOpacity(0.35) : colors.border,
+          width: isGranted ? 1.2 : 1.0,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.02),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(11),
             decoration: BoxDecoration(
-              color: isGranted ? SalesTrackTheme.primary.withOpacity(0.15) : SalesTrackTheme.surfaceColor,
-              borderRadius: BorderRadius.circular(12),
+              color: isGranted
+                  ? colors.primary.withOpacity(0.12)
+                  : colors.surfaceColor,
+              borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(
               icon,
               size: 22,
-              color: isGranted ? SalesTrackTheme.primary : SalesTrackTheme.textMuted,
+              color: isGranted ? colors.primary : colors.textMuted,
             ),
           ),
           const SizedBox(width: 14),
@@ -74,45 +106,82 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: SalesTrackTheme.textPrimary,
-                  ),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (isGranted) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: colors.success.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'ACTIVE',
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                            color: colors.success,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: SalesTrackTheme.textSecondary,
+                    color: colors.textSecondary,
+                    height: 1.35,
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(width: 10),
-          if (isGranted)
-            const Row(
-              children: [
-                Icon(Icons.check_circle_rounded, color: SalesTrackTheme.primary, size: 24),
-              ],
-            )
+          if (isGranted || onRequest == null)
+            Icon(Icons.check_circle_rounded, color: colors.primary, size: 24)
           else
-            OutlinedButton(
-              onPressed: () {
+            ElevatedButton(
+              onPressed: () async {
                 onRequest();
-                Future.delayed(const Duration(seconds: 1), () {
-                  if (mounted) widget.syncService.checkPermissions();
-                });
+                for (final ms in [300, 700, 1500]) {
+                  await Future.delayed(Duration(milliseconds: ms));
+                  if (mounted) {
+                    await widget.syncService.checkPermissions();
+                    if (mounted) setState(() {});
+                  }
+                }
               },
-              style: OutlinedButton.styleFrom(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: colors.primary,
+                foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                side: const BorderSide(color: SalesTrackTheme.primary),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
-              child: const Text('Grant', style: TextStyle(color: SalesTrackTheme.primaryLight, fontSize: 13)),
+              child: const Text(
+                'Grant',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+              ),
             ),
         ],
       ),
@@ -121,13 +190,48 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
 
   @override
   Widget build(BuildContext context) {
-    final perms = widget.syncService.permissions;
-    final allGranted = perms.values.every((v) => v);
+    final colors = context.stColors;
+    final themeProvider = context.watch<ThemeProvider>();
+    final isDark = context.isDarkMode;
+
+    final int totalCount;
+    final int grantedCount;
+    final bool allGranted;
+
+    if (Platform.isIOS) {
+      totalCount = 3;
+      int g = 0;
+      if (widget.syncService.hasContactsPermission) g++;
+      if (widget.syncService.hasRecordingsFolderPermission) g++;
+      if (widget.syncService.hasNotificationPermission) g++;
+      grantedCount = g;
+      allGranted = (g >= 1);
+    } else {
+      final perms = widget.syncService.permissions;
+      totalCount = perms.isNotEmpty ? perms.length : 7;
+      grantedCount = perms.values.where((v) => v).length;
+      allGranted = perms.isNotEmpty && perms.values.every((v) => v);
+    }
+    final progress = totalCount > 0 ? (grantedCount / totalCount).clamp(0.0, 1.0) : 0.0;
 
     return Scaffold(
+      backgroundColor: colors.background,
       appBar: AppBar(
         title: const Text('Setup & Permissions Wizard'),
         actions: [
+          IconButton(
+            icon: Icon(
+              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+              size: 20,
+            ),
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+            onPressed: () => themeProvider.toggleTheme(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_suggest_rounded),
+            tooltip: 'Open App Settings',
+            onPressed: () => widget.syncService.openAppSettings(),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Recheck Permissions',
@@ -140,110 +244,276 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
           children: [
             Expanded(
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
                 children: [
-                  const Text(
-                    'Grant Required Telemetry Permissions',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: SalesTrackTheme.textPrimary),
+                  // Progress Card
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: colors.cardBackground,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(Icons.security_rounded, size: 20, color: colors.primary),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    allGranted
+                                        ? 'All Permissions Configured!'
+                                        : '$grantedCount of $totalCount Permissions Granted',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: colors.textPrimary,
+                                    ),
+                                  ),
+                                  Text(
+                                    allGranted
+                                        ? 'Phone telemetry tracking is fully operational.'
+                                        : 'Grant the required permissions for seamless CRM synchronization.',
+                                    style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              '${(progress * 100).toInt()}%',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: colors.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 6,
+                            backgroundColor: colors.surfaceColor,
+                            valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'To automatically track calls, recordings, SMS, and WhatsApp calls for company phones, Sales Track needs system access:',
-                    style: TextStyle(fontSize: 13, color: SalesTrackTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 18),
 
-                  // 1. Call Log
-                  _buildPermissionItem(
-                    title: 'Call Log',
-                    description: 'Reads exact talk duration and call timestamps from device log.',
-                    icon: Icons.history_rounded,
-                    isGranted: widget.syncService.hasCallLogPermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
+                  Text(
+                    'TELEMETRY PERMISSIONS',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.8,
+                      color: colors.textMuted,
+                    ),
                   ),
+                  const SizedBox(height: 10),
 
-                  // 2. Phone State
-                  _buildPermissionItem(
-                    title: 'Phone State',
-                    description: 'Detects incoming, outgoing, answered, and missed phone calls.',
-                    icon: Icons.phone_in_talk_rounded,
-                    isGranted: widget.syncService.hasPhoneStatePermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
-                  ),
+                  if (Platform.isIOS) ...[
+                    // iOS 1. Contacts
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Contacts Book',
+                      description: 'Resolves customer numbers to contact names and client history saved on this iPhone.',
+                      icon: Icons.contacts_rounded,
+                      isGranted: widget.syncService.hasContactsPermission,
+                      onRequest: () => widget.syncService.requestPermission('contacts'),
+                    ),
 
-                  // 3. Contacts
-                  _buildPermissionItem(
-                    title: 'Contacts',
-                    description: 'Resolves phone numbers to employee/customer address book names.',
-                    icon: Icons.contacts_rounded,
-                    isGranted: widget.syncService.hasContactsPermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
-                  ),
+                    // iOS 2. Microphone & Audio
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Microphone & Audio Access',
+                      description: 'Access to record customer call audio, voice notes, and meeting memos.',
+                      icon: Icons.mic_rounded,
+                      isGranted: widget.syncService.hasRecordingsFolderPermission,
+                      onRequest: () => widget.syncService.requestPermission('microphone'),
+                    ),
 
-                  // 4. SMS
-                  _buildPermissionItem(
-                    title: 'SMS',
-                    description: 'Tracks customer SMS text exchanges.',
-                    icon: Icons.sms_rounded,
-                    isGranted: widget.syncService.hasSmsPermission,
-                    onRequest: () => widget.syncService.requestAllPermissions(),
-                  ),
+                    // iOS 3. Notifications & CRM Alerts
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'CRM Notifications & Alerts',
+                      description: 'Receives real-time lead updates, scheduled call reminders, and sync alerts.',
+                      icon: Icons.notifications_active_rounded,
+                      isGranted: widget.syncService.hasNotificationPermission,
+                      onRequest: () => widget.syncService.requestPermission('notifications'),
+                    ),
 
-                  // 5. WhatsApp Call Access
-                  _buildPermissionItem(
-                    title: 'WhatsApp Call Access',
-                    description: 'Notification Listener permission to sense WhatsApp & WhatsApp Business calls.',
-                    icon: Icons.mark_chat_unread_rounded,
-                    isGranted: widget.syncService.hasWhatsAppAccessPermission,
-                    onRequest: () => widget.syncService.openNotificationListenerSettings(),
-                  ),
+                    // iOS 4. WhatsApp & Phone Calling
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'WhatsApp & Cellular Dialing',
+                      description: 'Integrates one-tap calling and direct WhatsApp messaging from CRM lead lists.',
+                      icon: Icons.mark_chat_unread_rounded,
+                      isGranted: true,
+                      onRequest: null,
+                    ),
 
-                  // 6. Recordings Folder
-                  _buildPermissionItem(
-                    title: 'Recordings Folder',
-                    description: 'All Files Access to locate and upload call audio recordings (.m4a, .mp3).',
-                    icon: Icons.folder_special_rounded,
-                    isGranted: widget.syncService.hasRecordingsFolderPermission,
-                    onRequest: () => widget.syncService.openAllFilesSettings(),
-                  ),
+                    // iOS 5. Background Telemetry Sync
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Background Telemetry Sync',
+                      description: 'Leverages iOS Background Processing to synchronize CRM data and pending interaction queues.',
+                      icon: Icons.sync_rounded,
+                      isGranted: true,
+                      onRequest: null,
+                    ),
+                  ] else ...[
+                    // Android 1. Call Log
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Call Log Access',
+                      description: 'Reads exact talk duration, phone numbers, and timestamps from device call logs.',
+                      icon: Icons.history_rounded,
+                      isGranted: widget.syncService.hasCallLogPermission,
+                      onRequest: () => widget.syncService.requestPermission('call_log'),
+                    ),
 
-                  // 7. Battery Unrestricted
-                  _buildPermissionItem(
-                    title: 'Battery Unrestricted',
-                    description: 'Prevents the Android OS from stopping the background sync service.',
-                    icon: Icons.battery_charging_full_rounded,
-                    isGranted: widget.syncService.hasBatteryOptimizationExemption,
-                    onRequest: () => widget.syncService.openBatterySettings(),
-                  ),
+                    // Android 2. Phone State
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Phone State Sensing',
+                      description: 'Detects real-time incoming, outgoing, answered, and missed phone calls.',
+                      icon: Icons.phone_in_talk_rounded,
+                      isGranted: widget.syncService.hasPhoneStatePermission,
+                      onRequest: () => widget.syncService.requestPermission('phone_state'),
+                    ),
+
+                    // Android 3. Contacts
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Contacts Book',
+                      description: 'Resolves customer numbers to contact names saved on this phone.',
+                      icon: Icons.contacts_rounded,
+                      isGranted: widget.syncService.hasContactsPermission,
+                      onRequest: () => widget.syncService.requestPermission('contacts'),
+                    ),
+
+                    // Android 4. SMS
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'SMS Message Logs',
+                      description: 'Captures incoming and outgoing SMS text interactions with CRM clients.',
+                      icon: Icons.sms_rounded,
+                      isGranted: widget.syncService.hasSmsPermission,
+                      onRequest: () => widget.syncService.requestPermission('sms'),
+                    ),
+
+                    // Android 5. WhatsApp Call Access
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'WhatsApp Call Access',
+                      description: 'Notification Listener permission to capture WhatsApp & WhatsApp Business calls.',
+                      icon: Icons.mark_chat_unread_rounded,
+                      isGranted: widget.syncService.hasWhatsAppAccessPermission,
+                      onRequest: () => widget.syncService.openNotificationListenerSettings(),
+                    ),
+
+                    // Android 6. Recordings Audio & Storage
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Audio & Storage Access',
+                      description: 'Storage permission to detect, link, and upload call audio recordings (.m4a, .mp3, .wav).',
+                      icon: Icons.audio_file_rounded,
+                      isGranted: widget.syncService.hasRecordingsFolderPermission,
+                      onRequest: () => widget.syncService.requestPermission('audio'),
+                    ),
+
+                    // Android 7. Battery Unrestricted
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Battery Background Exemption',
+                      description: 'Prevents the Android OS from suspending background telemetry synchronization.',
+                      icon: Icons.battery_charging_full_rounded,
+                      isGranted: widget.syncService.hasBatteryOptimizationExemption,
+                      onRequest: () => widget.syncService.openBatterySettings(),
+                    ),
+
+                    // Android 8. Truecaller Overlay (Display Over Other Apps)
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Display Over Other Apps',
+                      description: 'Displays Truecaller-style caller ID and after-call outcome dialogs over phone dialer.',
+                      icon: Icons.layers_rounded,
+                      isGranted: widget.syncService.hasOverlayPermission,
+                      onRequest: () => widget.syncService.openOverlaySettings(),
+                    ),
+                  ],
                 ],
               ),
             ),
 
             // Bottom bar
             Container(
-              padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                color: SalesTrackTheme.cardBackground,
-                border: Border(top: BorderSide(color: SalesTrackTheme.surfaceColor)),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+              decoration: BoxDecoration(
+                color: colors.cardBackground,
+                border: Border(top: BorderSide(color: colors.border)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
               ),
-              child: Column(
+              child: Row(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => widget.syncService.requestAllPermissions(),
-                          child: const Text('Request All'),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => widget.syncService.requestAllPermissions(),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: widget.onCompleted,
-                          child: Text(allGranted ? 'Continue to App' : 'Skip & Continue'),
+                      child: Text(
+                        'Request All',
+                        style: TextStyle(
+                          color: colors.textPrimary,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 1,
+                    child: ElevatedButton(
+                      onPressed: widget.onCompleted,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        allGranted ? 'Continue to App' : 'Skip & Continue',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
                   ),
                 ],
               ),
