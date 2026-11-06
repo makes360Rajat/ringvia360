@@ -1748,6 +1748,9 @@ class TelemetrySyncService extends ChangeNotifier {
 
               if (upRes.success || upRes.data?['already'] == true) {
                 await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+                for (final call in _calls) {
+                  if (call.uid == rec.uid) call.recordingSyncStatus = 'synced';
+                }
               } else {
                 await LocalDatabaseService.instance.markRecordingFailed(rec.uid);
                 recsSuccess = false;
@@ -1872,6 +1875,9 @@ class TelemetrySyncService extends ChangeNotifier {
           }
           if (upRes.success || upRes.data?['already'] == true) {
             await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+            for (final call in _calls) {
+              if (call.uid == rec.uid) call.recordingSyncStatus = 'synced';
+            }
           } else {
             await LocalDatabaseService.instance.markRecordingFailed(rec.uid);
           }

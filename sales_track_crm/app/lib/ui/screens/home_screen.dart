@@ -3033,9 +3033,12 @@ class _HomeScreenState extends State<HomeScreen>
                 final name = rec['fileName']?.toString() ?? 'Call Recording';
                 final isCurrent = service.activeAudioPath == path;
 
-                final matchingCall = service.calls
-                    .where((c) => c.recordingPath == path)
-                    .firstOrNull;
+                final matchingCall = service.calls.where((c) {
+                  if (c.recordingPath == null) return false;
+                  if (c.recordingPath == path) return true;
+                  final p1 = c.recordingPath!;
+                  return (name.isNotEmpty && p1.endsWith(name)) || path.endsWith(p1) || p1.endsWith(path);
+                }).firstOrNull;
                 final isUploaded = matchingCall?.recordingSyncStatus == 'synced';
 
                 return Card(
