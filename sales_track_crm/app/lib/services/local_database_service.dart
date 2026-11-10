@@ -406,7 +406,7 @@ class LocalDatabaseService {
           )
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
-          AND ABS(e1.time - e2.time) <= 120000
+          AND ABS(e1.time - e2.time) <= 3000
         WHERE e1.kind IN ('call', 'whatsapp_call')
       ''');
 

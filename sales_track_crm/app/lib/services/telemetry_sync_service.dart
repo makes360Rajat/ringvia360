@@ -1040,12 +1040,12 @@ class TelemetrySyncService extends ChangeNotifier {
     // Match callLogId if both have it (e.g. call-1371-...)
     final aMatch = RegExp(r'^call-(\d+)').firstMatch(a.uid);
     final bMatch = RegExp(r'^call-(\d+)').firstMatch(b.uid);
-    if (aMatch != null && bMatch != null && aMatch.group(1) == bMatch.group(1)) {
-      return true;
+    if (aMatch != null && bMatch != null) {
+      return aMatch.group(1) == bMatch.group(1);
     }
 
     if (numbersMatch(a.number, b.number) && a.direction == b.direction) {
-      if ((a.time - b.time).abs() < 120000) return true;
+      if ((a.time - b.time).abs() <= 3000) return true;
     }
     return false;
   }
@@ -1055,7 +1055,6 @@ class TelemetrySyncService extends ChangeNotifier {
 
     final Map<String, int> uidIndex = {};
     final Map<String, int> logIdIndex = {};
-    final Map<String, int> timeNumIndex = {};
     final List<SalesTrackEvent> result = [];
 
     for (final call in list) {
@@ -1072,20 +1071,11 @@ class TelemetrySyncService extends ChangeNotifier {
         }
       }
 
-      String numKey = extractNumberKey(call.number);
-      if (numKey.isEmpty) {
-        numKey = call.number.replaceAll(RegExp(r'[\s\-+]'), '').toLowerCase();
-      }
-      if (existingIdx < 0 && numKey.isNotEmpty) {
-        final bucket = call.time ~/ 120000;
-        for (final b in [bucket, bucket - 1, bucket + 1]) {
-          final k = '${call.direction}_${numKey}_$b';
-          if (timeNumIndex.containsKey(k)) {
-            final candIdx = timeNumIndex[k]!;
-            if ((result[candIdx].time - call.time).abs() <= 120000) {
-              existingIdx = candIdx;
-              break;
-            }
+      if (existingIdx < 0) {
+        for (int i = 0; i < result.length; i++) {
+          if (isSameCall(result[i], call)) {
+            existingIdx = i;
+            break;
           }
         }
       }
@@ -1096,9 +1086,6 @@ class TelemetrySyncService extends ChangeNotifier {
         if (call.uid.isNotEmpty) uidIndex[call.uid] = newIdx;
         final match = RegExp(r'^call-(\d+)-').firstMatch(call.uid);
         if (match != null) logIdIndex[match.group(1)!] = newIdx;
-        if (numKey.isNotEmpty) {
-          timeNumIndex['${call.direction}_${numKey}_${call.time ~/ 120000}'] = newIdx;
-        }
       } else {
         final existing = result[existingIdx];
         if ((call.recording || (call.recordingPath != null && call.recordingPath!.isNotEmpty)) &&
@@ -1238,7 +1225,7 @@ class TelemetrySyncService extends ChangeNotifier {
       return false;
     }
     if (a.kind == 'whatsapp_call') {
-      if ((a.time - b.time).abs() <= 120000 &&
+      if ((a.time - b.time).abs() <= 3000 &&
           (a.name == b.name ||
            numbersMatch(a.number, b.number) ||
            numbersMatch(a.name, b.number) ||
@@ -1302,24 +1289,12 @@ class TelemetrySyncService extends ChangeNotifier {
 
         final Map<String, int> uidMap = {};
         final Map<String, int> logIdMap = {};
-        final Map<String, int> timeNumMap = {};
 
         for (int i = 0; i < _calls.length; i++) {
           final c = _calls[i];
           if (c.uid.isNotEmpty) uidMap[c.uid] = i;
           final match = RegExp(r'^call-(\d+)-').firstMatch(c.uid);
           if (match != null) logIdMap[match.group(1)!] = i;
-          final numKey = extractNumberKey(c.number);
-          if (numKey.isNotEmpty) {
-            timeNumMap['${c.direction}_${numKey}_${c.time ~/ 120000}'] = i;
-          }
-        }
-
-        final Map<String, int> waMap = {};
-        for (int i = 0; i < _whatsappEvents.length; i++) {
-          final w = _whatsappEvents[i];
-          final numKey = extractNumberKey(w.number);
-          waMap['${w.direction}_${numKey}_${w.time ~/ 120000}'] = i;
         }
 
         for (final item in rawLogs) {
@@ -1358,10 +1333,11 @@ class TelemetrySyncService extends ChangeNotifier {
               if (match != null && logIdMap.containsKey(match.group(1)!)) {
                 existing = logIdMap[match.group(1)!]!;
               } else {
-                final numKey = extractNumberKey(event.number);
-                final key = '${event.direction}_${numKey}_${event.time ~/ 120000}';
-                if (timeNumMap.containsKey(key)) {
-                  existing = timeNumMap[key]!;
+                for (int i = 0; i < _calls.length; i++) {
+                  if (isSameCall(_calls[i], event)) {
+                    existing = i;
+                    break;
+                  }
                 }
               }
             }

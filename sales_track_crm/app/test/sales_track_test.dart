@@ -233,5 +233,44 @@ void main() {
       expect(merged.first.duration, equals(5));
       expect(merged.first.time, equals(1794294175414));
     });
+
+    test('preserves multiple missed calls from the same number in the same minute', () {
+      final missed1 = SalesTrackEvent(
+        uid: 'wacall_1794294175000_1001',
+        kind: 'whatsapp_call',
+        time: 1794294175000, // 12:00:15
+        direction: 'missed',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      final missed2 = SalesTrackEvent(
+        uid: 'wacall_1794294195000_1002',
+        kind: 'whatsapp_call',
+        time: 1794294195000, // 12:00:35 (20 seconds later in the same minute!)
+        direction: 'missed',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      final missed3 = SalesTrackEvent(
+        uid: 'wacall_1794294215000_1003',
+        kind: 'whatsapp_call',
+        time: 1794294215000, // 12:00:55 (20 seconds later in the same minute!)
+        direction: 'missed',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      // Must NOT be considered the same call!
+      expect(TelemetrySyncService.isSameWhatsApp(missed1, missed2), isFalse);
+      expect(TelemetrySyncService.isSameWhatsApp(missed2, missed3), isFalse);
+
+      final deduped = TelemetrySyncService.dedupWhatsAppList([missed1, missed2, missed3]);
+      expect(deduped.length, equals(3), reason: 'All 3 distinct missed calls in the same minute must be kept!');
+    });
   });
 }
