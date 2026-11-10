@@ -71,6 +71,8 @@ class LocalDatabaseService {
       onOpen: (db) async {
         // Automatically purge any group count summary notifications
         try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_events_number ON events (number)');
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_events_kind_time ON events (kind, time DESC)');
           await db.rawDelete('''
             DELETE FROM events 
             WHERE kind IN ('whatsapp_message', 'notification', 'sms')
@@ -201,7 +203,7 @@ class LocalDatabaseService {
   Future<List<SalesTrackEvent>> getPendingEvents({String? kind, int limit = 500}) async {
     final db = await database;
     if (db == null) return [];
-    String query = "SELECT * FROM events WHERE sync_status != 'synced'";
+    String query = "SELECT * FROM events WHERE sync_status = 'pending' AND NOT (kind = 'whatsapp_call' AND direction != 'missed' AND duration = 0)";
     final args = <dynamic>[];
 
     if (kind != null && kind.isNotEmpty) {
@@ -381,18 +383,15 @@ class LocalDatabaseService {
     if (db == null) return 0;
     int removed = 0;
     try {
-      // 1. Remove duplicate calls where another record exists with same number, and time within 120s
+      // 1. Remove duplicate calls where another record exists with same number, and time within natural window (5s for dialer, 120s for WhatsApp)
       final duplicateCalls = await db.rawQuery('''
         SELECT e2.uid as remove_uid, e1.uid as keep_uid, e2.duration as dur2, e1.duration as dur1,
                e2.sync_status as sync2, e1.sync_status as sync1,
                e2.direction as dir2, e1.direction as dir1,
-               e2.recording_path as rec2, e1.recording_path as rec1
+               e2.recording_path as rec2, e1.recording_path as rec1,
+               e1.kind as call_kind
         FROM events e1
         INNER JOIN events e2 ON e1.kind = e2.kind
-          AND (
-            (e1.kind = 'call' AND e1.direction = e2.direction)
-            OR (e1.kind = 'whatsapp_call')
-          )
           AND (
             e1.number = e2.number
             OR (
@@ -400,13 +399,13 @@ class LocalDatabaseService {
               AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e1.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10) =
                   SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e2.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10)
             )
-            OR (
-              e1.kind = 'whatsapp_call' AND e1.name != '' AND e1.name = e2.name
-            )
           )
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
-          AND ABS(e1.time - e2.time) <= 3000
+          AND (
+            (e1.kind = 'call' AND ABS(e1.time - e2.time) <= 5000)
+            OR (e1.kind = 'whatsapp_call' AND ABS(e1.time - e2.time) <= 120000)
+          )
         WHERE e1.kind IN ('call', 'whatsapp_call')
       ''');
 
@@ -425,7 +424,7 @@ class LocalDatabaseService {
           final updates = <String, dynamic>{};
           if (dur2 > dur1) updates['duration'] = dur2;
           if (sync2 == 'synced') updates['sync_status'] = 'synced';
-          if (dir1 == 'incoming' && dir2 == 'outgoing') updates['direction'] = 'outgoing';
+          if (dir1 == 'incoming' && (dir2 == 'outgoing' || dir2 == 'missed')) updates['direction'] = dir2;
           if ((rec1 == null || rec1.isEmpty) && rec2 != null && rec2.isNotEmpty) {
             updates['recording_path'] = rec2;
             updates['recording'] = 1;
@@ -484,6 +483,21 @@ class LocalDatabaseService {
           removed++;
         }
       }
+
+      // 3. Purge any phantom/summary messages (e.g. "5 new messages", "4 new messages", "Checking for new messages")
+      final purged = await db.rawDelete('''
+        DELETE FROM events 
+        WHERE kind IN ('whatsapp_message', 'notification')
+          AND (
+            text LIKE '%new message%' 
+            OR text LIKE '%unread message%'
+            OR text LIKE '%messages from%chat%'
+            OR text LIKE 'Checking for new messages%'
+            OR text LIKE 'Looking for new messages%'
+            OR (text LIKE '%(%' AND text LIKE '%messages)%')
+          )
+      ''');
+      removed += purged;
     } catch (_) {}
     return removed;
   }

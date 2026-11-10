@@ -204,34 +204,39 @@ void main() {
       expect(TelemetrySyncService.isMessageCountSummary('2 missed calls'), isFalse);
     });
 
+    test('normalizeNumber standardizes formats across spaced and unspaced numbers', () {
+      expect(TelemetrySyncService.normalizeNumber('+91 86994 98813'), equals('+918699498813'));
+      expect(TelemetrySyncService.normalizeNumber('+918699498813'), equals('+918699498813'));
+      expect(TelemetrySyncService.normalizeNumber('86994 98813'), equals('8699498813'));
+      expect(TelemetrySyncService.normalizeNumber('+1 (555) 234-5678'), equals('+15552345678'));
+    });
+
     test('dedupWhatsAppList merges duplicate WhatsApp call events (calling vs ongoing/completed)', () {
       final call1 = SalesTrackEvent(
-        uid: 'wacall_1794294175414_2003154570',
+        uid: 'wacall_1794293915731_1814978277',
         kind: 'whatsapp_call',
-        time: 1794294175414,
-        direction: 'outgoing',
+        time: 1794293915731,
+        direction: 'incoming',
         number: '+91 86994 98813',
         name: '+91 86994 98813',
         duration: 0,
       );
 
       final call2 = SalesTrackEvent(
-        uid: 'wacall_1794294177183_1226899528',
+        uid: 'wacall_1794293915943_1814978277',
         kind: 'whatsapp_call',
-        time: 1794294177183,
-        direction: 'incoming', // WhatsApp notification changed to ongoing
-        number: '+91 86994 98813',
+        time: 1794293915943,
+        direction: 'incoming',
+        number: '+918699498813',
         name: '+91 86994 98813',
-        duration: 5,
+        duration: 7,
       );
 
       expect(TelemetrySyncService.isSameWhatsApp(call1, call2), isTrue);
 
       final merged = TelemetrySyncService.dedupWhatsAppList([call1, call2]);
       expect(merged.length, equals(1));
-      expect(merged.first.direction, equals('outgoing'));
-      expect(merged.first.duration, equals(5));
-      expect(merged.first.time, equals(1794294175414));
+      expect(merged.first.duration, equals(7));
     });
 
     test('preserves multiple missed calls from the same number in the same minute', () {

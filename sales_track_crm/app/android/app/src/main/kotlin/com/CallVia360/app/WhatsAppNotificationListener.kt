@@ -85,16 +85,22 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val lower = trimmed.lowercase()
 
         // e.g. "5 new messages", "1 new message", "24 messages", "3 unread messages", "(5 messages)"
-        if (lower.matches(Regex("""^\(?\d+\s+(new\s+|unread\s+)?messages?\)?$"""))) return true
+        if (lower.matches(Regex("""^\(?\d+\s+(new\s+|unread\s+)?messages?[\s\.\,\!\?]*\)?$"""))) return true
 
         // e.g. "2 messages from 2 chats", "28 messages from 6 chats", "5 new messages from 3 chats"
         if (lower.matches(Regex("""^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$"""))) return true
 
+        // e.g. "5 new messages" appearing as a standalone phrase
+        if (lower.contains("new message") && lower.matches(Regex(""".*\b\d+\s+new\s+messages?\b.*""")) && lower.length < 35) return true
+
         // e.g. "messages from X chats"
         if (lower.contains("messages from") && lower.contains("chat")) return true
 
-        // e.g. "Checking for new messages"
-        if (lower.contains("checking for new messages")) return true
+        // e.g. "Checking for new messages", "Looking for new messages"
+        if (lower.contains("checking for new messages") || lower.contains("looking for new messages")) return true
+
+        // WhatsApp Web companion notifications
+        if (lower.contains("whatsapp web is currently active") || lower.contains("whatsapp web")) return true
 
         // Strings ending in "(X messages)"
         if (lower.matches(Regex(""".*\(\d+\s+messages?\)$"""))) return true
@@ -113,10 +119,26 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val text = (extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: "").trim()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
+        val summaryText = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()?.trim() ?: ""
         val category = notification.category ?: ""
         val channelId = notification.channelId ?: ""
 
         if (title.isEmpty() && text.isEmpty()) return null
+
+        // Skip message count summary text (e.g. "5 new messages", "3 messages from 2 chats")
+        if (isMessageCountSummary(text) || isMessageCountSummary(title) || isMessageCountSummary(subText) || isMessageCountSummary(summaryText)) {
+            return null
+        }
+
+        // Skip internal/backup/companion notifications
+        if (title.contains("backup", ignoreCase = true) ||
+            text.contains("Checking for new messages", ignoreCase = true) ||
+            text.contains("Looking for new messages", ignoreCase = true) ||
+            title.contains("WhatsApp Web", ignoreCase = true) ||
+            text.contains("WhatsApp Web", ignoreCase = true)
+        ) {
+            return null
+        }
 
         // 1. Detect if notification is any kind of Call (VoIP incoming, outgoing, ongoing, missed)
         var hasCallAction = false
@@ -131,21 +153,31 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             }
         }
 
-        val isCall = (category == Notification.CATEGORY_CALL) ||
+        val hasMessagingStyle = extras.containsKey("android.messagingUser") ||
+                extras.containsKey("android.messages")
+
+        val isCallCategory = (category == Notification.CATEGORY_CALL) ||
                 (category == Notification.CATEGORY_MISSED_CALL) ||
                 (category == "call") ||
-                (category == "missed_call") ||
-                channelId.contains("voip", ignoreCase = true) ||
-                channelId.contains("call", ignoreCase = true) ||
-                hasCallAction ||
-                text.contains("call", ignoreCase = true) ||
-                text.contains("calling", ignoreCase = true) ||
-                text.contains("ringing", ignoreCase = true) ||
-                title.contains("call", ignoreCase = true) ||
-                subText.contains("call", ignoreCase = true)
+                (category == "missed_call")
+
+        val isCallChannel = channelId.contains("voip", ignoreCase = true) ||
+                channelId.contains("call", ignoreCase = true)
+
+        val isCallText = text.equals("Incoming voice call", ignoreCase = true) ||
+                text.equals("Incoming video call", ignoreCase = true) ||
+                text.equals("Ongoing call", ignoreCase = true) ||
+                text.equals("Ringing...", ignoreCase = true) ||
+                text.equals("Ringing…", ignoreCase = true) ||
+                text.startsWith("Ongoing voice call", ignoreCase = true) ||
+                text.startsWith("Ongoing video call", ignoreCase = true) ||
+                text.matches(Regex("""^(Incoming|Ongoing|Missed)\s+(voice|video\s+)?call.*""", RegexOption.IGNORE_CASE)) ||
+                subText.matches(Regex("""^(Incoming|Ongoing|Missed)\s+(voice|video\s+)?call.*""", RegexOption.IGNORE_CASE))
+
+        val isCall = !hasMessagingStyle && (isCallCategory || isCallChannel || hasCallAction || isCallText)
 
         val isWhatsAppBusiness = packageName == "com.whatsapp.w4b"
-        val isWebCompanion = title.contains("WhatsApp Web", ignoreCase = true) || text.contains("WhatsApp Web", ignoreCase = true)
+        val isWebCompanion = false
         val now = System.currentTimeMillis()
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         val timestamp = isoFormat.format(Date(now))
@@ -186,9 +218,20 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 callNumber = title
             }
 
-            val digitsOnly = callNumber.replace(Regex("[^0-9]"), "")
+            // Strictly normalize phone number: keep leading '+' if present, strip all spaces and punctuation
+            val rawTrimmed = callNumber.trim()
+            val hasPlus = rawTrimmed.startsWith("+")
+            val digitsOnly = rawTrimmed.replace(Regex("[^0-9]"), "")
+            val normalizedNumber = if (digitsOnly.isNotEmpty()) {
+                if (hasPlus) "+$digitsOnly" else digitsOnly
+            } else {
+                rawTrimmed
+            }
+            callNumber = normalizedNumber
+
             val normalizedCaller = if (digitsOnly.length >= 7) digitsOnly.takeLast(10) else callNumber.trim().lowercase()
             val callerKey = "$packageName:$normalizedCaller"
+            val callerHash = Math.abs(callerKey.hashCode())
 
             // Resolve or preserve the call direction & stable UID
             val direction: String
@@ -197,11 +240,9 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
             if (isMissed) {
                 direction = "missed"
-                callTime = sbn.postTime
-                callUid = "wacall_${callTime}_$contentHash"
-                // Clean up any ongoing session for this caller
-                ongoingCallUids.remove(callerKey)
-                ongoingCallStartTimes.remove(callerKey)
+                // If there was an active incoming/ringing session, reuse its exact UID and start time!
+                callTime = ongoingCallStartTimes.remove(callerKey) ?: sbn.postTime
+                callUid = ongoingCallUids.remove(callerKey) ?: "wacall_${callTime}_$callerHash"
                 ongoingCallDirections.remove(callerKey)
             } else if (ongoingCallUids.containsKey(callerKey)) {
                 // Call is ALREADY ACTIVE - Reuse the exact same UID, start time, and original direction!
@@ -212,7 +253,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 // Call is STARTING
                 direction = if (isOutgoing) "outgoing" else "incoming"
                 callTime = sbn.postTime
-                val callerHash = Math.abs(callerKey.hashCode())
                 callUid = "wacall_${callTime}_$callerHash"
                 ongoingCallUids[callerKey] = callUid
                 ongoingCallStartTimes[callerKey] = callTime
@@ -231,7 +271,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "packageName" to packageName,
                 "isBusiness" to isWhatsAppBusiness,
                 "isWeb" to isWebCompanion,
-                "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else (if (isWebCompanion) "WhatsApp Web" else "WhatsApp")),
+                "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else "WhatsApp"),
                 "name" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
                 "number" to callNumber,
                 "direction" to direction,
@@ -249,24 +289,25 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             }
 
             // 2. Skip message count summary text (e.g. "5 new messages", "3 messages from 2 chats")
-            if (isMessageCountSummary(text) || isMessageCountSummary(title)) {
-                return null
-            }
-
-            // Skip internal/backup notifications
-            if (title.contains("backup", ignoreCase = true) ||
-                text.contains("Checking for new messages", ignoreCase = true)
-            ) {
+            if (isMessageCountSummary(text) || isMessageCountSummary(title) || isMessageCountSummary(subText) || isMessageCountSummary(summaryText)) {
                 return null
             }
 
             // WhatsApp Chat / SMS Message
             val groupName = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
-            val msgNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+            var msgNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
                 title
             } else {
                 ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
             }
+
+            val msgRawTrimmed = msgNumber.trim()
+            val msgHasPlus = msgRawTrimmed.startsWith("+")
+            val msgDigitsOnly = msgRawTrimmed.replace(Regex("[^0-9]"), "")
+            if (msgDigitsOnly.isNotEmpty()) {
+                msgNumber = if (msgHasPlus) "+$msgDigitsOnly" else msgDigitsOnly
+            }
+
             return mapOf(
                 "type" to "whatsapp_message",
                 "uid" to "wamsg_${sbn.postTime}_$contentHash",
@@ -274,7 +315,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "packageName" to packageName,
                 "isBusiness" to isWhatsAppBusiness,
                 "isWeb" to isWebCompanion,
-                "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else (if (isWebCompanion) "WhatsApp Web" else "WhatsApp")),
+                "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else "WhatsApp"),
                 "sender" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
                 "name" to title,
                 "number" to msgNumber,
@@ -304,7 +345,12 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         if (callNumber.isEmpty()) {
             callNumber = title
         }
-        val digitsOnly = callNumber.replace(Regex("[^0-9]"), "")
+        val rawTrimmed = callNumber.trim()
+        val hasPlus = rawTrimmed.startsWith("+")
+        val digitsOnly = rawTrimmed.replace(Regex("[^0-9]"), "")
+        if (digitsOnly.isNotEmpty()) {
+            callNumber = if (hasPlus) "+$digitsOnly" else digitsOnly
+        }
         val normalizedCaller = if (digitsOnly.length >= 7) digitsOnly.takeLast(10) else callNumber.trim().lowercase()
         val callerKey = "$packageName:$normalizedCaller"
 

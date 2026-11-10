@@ -3146,8 +3146,9 @@ class _HomeScreenState extends State<HomeScreen>
     final pendingSms = service.smsList.where((s) => s.syncStatus != 'synced').toList();
     final pendingRecordings = service.calls
         .where((c) =>
-            (c.recording || (c.recordingPath != null && c.recordingPath!.isNotEmpty)) &&
-            c.recordingSyncStatus != 'synced')
+            c.recordingPath != null &&
+            c.recordingPath!.isNotEmpty &&
+            c.recordingSyncStatus == 'pending')
         .toList();
 
     final totalPending = pendingCalls.length +

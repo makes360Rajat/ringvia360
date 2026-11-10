@@ -123,6 +123,57 @@ function mks_st_clean_body($value, $max = MKS_ST_TEXT_MAX)
 }
 
 /**
+ * Detects whether a string is an Android group summary or message count (e.g. "5 new messages", "3 messages from 2 chats")
+ *
+ * @param  mixed $value
+ * @return bool
+ */
+function mks_st_is_message_count_summary($value)
+{
+    if (!is_scalar($value)) {
+        return false;
+    }
+    $trimmed = trim((string) $value);
+    if ($trimmed === '') {
+        return false;
+    }
+    $lower = strtolower($trimmed);
+
+    // e.g. "5 new messages", "1 new message", "24 messages", "3 unread messages", "(5 messages)"
+    if (preg_match('/^\(?\d+\s+(new\s+|unread\s+)?messages?[\s\.\,\!\?]*\)?$/i', $lower)) {
+        return true;
+    }
+
+    // e.g. "2 messages from 2 chats", "28 messages from 6 chats", "5 new messages from 3 chats"
+    if (preg_match('/^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+/i', $lower)) {
+        return true;
+    }
+
+    // e.g. "5 new messages" appearing as a standalone phrase
+    if (strpos($lower, 'new message') !== false && preg_match('/\b\d+\s+new\s+messages?\b/i', $lower) && strlen($lower) < 35) {
+        return true;
+    }
+
+    if (strpos($lower, 'checking for new messages') !== false || strpos($lower, 'looking for new messages') !== false) {
+        return true;
+    }
+
+    if (strpos($lower, 'whatsapp web is currently active') !== false || strpos($lower, 'whatsapp web') !== false) {
+        return true;
+    }
+
+    if (strpos($lower, 'messages from') !== false && strpos($lower, 'chat') !== false) {
+        return true;
+    }
+
+    if (preg_match('/.*\(\d+\s+messages?\)$/i', $lower)) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
  * A device side event id. Printable ASCII without spaces, 1 to 80 characters.
  *
  * @param  mixed $value
@@ -2170,6 +2221,14 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
         $row['app_name']     = mks_st_null_if_empty(mks_st_clean_line(isset($raw['app_name']) ? $raw['app_name'] : '', 100));
         $row['title']        = mks_st_clean_line($finalTitle, 255);
         $row['body']         = mks_st_null_if_empty(mks_st_clean_body(isset($raw['text']) ? $raw['text'] : ''));
+
+        // Skip message count summaries (e.g. "5 new messages", "4 new messages") immediately
+        if (in_array($kind, ['whatsapp_message', 'notification', 'sms'], true)) {
+            if (mks_st_is_message_count_summary($row['body']) || mks_st_is_message_count_summary($row['title'])) {
+                $result['skipped'][] = ['uid' => $uid, 'reason' => 'summary_message_ignored'];
+                continue;
+            }
+        }
         $row['occurred_at']  = date('Y-m-d H:i:s', (int) floor($ms / 1000));
         $row['duration']     = $duration;
         $row['received_at']  = $now;
