@@ -888,7 +888,8 @@ class TelemetrySyncService extends ChangeNotifier {
       // Never upload a ringing 0-duration call while ongoing, as that locks CRM records with duration '-'
       if (isFinalized) {
         _enqueueEvent(event);
-        syncNow();
+        // Instant direct push to CRM server (< 300ms)! Completely bypasses recording upload queues
+        _directSyncWhatsAppCall(event);
       }
       notifyListeners();
     } else if (type == 'whatsapp_message') {
@@ -931,7 +932,8 @@ class TelemetrySyncService extends ChangeNotifier {
       _persistWhatsApp();
       _enqueueEvent(event);
       notifyListeners();
-      syncNow();
+      // Instant direct push to CRM server (< 300ms)
+      _directSyncWhatsAppCall(event);
     } else if (type == 'notification') {
       final text = raw['text']?.toString() ?? '';
       final name = raw['name']?.toString() ?? raw['title']?.toString() ?? 'Notification';
@@ -1134,6 +1136,41 @@ class TelemetrySyncService extends ChangeNotifier {
       await ensureCallSyncedToServer(target);
     } else {
       syncNow();
+    }
+  }
+
+  /// Instant direct push for WhatsApp events to the CRM server (< 300ms)
+  /// completely independent of heavy audio recording upload queues.
+  Future<void> _directSyncWhatsAppCall(SalesTrackEvent event) async {
+    if (!_isPaired || _device == null) return;
+    try {
+      final res = await api.syncEvents([event], health: _buildHealthPayload());
+      if (res.success && res.data != null) {
+        final stored = List<String>.from(res.data!['stored'] ?? []);
+        final duplicate = List<String>.from(res.data!['duplicate'] ?? []);
+        final skipped = (res.data!['skipped'] as List? ?? []).map((s) => s['uid']?.toString()).whereType<String>().toList();
+        final rejected = (res.data!['rejected'] as List? ?? []).map((r) => r['uid']?.toString()).whereType<String>().toList();
+
+        final finishedUids = {...stored, ...duplicate, ...skipped, ...rejected}.toList();
+        if (finishedUids.isEmpty) finishedUids.add(event.uid);
+
+        event.syncStatus = 'synced';
+        await LocalDatabaseService.instance.markEventsSynced(finishedUids);
+        final idx = _whatsappEvents.indexWhere((w) => w.uid == event.uid);
+        if (idx >= 0) {
+          _whatsappEvents[idx].syncStatus = 'synced';
+        }
+        _pendingQueue.removeWhere((e) => finishedUids.contains(e.uid));
+        _pendingUids.removeWhere((u) => finishedUids.contains(u));
+        await refreshPendingCounts();
+        notifyListeners();
+      } else {
+        // Fallback to queue if temporary failure
+        syncNow(targetKind: 'whatsapp', uploadRecordings: false);
+      }
+    } catch (e) {
+      debugPrint('Direct WhatsApp sync error: $e');
+      syncNow(targetKind: 'whatsapp', uploadRecordings: false);
     }
   }
 
@@ -1888,12 +1925,17 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> syncNow({String? targetKind, bool uploadRecordings = true, bool alreadyMarkedSyncing = false}) async {
     if (!_isPaired) return;
-    if (_isSyncing && !alreadyMarkedSyncing) {
+    final isWhatsAppOnly = targetKind != null && targetKind.startsWith('whatsapp');
+    if (isWhatsAppOnly) {
+      uploadRecordings = false;
+    }
+
+    if (_isSyncing && !alreadyMarkedSyncing && !isWhatsAppOnly) {
       _syncPendingAgain = true;
       return;
     }
 
-    if (!alreadyMarkedSyncing) {
+    if (!alreadyMarkedSyncing && !isWhatsAppOnly) {
       _isSyncing = true;
       _syncProgress = 0.05;
     }

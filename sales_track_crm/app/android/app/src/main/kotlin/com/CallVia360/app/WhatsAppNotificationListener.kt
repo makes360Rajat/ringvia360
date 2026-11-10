@@ -233,6 +233,10 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             val callerKey = "$packageName:$normalizedCaller"
             val callerHash = Math.abs(callerKey.hashCode())
 
+            val isEnded = text.contains("call ended", ignoreCase = true) ||
+                    text.contains("ended", ignoreCase = true) ||
+                    subText.contains("call ended", ignoreCase = true)
+
             // Resolve or preserve the call direction & stable UID
             val direction: String
             val callUid: String
@@ -244,6 +248,28 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 callTime = ongoingCallStartTimes.remove(callerKey) ?: sbn.postTime
                 callUid = ongoingCallUids.remove(callerKey) ?: "wacall_${callTime}_$callerHash"
                 ongoingCallDirections.remove(callerKey)
+            } else if (isEnded && (ongoingCallUids.containsKey(callerKey) || ongoingCallUids.keys.any { it.startsWith("$packageName:") })) {
+                val matchedKey = if (ongoingCallUids.containsKey(callerKey)) callerKey else ongoingCallUids.keys.first { it.startsWith("$packageName:") }
+                callUid = ongoingCallUids.remove(matchedKey) ?: "wacall_${sbn.postTime}_$callerHash"
+                callTime = ongoingCallStartTimes.remove(matchedKey) ?: sbn.postTime
+                direction = ongoingCallDirections.remove(matchedKey) ?: (if (isOutgoing) "outgoing" else "incoming")
+                val durationSec = Math.max(1, ((now - callTime) / 1000).toInt())
+                return mapOf(
+                    "type" to "whatsapp_call_completed",
+                    "uid" to callUid,
+                    "kind" to "whatsapp_call",
+                    "packageName" to packageName,
+                    "isBusiness" to isWhatsAppBusiness,
+                    "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else "WhatsApp"),
+                    "name" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
+                    "number" to callNumber,
+                    "direction" to direction,
+                    "media" to (if (isVideo) "video" else "voice"),
+                    "duration" to durationSec,
+                    "time" to callTime,
+                    "timestamp" to timestamp,
+                    "source" to "auto"
+                )
             } else if (ongoingCallUids.containsKey(callerKey)) {
                 // Call is ALREADY ACTIVE - Reuse the exact same UID, start time, and original direction!
                 callUid = ongoingCallUids[callerKey]!!
