@@ -247,7 +247,7 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
 
   void _onSkipOrDismiss() {
     widget.onDismiss();
-    widget.syncService.syncNow();
+    widget.syncService.dismissAfterCallPopup(widget.event);
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     }
@@ -284,6 +284,8 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
     }
 
     setState(() => _isSubmitting = true);
+
+    widget.syncService.ensureCallSyncedToServer(widget.event);
 
     final success = await widget.syncService.submitCallOutcome(
       uid: widget.event.uid,
@@ -424,8 +426,15 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
             ? widget.event.name
             : 'Unsaved Contact');
 
-    return FadeTransition(
-      opacity: _fadeAnimation,
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          widget.syncService.dismissAfterCallPopup(widget.event);
+        }
+      },
+      child: FadeTransition(
+        opacity: _fadeAnimation,
       child: ScaleTransition(
         scale: _scaleAnimation,
         child: Dialog(
@@ -1003,8 +1012,9 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildFollowUpPresetChip(String label, VoidCallback onTap, bool isDark) {
     return ActionChip(

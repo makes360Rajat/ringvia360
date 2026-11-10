@@ -192,13 +192,13 @@ class _HomeScreenState extends State<HomeScreen>
               event: afterCall,
               syncService: widget.syncService,
               onDismiss: () {
-                widget.syncService.dismissAfterCallPopup();
+                widget.syncService.dismissAfterCallPopup(afterCall);
               },
             );
           },
         ).then((_) {
           _afterCallDialogContext = null;
-          widget.syncService.dismissAfterCallPopup();
+          widget.syncService.dismissAfterCallPopup(afterCall);
         });
       });
     } else if (afterCall == null) {
@@ -1817,7 +1817,9 @@ class _HomeScreenState extends State<HomeScreen>
                           builder: (dialogCtx) => AfterCallDialog(
                             event: eventObj,
                             syncService: service,
-                            onDismiss: () {},
+                            onDismiss: () {
+                              service.dismissAfterCallPopup(eventObj);
+                            },
                           ),
                         );
                       },

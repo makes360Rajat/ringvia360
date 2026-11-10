@@ -61,7 +61,9 @@ class CallerIdDialog extends StatelessWidget {
         event: tempEvent,
         callerInfo: info,
         syncService: syncService,
-        onDismiss: () {},
+        onDismiss: () {
+          syncService.dismissAfterCallPopup(tempEvent);
+        },
       ),
     );
   }

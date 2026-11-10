@@ -1008,11 +1008,96 @@ class TelemetrySyncService extends ChangeNotifier {
     return true;
   }
 
-  void dismissAfterCallPopup() {
+  String? _lastEnsuredCallUid;
+  DateTime? _lastEnsuredCallTime;
+
+  /// Ensures that a call event is guaranteed to be sent to the CRM server in all cases.
+  /// Used whenever an after-call / log-lead dialog is dismissed or submitted, ensuring
+  /// that cancelling or crossing out the dialog view never drops the call from the server.
+  Future<void> ensureCallSyncedToServer(SalesTrackEvent event) async {
+    final now = DateTime.now();
+    if (_lastEnsuredCallUid == event.uid &&
+        _lastEnsuredCallTime != null &&
+        now.difference(_lastEnsuredCallTime!).inSeconds < 5 &&
+        event.syncStatus == 'synced') {
+      return;
+    }
+    _lastEnsuredCallUid = event.uid;
+    _lastEnsuredCallTime = now;
+
+    try {
+      // 1. Mark as pending and persist to local SQLite
+      event.syncStatus = 'pending';
+      await LocalDatabaseService.instance.saveEvents([event]);
+
+      // Update in-memory lists
+      int callIdx = _calls.indexWhere((c) => c.uid == event.uid);
+      if (callIdx < 0) {
+        callIdx = _calls.indexWhere((c) => isSameCall(c, event));
+      }
+      if (callIdx >= 0) {
+        _calls[callIdx].syncStatus = 'pending';
+      }
+
+      int waIdx = _whatsappEvents.indexWhere((w) => w.uid == event.uid);
+      if (waIdx < 0) {
+        waIdx = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
+      }
+      if (waIdx >= 0) {
+        _whatsappEvents[waIdx].syncStatus = 'pending';
+      }
+
+      _pendingUids.remove(event.uid);
+      _enqueueEvent(event);
+
+      // 2. Direct upload to CRM server immediately if paired
+      if (_isPaired) {
+        final res = await api.syncEvents([event], health: _buildHealthPayload());
+        if (res.success && res.data != null) {
+          final stored = List<String>.from(res.data!['stored'] ?? []);
+          final duplicate = List<String>.from(res.data!['duplicate'] ?? []);
+          final skipped = (res.data!['skipped'] as List? ?? []).map((s) => s['uid']?.toString()).whereType<String>().toList();
+          final rejected = (res.data!['rejected'] as List? ?? []).map((r) => r['uid']?.toString()).whereType<String>().toList();
+
+          final finishedUids = {...stored, ...duplicate, ...skipped, ...rejected}.toList();
+          if (finishedUids.isEmpty) {
+            finishedUids.add(event.uid);
+          }
+
+          event.syncStatus = 'synced';
+          await LocalDatabaseService.instance.markEventsSynced(finishedUids);
+          _pendingQueue.removeWhere((e) => finishedUids.contains(e.uid));
+          _pendingUids.removeWhere((u) => finishedUids.contains(u));
+
+          if (callIdx >= 0) _calls[callIdx].syncStatus = 'synced';
+          if (waIdx >= 0) _whatsappEvents[waIdx].syncStatus = 'synced';
+
+          final recordingsWanted = List<String>.from(res.data!['recordings_wanted'] ?? []);
+          if (recordingsWanted.contains(event.uid) && event.recordingPath != null && event.recordingPath!.isNotEmpty) {
+            await _uploadWantedRecordings([event.uid]);
+          }
+        }
+      }
+
+      // Also trigger a general sync to flush any remaining items
+      syncNow();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error ensuring call synced to server: $e');
+      syncNow();
+    }
+  }
+
+  Future<void> dismissAfterCallPopup([SalesTrackEvent? event]) async {
+    final target = event ?? _activeAfterCallEvent;
     _activeAfterCallEvent = null;
     notifyListeners();
-    // Guarantee that call data and audio are immediately uploaded to the server
-    syncNow();
+
+    if (target != null) {
+      await ensureCallSyncedToServer(target);
+    } else {
+      syncNow();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1720,6 +1805,11 @@ class TelemetrySyncService extends ChangeNotifier {
           limit: batchSize,
         );
 
+        if (batch.isEmpty) {
+          keepSyncing = false;
+          break;
+        }
+
         // Filter out summary/count messages before upload and purge them from DB
         final summaryEvents = batch.where((ev) => isMessageCountSummary(ev.text) || isMessageCountSummary(ev.name)).toList();
         if (summaryEvents.isNotEmpty) {
@@ -2239,6 +2329,26 @@ class TelemetrySyncService extends ChangeNotifier {
 
     // Save to local SQLite database so caller lookup and offline history are immediately updated
     await LocalDatabaseService.instance.saveOutcome(submission);
+
+    // Guarantee the base call is synced to server
+    SalesTrackEvent? callEvent;
+    for (final c in _calls) {
+      if (c.uid == uid) {
+        callEvent = c;
+        break;
+      }
+    }
+    if (callEvent == null) {
+      for (final w in _whatsappEvents) {
+        if (w.uid == uid) {
+          callEvent = w;
+          break;
+        }
+      }
+    }
+    if (callEvent != null) {
+      ensureCallSyncedToServer(callEvent);
+    }
 
     _activeAfterCallEvent = null;
     notifyListeners();
