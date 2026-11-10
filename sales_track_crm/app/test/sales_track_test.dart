@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sales_track_crm/models/sales_track_models.dart';
 import 'package:sales_track_crm/services/app_lock_service.dart';
 import 'package:sales_track_crm/services/sales_track_api_service.dart';
+import 'package:sales_track_crm/services/telemetry_sync_service.dart';
 
 void main() {
   group('Sales Track Backend Compatibility Tests', () {
@@ -178,6 +179,25 @@ void main() {
       expect(SalesTrackApiService.defaultServerUrl, equals('https://crm.make360.in'));
       expect(SalesTrackApiService.normalizeServerUrl('crm.example.com'), equals('https://crm.example.com'));
       expect(SalesTrackApiService.normalizeServerUrl('https://crm.example.com/admin/'), equals('https://crm.example.com'));
+    });
+
+    test('isMessageCountSummary detects group summary strings and allows real messages', () {
+      // Should detect and reject summary count strings
+      expect(TelemetrySyncService.isMessageCountSummary('5 new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('4 new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('3 new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('1 new message'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('16 messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('2 messages from 2 chats'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('28 messages from 6 chats'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('Checking for new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('(24 messages)'), isTrue);
+
+      // Should allow real message content
+      expect(TelemetrySyncService.isMessageCountSummary('17'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('Hello, interested in CallVia360'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('Can you please send 5 messages to the team?'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('Thank you'), isFalse);
     });
   });
 }

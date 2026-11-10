@@ -841,9 +841,13 @@ class TelemetrySyncService extends ChangeNotifier {
       notifyListeners();
       syncNow();
     } else if (type == 'whatsapp_message') {
+      final text = raw['text']?.toString() ?? '';
+      String name = raw['sender']?.toString() ?? raw['name']?.toString() ?? 'WhatsApp Contact';
+      if (isMessageCountSummary(text) || isMessageCountSummary(name)) {
+        return; // Drop message count summary notifications immediately
+      }
       final uid = raw['uid']?.toString() ?? 'wamsg-${DateTime.now().millisecondsSinceEpoch}';
       String number = raw['number']?.toString() ?? '';
-      String name = raw['sender']?.toString() ?? raw['name']?.toString() ?? 'WhatsApp Contact';
       if (number.isEmpty && RegExp(r'^\+?[0-9\s\-()]{7,}$').hasMatch(name)) {
         number = name;
       }
@@ -855,7 +859,7 @@ class TelemetrySyncService extends ChangeNotifier {
         number: number,
         name: name,
         app: raw['packageName']?.toString() ?? 'com.whatsapp',
-        text: raw['text']?.toString() ?? '',
+        text: text,
         source: 'auto',
       );
 
@@ -877,6 +881,11 @@ class TelemetrySyncService extends ChangeNotifier {
       notifyListeners();
       syncNow();
     } else if (type == 'notification') {
+      final text = raw['text']?.toString() ?? '';
+      final name = raw['name']?.toString() ?? raw['title']?.toString() ?? 'Notification';
+      if (isMessageCountSummary(text) || isMessageCountSummary(name)) {
+        return; // Drop message count summary notifications immediately
+      }
       final uid = raw['uid']?.toString() ?? 'notif-${DateTime.now().millisecondsSinceEpoch}';
       final event = SalesTrackEvent(
         uid: uid,
@@ -884,9 +893,9 @@ class TelemetrySyncService extends ChangeNotifier {
         time: (raw['time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
         direction: raw['direction']?.toString() ?? 'incoming',
         number: raw['number']?.toString() ?? '',
-        name: raw['name']?.toString() ?? raw['title']?.toString() ?? 'Notification',
+        name: name,
         app: raw['packageName']?.toString() ?? '',
-        text: raw['text']?.toString() ?? '',
+        text: text,
         source: 'auto',
       );
 
@@ -1215,10 +1224,26 @@ class TelemetrySyncService extends ChangeNotifier {
     return false;
   }
 
+  /// Returns true if the string represents an Android group summary or message count (e.g. "5 new messages")
+  static bool isMessageCountSummary(String? str) {
+    if (str == null) return false;
+    final trimmed = str.trim();
+    if (trimmed.isEmpty) return false;
+    final lower = trimmed.toLowerCase();
+    if (RegExp(r'^\(?\d+\s+(new\s+|unread\s+)?messages?\)?$').hasMatch(lower)) return true;
+    if (RegExp(r'^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$').hasMatch(lower)) return true;
+    if (lower.contains('checking for new messages')) return true;
+    if (RegExp(r'^\d+\s+missed\s+calls?$').hasMatch(lower)) return true;
+    if (lower.contains('messages from') && lower.contains('chat')) return true;
+    if (RegExp(r'.*\(\d+\s+messages?\)$').hasMatch(lower)) return true;
+    return false;
+  }
+
   static List<SalesTrackEvent> dedupWhatsAppList(List<SalesTrackEvent> list) {
     if (list.isEmpty) return [];
     final List<SalesTrackEvent> result = [];
     for (final wa in list) {
+      if (isMessageCountSummary(wa.text) || isMessageCountSummary(wa.name)) continue;
       int existingIdx = -1;
       for (int i = 0; i < result.length; i++) {
         if (isSameWhatsApp(result[i], wa)) {
@@ -1432,6 +1457,7 @@ class TelemetrySyncService extends ChangeNotifier {
         int newCount = 0;
         for (final item in rawList) {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
+          if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) continue;
           final existing = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
           if (existing >= 0) {
             if (_whatsappEvents[existing].syncStatus == 'synced') {
@@ -1610,6 +1636,9 @@ class TelemetrySyncService extends ChangeNotifier {
     if (_config.isNumberExcluded(event.number)) return;
     if (_config.trackSim > 0 && event.sim > 0 && event.sim != _config.trackSim) return;
 
+    // Filter out group summary notifications (e.g. "5 new messages")
+    if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) return;
+
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
     if (event.kind == 'whatsapp_message') {
@@ -1665,7 +1694,17 @@ class TelemetrySyncService extends ChangeNotifier {
           limit: batchSize,
         );
 
-        if (batch.isEmpty) break;
+        // Filter out summary/count messages before upload and purge them from DB
+        final summaryEvents = batch.where((ev) => isMessageCountSummary(ev.text) || isMessageCountSummary(ev.name)).toList();
+        if (summaryEvents.isNotEmpty) {
+          final summaryUids = summaryEvents.map((e) => e.uid).toList();
+          await LocalDatabaseService.instance.markEventsSynced(summaryUids);
+          _pendingQueue.removeWhere((e) => summaryUids.contains(e.uid));
+          _pendingUids.removeWhere((u) => summaryUids.contains(u));
+          batch.removeWhere((ev) => summaryUids.contains(ev.uid));
+        }
+
+        if (batch.isEmpty) continue;
 
         _syncProgressMessage = 'Uploading ${batch.length} ${targetKind ?? "telemetry"} events to CRM...';
         notifyListeners();
@@ -2396,6 +2435,7 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> _loadPersistedHistory() async {
     // 1. Try loading from SQLite first (Offline-First source of truth)
     try {
+      await LocalDatabaseService.instance.purgeSummaryNotifications();
       final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call');
       final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp');
       final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms');
@@ -2410,6 +2450,7 @@ class TelemetrySyncService extends ChangeNotifier {
         await LocalDatabaseService.instance.cleanupDuplicates();
 
         final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 10000);
+        pendingFromDb.removeWhere((e) => isMessageCountSummary(e.text) || isMessageCountSummary(e.name));
         _pendingQueue.clear();
         _pendingQueue.addAll(pendingFromDb);
         _pendingUids.clear();

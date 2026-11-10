@@ -77,18 +77,55 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         TelemetryBridgeChannel.sendTelemetryEvent(event)
     }
 
+    private fun isMessageCountSummary(str: String): Boolean {
+        val trimmed = str.trim()
+        if (trimmed.isEmpty()) return false
+        val lower = trimmed.lowercase()
+
+        // e.g. "5 new messages", "1 new message", "24 messages", "3 unread messages", "(5 messages)"
+        if (lower.matches(Regex("""^\(?\d+\s+(new\s+|unread\s+)?messages?\)?$"""))) return true
+
+        // e.g. "2 messages from 2 chats", "28 messages from 6 chats", "5 new messages from 3 chats"
+        if (lower.matches(Regex("""^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$"""))) return true
+
+        // e.g. "messages from X chats"
+        if (lower.contains("messages from") && lower.contains("chat")) return true
+
+        // e.g. "Checking for new messages"
+        if (lower.contains("checking for new messages")) return true
+
+        // e.g. "X missed calls"
+        if (lower.matches(Regex("""^\d+\s+missed\s+calls?$"""))) return true
+
+        // Strings ending in "(X messages)"
+        if (lower.matches(Regex(""".*\(\d+\s+messages?\)$"""))) return true
+
+        return false
+    }
+
     private fun parseWhatsAppNotification(sbn: StatusBarNotification): Map<String, Any>? {
         val packageName = sbn.packageName ?: return null
         if (packageName != "com.whatsapp" && packageName != "com.whatsapp.w4b") return null
 
         val notification = sbn.notification ?: return null
+
+        // 1. Skip Android group summary notifications (e.g. the summary notification that groups individual messages)
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            return null
+        }
+
         val extras = notification.extras ?: return null
 
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
-            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+        val text = (extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: "").trim()
 
         if (title.isEmpty() && text.isEmpty()) return null
+
+        // 2. Skip message count summary text (e.g. "5 new messages", "3 messages from 2 chats")
+        if (isMessageCountSummary(text) || isMessageCountSummary(title)) {
+            return null
+        }
 
         // Skip internal/backup notifications
         if (title.contains("backup", ignoreCase = true) ||

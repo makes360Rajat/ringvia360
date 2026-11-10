@@ -68,6 +68,23 @@ class LocalDatabaseService {
           )
         ''');
       },
+      onOpen: (db) async {
+        // Automatically purge any group count summary notifications
+        try {
+          await db.rawDelete('''
+            DELETE FROM events 
+            WHERE kind IN ('whatsapp_message', 'notification', 'sms')
+              AND (
+                text LIKE '%new message%'
+                OR text LIKE '%messages from%'
+                OR text LIKE '%unread message%'
+                OR text GLOB '[0-9]* message*'
+                OR text GLOB '[0-9]* new message*'
+                OR text GLOB '(* message*)'
+              )
+          ''');
+        } catch (_) {}
+      },
     );
   }
 
@@ -674,5 +691,27 @@ class LocalDatabaseService {
       chunks.add(list.sublist(i, i + size > list.length ? list.length : i + size));
     }
     return chunks;
+  }
+
+  /// Purge all group count summary notifications (e.g. "5 new messages", "3 messages from 2 chats")
+  Future<int> purgeSummaryNotifications() async {
+    final db = await database;
+    if (db == null) return 0;
+    try {
+      return await db.rawDelete('''
+        DELETE FROM events 
+        WHERE kind IN ('whatsapp_message', 'notification', 'sms')
+          AND (
+            text LIKE '%new message%'
+            OR text LIKE '%messages from%'
+            OR text LIKE '%unread message%'
+            OR text GLOB '[0-9]* message*'
+            OR text GLOB '[0-9]* new message*'
+            OR text GLOB '(* message*)'
+          )
+      ''');
+    } catch (_) {
+      return 0;
+    }
   }
 }

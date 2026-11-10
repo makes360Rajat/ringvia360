@@ -2232,7 +2232,11 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final allEvents = service.whatsappEvents;
+    final allEvents = service.whatsappEvents
+        .where((e) =>
+            !TelemetrySyncService.isMessageCountSummary(e.text) &&
+            !TelemetrySyncService.isMessageCountSummary(e.name))
+        .toList();
     final messageCount = allEvents.where((e) => e.kind == 'whatsapp_message').length;
     final callCount = allEvents.where((e) => e.kind == 'whatsapp_call').length;
 
@@ -2632,7 +2636,11 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final sortedSms = List<SalesTrackEvent>.from(service.smsList)
+    final sortedSms = service.smsList
+        .where((e) =>
+            !TelemetrySyncService.isMessageCountSummary(e.text) &&
+            !TelemetrySyncService.isMessageCountSummary(e.name))
+        .toList()
       ..sort((a, b) => b.time.compareTo(a.time));
 
     return Column(
