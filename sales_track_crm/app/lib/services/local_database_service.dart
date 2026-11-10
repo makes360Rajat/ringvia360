@@ -100,57 +100,55 @@ class LocalDatabaseService {
       final end = (i + chunkSize < events.length) ? i + chunkSize : events.length;
       final chunk = events.sublist(i, end);
 
-      await db.transaction((txn) async {
-        final batch = txn.batch();
+      final batch = db.batch();
 
-        for (final ev in chunk) {
-          final recSync = (ev.recordingPath != null && ev.recordingPath!.isNotEmpty)
-              ? (ev.recordingSyncStatus == 'synced' ? 'synced' : 'pending')
-              : 'none';
+      for (final ev in chunk) {
+        final recSync = (ev.recordingPath != null && ev.recordingPath!.isNotEmpty)
+            ? (ev.recordingSyncStatus == 'synced' ? 'synced' : 'pending')
+            : 'none';
 
-          batch.rawInsert('''
-            INSERT INTO events (
-              uid, kind, time, direction, number, name, sim, duration, recording,
-              media, app, text, source, recording_path, sync_status, recording_sync_status,
-              created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(uid) DO UPDATE SET
-              name = excluded.name,
-              duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
-              recording = CASE WHEN excluded.recording = 1 THEN 1 ELSE recording END,
-              recording_path = COALESCE(excluded.recording_path, recording_path),
-              sync_status = CASE WHEN sync_status = 'synced' THEN 'synced' ELSE excluded.sync_status END,
-              recording_sync_status = CASE 
-                WHEN recording_sync_status = 'synced' THEN 'synced'
-                WHEN excluded.recording_path IS NOT NULL AND excluded.recording_path != '' AND recording_sync_status = 'none' THEN 'pending'
-                ELSE recording_sync_status
-              END,
-              updated_at = ?
-          ''', [
-            ev.uid,
-            ev.kind,
-            ev.time,
-            ev.direction,
-            ev.number,
-            ev.name,
-            ev.sim,
-            ev.duration,
-            ev.recording ? 1 : 0,
-            ev.media,
-            ev.app,
-            ev.text,
-            ev.source,
-            ev.recordingPath,
-            ev.syncStatus,
-            recSync,
-            now,
-            now,
-            now,
-          ]);
-        }
+        batch.rawInsert('''
+          INSERT INTO events (
+            uid, kind, time, direction, number, name, sim, duration, recording,
+            media, app, text, source, recording_path, sync_status, recording_sync_status,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(uid) DO UPDATE SET
+            name = excluded.name,
+            duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
+            recording = CASE WHEN excluded.recording = 1 THEN 1 ELSE recording END,
+            recording_path = COALESCE(excluded.recording_path, recording_path),
+            sync_status = CASE WHEN sync_status = 'synced' THEN 'synced' ELSE excluded.sync_status END,
+            recording_sync_status = CASE 
+              WHEN recording_sync_status = 'synced' THEN 'synced'
+              WHEN excluded.recording_path IS NOT NULL AND excluded.recording_path != '' AND recording_sync_status = 'none' THEN 'pending'
+              ELSE recording_sync_status
+            END,
+            updated_at = ?
+        ''', [
+          ev.uid,
+          ev.kind,
+          ev.time,
+          ev.direction,
+          ev.number,
+          ev.name,
+          ev.sim,
+          ev.duration,
+          ev.recording ? 1 : 0,
+          ev.media,
+          ev.app,
+          ev.text,
+          ev.source,
+          ev.recordingPath,
+          ev.syncStatus,
+          recSync,
+          now,
+          now,
+          now,
+        ]);
+      }
 
-        await batch.commit(noResult: true);
-      });
+      await batch.commit(noResult: true);
 
       if (events.length > chunkSize) {
         await Future.delayed(Duration.zero);
@@ -402,11 +400,14 @@ class LocalDatabaseService {
               AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e1.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10) =
                   SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e2.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10)
             )
+            OR (
+              e1.kind = 'whatsapp_call' AND e1.name != '' AND e1.name = e2.name
+            )
           )
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
           AND ABS(e1.time - e2.time) <= 120000
-        WHERE e1.kind IN ('call', 'whatsapp_call') AND e1.number != ''
+        WHERE e1.kind IN ('call', 'whatsapp_call')
       ''');
 
       for (final d in duplicateCalls) {

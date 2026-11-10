@@ -827,12 +827,14 @@ class TelemetrySyncService extends ChangeNotifier {
         final existing = _whatsappEvents[existingIndex];
         // Reuse existing UID to prevent creating a second phantom call in SQLite and CRM
         event.uid = existing.uid;
-        if (existing.syncStatus == 'synced') event.syncStatus = 'synced';
         if (existing.duration > event.duration) event.duration = existing.duration;
         if (existing.direction != 'unknown' && event.direction == 'incoming' && existing.direction == 'outgoing') {
           event.direction = existing.direction;
         }
         if (existing.time < event.time) event.time = existing.time;
+        if (existing.syncStatus == 'synced' && event.duration == existing.duration) {
+          event.syncStatus = 'synced';
+        }
         _whatsappEvents[existingIndex] = event;
       } else {
         _whatsappEvents.insert(0, event);
@@ -844,9 +846,15 @@ class TelemetrySyncService extends ChangeNotifier {
       LocalDatabaseService.instance.saveEvents([event]);
       LocalDatabaseService.instance.cleanupDuplicates();
       _persistWhatsApp();
-      _enqueueEvent(event);
+
+      // Only enqueue and upload to CRM once finalized (completed with talk time, or missed call)
+      // Never upload a ringing 0-duration call while ongoing, as that locks CRM records with duration '-'
+      final isFinalized = type == 'whatsapp_call_completed' || event.direction == 'missed' || event.duration > 0;
+      if (isFinalized) {
+        _enqueueEvent(event);
+        syncNow();
+      }
       notifyListeners();
-      syncNow();
     } else if (type == 'whatsapp_message') {
       final text = raw['text']?.toString() ?? '';
       String name = raw['sender']?.toString() ?? raw['name']?.toString() ?? 'WhatsApp Contact';
@@ -1231,7 +1239,10 @@ class TelemetrySyncService extends ChangeNotifier {
     }
     if (a.kind == 'whatsapp_call') {
       if ((a.time - b.time).abs() <= 120000 &&
-          (a.name == b.name || numbersMatch(a.number, b.number))) {
+          (a.name == b.name ||
+           numbersMatch(a.number, b.number) ||
+           numbersMatch(a.name, b.number) ||
+           numbersMatch(b.name, a.number))) {
         return true;
       }
       return false;
@@ -1248,7 +1259,6 @@ class TelemetrySyncService extends ChangeNotifier {
     if (RegExp(r'^\(?\d+\s+(new\s+|unread\s+)?messages?\)?$').hasMatch(lower)) return true;
     if (RegExp(r'^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$').hasMatch(lower)) return true;
     if (lower.contains('checking for new messages')) return true;
-    if (RegExp(r'^\d+\s+missed\s+calls?$').hasMatch(lower)) return true;
     if (lower.contains('messages from') && lower.contains('chat')) return true;
     if (RegExp(r'.*\(\d+\s+messages?\)$').hasMatch(lower)) return true;
     return false;
@@ -1273,6 +1283,7 @@ class TelemetrySyncService extends ChangeNotifier {
         if (wa.syncStatus == 'synced') existing.syncStatus = 'synced';
         if (wa.duration > existing.duration) existing.duration = wa.duration;
         if (existing.name.isEmpty && wa.name.isNotEmpty) existing.name = wa.name;
+        if (existing.number.isEmpty && wa.number.isNotEmpty) existing.number = wa.number;
         if (existing.direction == 'incoming' && wa.direction == 'outgoing') existing.direction = 'outgoing';
         if (existing.time > wa.time) existing.time = wa.time;
       }
@@ -1315,21 +1326,28 @@ class TelemetrySyncService extends ChangeNotifier {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
           
           if (event.kind == 'whatsapp_call') {
-            final numKey = extractNumberKey(event.number);
-            final key = '${event.direction}_${numKey}_${event.time ~/ 120000}';
-            final waIdx = waMap[key] ?? -1;
-            if (waIdx >= 0) {
-              if (_whatsappEvents[waIdx].syncStatus == 'synced') {
-                event.syncStatus = 'synced';
+            int existing = -1;
+            for (int i = 0; i < _whatsappEvents.length; i++) {
+              if (isSameWhatsApp(_whatsappEvents[i], event)) {
+                existing = i;
+                break;
               }
-              _whatsappEvents[waIdx] = event;
+            }
+            if (existing >= 0) {
+              final old = _whatsappEvents[existing];
+              event.uid = old.uid; // Preserve UID so CRM never creates a duplicate call!
+              if (old.syncStatus == 'synced') event.syncStatus = 'synced';
+              if (old.duration > event.duration) event.duration = old.duration;
+              if (old.direction == 'outgoing' && event.direction == 'incoming') event.direction = 'outgoing';
+              if (old.time < event.time) event.time = old.time;
+              _whatsappEvents[existing] = event;
               if (event.syncStatus != 'synced') {
                 _enqueueEvent(event);
               }
             } else {
               _whatsappEvents.add(event);
               _enqueueEvent(event);
-              waMap[key] = _whatsappEvents.length - 1;
+              newCount++;
             }
           } else {
             int existing = -1;
@@ -1477,17 +1495,32 @@ class TelemetrySyncService extends ChangeNotifier {
           if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) continue;
           final existing = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
           if (existing >= 0) {
-            if (_whatsappEvents[existing].syncStatus == 'synced') {
+            final old = _whatsappEvents[existing];
+            event.uid = old.uid; // Preserve original UID so CRM never creates a duplicate call!
+            if (old.syncStatus == 'synced') {
               event.syncStatus = 'synced';
             }
+            if (old.duration > event.duration) {
+              event.duration = old.duration;
+            }
+            if (old.direction == 'outgoing' && event.direction == 'incoming') {
+              event.direction = 'outgoing';
+            }
+            if (old.time < event.time) {
+              event.time = old.time;
+            }
             _whatsappEvents[existing] = event;
-            if (event.syncStatus != 'synced') {
+            final isFinalized = event.kind != 'whatsapp_call' || event.direction == 'missed' || event.duration > 0;
+            if (event.syncStatus != 'synced' && isFinalized) {
               _enqueueEvent(event);
             }
           } else {
             _whatsappEvents.add(event);
-            _enqueueEvent(event);
-            newCount++;
+            final isFinalized = event.kind != 'whatsapp_call' || event.direction == 'missed' || event.duration > 0;
+            if (isFinalized) {
+              _enqueueEvent(event);
+              newCount++;
+            }
           }
         }
         if (newCount > 0 || _whatsappEvents.isNotEmpty) {

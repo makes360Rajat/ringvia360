@@ -419,7 +419,7 @@ class SalesTrackEvent {
   final String kind; // 'call', 'whatsapp_call', 'sms'
   int time; // epoch ms
   String direction; // 'incoming', 'outgoing', 'missed', 'rejected', 'blocked', 'voicemail', 'unknown'
-  final String number;
+  String number;
   String name;
   final int sim;
   int duration; // seconds

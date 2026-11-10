@@ -96,9 +96,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         // e.g. "Checking for new messages"
         if (lower.contains("checking for new messages")) return true
 
-        // e.g. "X missed calls"
-        if (lower.matches(Regex("""^\d+\s+missed\s+calls?$"""))) return true
-
         // Strings ending in "(X messages)"
         if (lower.matches(Regex(""".*\(\d+\s+messages?\)$"""))) return true
 
@@ -110,60 +107,88 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         if (packageName != "com.whatsapp" && packageName != "com.whatsapp.w4b") return null
 
         val notification = sbn.notification ?: return null
-
-        // 1. Skip Android group summary notifications (e.g. the summary notification that groups individual messages)
-        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
-            return null
-        }
-
         val extras = notification.extras ?: return null
 
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
         val text = (extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: "").trim()
+        val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()?.trim() ?: ""
+        val category = notification.category ?: ""
+        val channelId = notification.channelId ?: ""
 
         if (title.isEmpty() && text.isEmpty()) return null
 
-        // 2. Skip message count summary text (e.g. "5 new messages", "3 messages from 2 chats")
-        if (isMessageCountSummary(text) || isMessageCountSummary(title)) {
-            return null
+        // 1. Detect if notification is any kind of Call (VoIP incoming, outgoing, ongoing, missed)
+        var hasCallAction = false
+        var isCallActionEnd = false
+        notification.actions?.forEach { action ->
+            val at = action.title?.toString()?.lowercase() ?: ""
+            if (at.contains("decline") || at.contains("answer") || at.contains("accept") || at.contains("call back") || at.contains("call again")) {
+                hasCallAction = true
+            } else if (at.contains("end") || at.contains("hang up") || at.contains("mute")) {
+                hasCallAction = true
+                isCallActionEnd = true
+            }
         }
 
-        // Skip internal/backup notifications
-        if (title.contains("backup", ignoreCase = true) ||
-            text.contains("Checking for new messages", ignoreCase = true)
-        ) {
-            return null
-        }
+        val isCall = (category == Notification.CATEGORY_CALL) ||
+                (category == Notification.CATEGORY_MISSED_CALL) ||
+                (category == "call") ||
+                (category == "missed_call") ||
+                channelId.contains("voip", ignoreCase = true) ||
+                channelId.contains("call", ignoreCase = true) ||
+                hasCallAction ||
+                text.contains("call", ignoreCase = true) ||
+                text.contains("calling", ignoreCase = true) ||
+                text.contains("ringing", ignoreCase = true) ||
+                title.contains("call", ignoreCase = true) ||
+                subText.contains("call", ignoreCase = true)
 
         val isWhatsAppBusiness = packageName == "com.whatsapp.w4b"
         val isWebCompanion = title.contains("WhatsApp Web", ignoreCase = true) || text.contains("WhatsApp Web", ignoreCase = true)
         val now = System.currentTimeMillis()
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         val timestamp = isoFormat.format(Date(now))
-
-        // Deterministic hash component for strict deduplication
         val contentHash = Math.abs((title + text).hashCode())
 
-        // Detect Call Notifications
-        val isCall = (notification.category == Notification.CATEGORY_CALL) ||
-                text.contains("call", ignoreCase = true) ||
-                text.contains("calling", ignoreCase = true) ||
-                title.contains("voice call", ignoreCase = true) ||
-                title.contains("video call", ignoreCase = true)
-
         if (isCall) {
-            val isMissed = text.contains("missed", ignoreCase = true) || title.contains("missed", ignoreCase = true)
+            val isMissed = (category == Notification.CATEGORY_MISSED_CALL) ||
+                    (category == "missed_call") ||
+                    text.contains("missed", ignoreCase = true) ||
+                    title.contains("missed", ignoreCase = true)
             val isOutgoing = text.contains("calling", ignoreCase = true) || text.contains("outgoing", ignoreCase = true)
-            val isOngoing = text.contains("ongoing", ignoreCase = true) || text.contains("tap to return to call", ignoreCase = true)
+            val isOngoing = isCallActionEnd ||
+                    text.contains("ongoing", ignoreCase = true) ||
+                    text.contains("tap to return to call", ignoreCase = true) ||
+                    text.matches(Regex("""^\d{1,2}:\d{2}(:\d{2})?$"""))
 
             val isVideo = text.contains("video", ignoreCase = true) || title.contains("video", ignoreCase = true)
-            val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+
+            var callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
                 title
             } else {
                 ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
             }
-            val callerKey = "$packageName:${callNumber.ifEmpty { title }}"
+
+            if (callNumber.isEmpty()) {
+                val people = extras.getStringArray(Notification.EXTRA_PEOPLE)
+                if (people != null) {
+                    for (person in people) {
+                        if (person.startsWith("tel:")) {
+                            callNumber = person.removePrefix("tel:")
+                            break
+                        }
+                    }
+                }
+            }
+
+            if (callNumber.isEmpty()) {
+                callNumber = title
+            }
+
+            val digitsOnly = callNumber.replace(Regex("[^0-9]"), "")
+            val normalizedCaller = if (digitsOnly.length >= 7) digitsOnly.takeLast(10) else callNumber.trim().lowercase()
+            val callerKey = "$packageName:$normalizedCaller"
 
             // Resolve or preserve the call direction & stable UID
             val direction: String
@@ -217,6 +242,24 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "source" to "auto"
             )
         } else {
+            // It is a chat message:
+            // 1. Skip Android group summary notifications (e.g. the summary notification that groups individual messages)
+            if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+                return null
+            }
+
+            // 2. Skip message count summary text (e.g. "5 new messages", "3 messages from 2 chats")
+            if (isMessageCountSummary(text) || isMessageCountSummary(title)) {
+                return null
+            }
+
+            // Skip internal/backup notifications
+            if (title.contains("backup", ignoreCase = true) ||
+                text.contains("Checking for new messages", ignoreCase = true)
+            ) {
+                return null
+            }
+
             // WhatsApp Chat / SMS Message
             val groupName = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
             val msgNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
@@ -252,19 +295,33 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim() ?: ""
+        var callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
             title
         } else {
             ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
         }
-        val callerKey = "$packageName:${callNumber.ifEmpty { title }}"
+        if (callNumber.isEmpty()) {
+            callNumber = title
+        }
+        val digitsOnly = callNumber.replace(Regex("[^0-9]"), "")
+        val normalizedCaller = if (digitsOnly.length >= 7) digitsOnly.takeLast(10) else callNumber.trim().lowercase()
+        val callerKey = "$packageName:$normalizedCaller"
+
+        // Find matching active session by callerKey or single active session
+        val matchedKey = if (ongoingCallUids.containsKey(callerKey)) {
+            callerKey
+        } else if (ongoingCallUids.size == 1 && ongoingCallUids.keys.first().startsWith("$packageName:")) {
+            ongoingCallUids.keys.first()
+        } else {
+            null
+        }
 
         // If an ongoing call notification was removed, calculate total duration and emit completed event
-        if (ongoingCallUids.containsKey(callerKey) || ongoingCallStartTimes.containsKey(callerKey)) {
-            val callUid = ongoingCallUids.remove(callerKey) ?: "wacall_done_${sbn.postTime}_${Math.abs(callerKey.hashCode())}"
-            val startTime = ongoingCallStartTimes.remove(callerKey) ?: System.currentTimeMillis()
-            val direction = ongoingCallDirections.remove(callerKey) ?: "incoming"
+        if (matchedKey != null) {
+            val callUid = ongoingCallUids.remove(matchedKey) ?: "wacall_done_${sbn.postTime}_${Math.abs(callerKey.hashCode())}"
+            val startTime = ongoingCallStartTimes.remove(matchedKey) ?: System.currentTimeMillis()
+            val direction = ongoingCallDirections.remove(matchedKey) ?: "incoming"
             val durationSec = Math.max(0, ((System.currentTimeMillis() - startTime) / 1000).toInt())
 
             val now = System.currentTimeMillis()

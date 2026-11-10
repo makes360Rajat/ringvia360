@@ -198,6 +198,10 @@ void main() {
       expect(TelemetrySyncService.isMessageCountSummary('Hello, interested in CallVia360'), isFalse);
       expect(TelemetrySyncService.isMessageCountSummary('Can you please send 5 messages to the team?'), isFalse);
       expect(TelemetrySyncService.isMessageCountSummary('Thank you'), isFalse);
+
+      // Missed call notifications must NEVER be treated as message summaries
+      expect(TelemetrySyncService.isMessageCountSummary('1 missed call'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('2 missed calls'), isFalse);
     });
 
     test('dedupWhatsAppList merges duplicate WhatsApp call events (calling vs ongoing/completed)', () {
