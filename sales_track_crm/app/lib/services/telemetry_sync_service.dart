@@ -825,8 +825,14 @@ class TelemetrySyncService extends ChangeNotifier {
       final existingIndex = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
       if (existingIndex >= 0) {
         final existing = _whatsappEvents[existingIndex];
+        // Reuse existing UID to prevent creating a second phantom call in SQLite and CRM
+        event.uid = existing.uid;
         if (existing.syncStatus == 'synced') event.syncStatus = 'synced';
         if (existing.duration > event.duration) event.duration = existing.duration;
+        if (existing.direction != 'unknown' && event.direction == 'incoming' && existing.direction == 'outgoing') {
+          event.direction = existing.direction;
+        }
+        if (existing.time < event.time) event.time = existing.time;
         _whatsappEvents[existingIndex] = event;
       } else {
         _whatsappEvents.insert(0, event);
@@ -836,6 +842,7 @@ class TelemetrySyncService extends ChangeNotifier {
       _whatsappEvents.addAll(cleanWa);
 
       LocalDatabaseService.instance.saveEvents([event]);
+      LocalDatabaseService.instance.cleanupDuplicates();
       _persistWhatsApp();
       _enqueueEvent(event);
       notifyListeners();
@@ -1216,10 +1223,18 @@ class TelemetrySyncService extends ChangeNotifier {
       if (a.text != null && b.text != null && a.text!.isNotEmpty && b.text!.isNotEmpty && a.text != b.text) {
         return false;
       }
+      if ((a.time - b.time).abs() <= 60000 &&
+          (a.name == b.name || numbersMatch(a.number, b.number))) {
+        return true;
+      }
+      return false;
     }
-    if ((a.time - b.time).abs() <= 60000 &&
-        (a.name == b.name || numbersMatch(a.number, b.number))) {
-      return true;
+    if (a.kind == 'whatsapp_call') {
+      if ((a.time - b.time).abs() <= 120000 &&
+          (a.name == b.name || numbersMatch(a.number, b.number))) {
+        return true;
+      }
+      return false;
     }
     return false;
   }
@@ -1258,6 +1273,8 @@ class TelemetrySyncService extends ChangeNotifier {
         if (wa.syncStatus == 'synced') existing.syncStatus = 'synced';
         if (wa.duration > existing.duration) existing.duration = wa.duration;
         if (existing.name.isEmpty && wa.name.isNotEmpty) existing.name = wa.name;
+        if (existing.direction == 'incoming' && wa.direction == 'outgoing') existing.direction = 'outgoing';
+        if (existing.time > wa.time) existing.time = wa.time;
       }
     }
     result.sort((a, b) => b.time.compareTo(a.time));
@@ -2436,6 +2453,7 @@ class TelemetrySyncService extends ChangeNotifier {
     // 1. Try loading from SQLite first (Offline-First source of truth)
     try {
       await LocalDatabaseService.instance.purgeSummaryNotifications();
+      await LocalDatabaseService.instance.cleanupDuplicates();
       final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call');
       final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp');
       final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms');

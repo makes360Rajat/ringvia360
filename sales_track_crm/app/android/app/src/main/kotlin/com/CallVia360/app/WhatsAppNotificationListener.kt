@@ -14,8 +14,10 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         var instance: WhatsAppNotificationListener? = null
             private set
 
-        // Track ongoing WhatsApp call start times to calculate talk duration
+        // Track active WhatsApp call sessions: callerKey -> (uid, startTime, direction)
+        private val ongoingCallUids = mutableMapOf<String, String>()
         private val ongoingCallStartTimes = mutableMapOf<String, Long>()
+        private val ongoingCallDirections = mutableMapOf<String, String>()
 
         // Cache recently sensed events so Flutter can fetch them if stream wasn't ready
         private val recentEvents = Collections.synchronizedList(mutableListOf<Map<String, Any>>())
@@ -155,34 +157,51 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             val isOutgoing = text.contains("calling", ignoreCase = true) || text.contains("outgoing", ignoreCase = true)
             val isOngoing = text.contains("ongoing", ignoreCase = true) || text.contains("tap to return to call", ignoreCase = true)
 
-            val direction = when {
-                isMissed -> "missed"
-                isOutgoing -> "outgoing"
-                isOngoing -> "incoming" // Ongoing connected
-                else -> "incoming"
-            }
-
             val isVideo = text.contains("video", ignoreCase = true) || title.contains("video", ignoreCase = true)
-            val callerKey = "$packageName:$title"
-
-            if (isOngoing && !ongoingCallStartTimes.containsKey(callerKey)) {
-                ongoingCallStartTimes[callerKey] = now
-            }
-
-            val durationSeconds = if (isOngoing) {
-                val start = ongoingCallStartTimes[callerKey] ?: now
-                ((now - start) / 1000).toInt()
-            } else 0
-
             val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
                 title
             } else {
                 ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
             }
+            val callerKey = "$packageName:${callNumber.ifEmpty { title }}"
+
+            // Resolve or preserve the call direction & stable UID
+            val direction: String
+            val callUid: String
+            val callTime: Long
+
+            if (isMissed) {
+                direction = "missed"
+                callTime = sbn.postTime
+                callUid = "wacall_${callTime}_$contentHash"
+                // Clean up any ongoing session for this caller
+                ongoingCallUids.remove(callerKey)
+                ongoingCallStartTimes.remove(callerKey)
+                ongoingCallDirections.remove(callerKey)
+            } else if (ongoingCallUids.containsKey(callerKey)) {
+                // Call is ALREADY ACTIVE - Reuse the exact same UID, start time, and original direction!
+                callUid = ongoingCallUids[callerKey]!!
+                callTime = ongoingCallStartTimes[callerKey] ?: sbn.postTime
+                direction = ongoingCallDirections[callerKey] ?: (if (isOutgoing) "outgoing" else "incoming")
+            } else {
+                // Call is STARTING
+                direction = if (isOutgoing) "outgoing" else "incoming"
+                callTime = sbn.postTime
+                val callerHash = Math.abs(callerKey.hashCode())
+                callUid = "wacall_${callTime}_$callerHash"
+                ongoingCallUids[callerKey] = callUid
+                ongoingCallStartTimes[callerKey] = callTime
+                ongoingCallDirections[callerKey] = direction
+            }
+
+            val durationSeconds = if (isOngoing && ongoingCallStartTimes.containsKey(callerKey)) {
+                val start = ongoingCallStartTimes[callerKey] ?: now
+                Math.max(0, ((now - start) / 1000).toInt())
+            } else 0
 
             return mapOf(
                 "type" to "whatsapp_call",
-                "uid" to "wacall_${sbn.postTime}_$contentHash",
+                "uid" to callUid,
                 "kind" to "whatsapp_call",
                 "packageName" to packageName,
                 "isBusiness" to isWhatsAppBusiness,
@@ -193,7 +212,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "direction" to direction,
                 "media" to (if (isVideo) "video" else "voice"),
                 "duration" to durationSeconds,
-                "time" to sbn.postTime,
+                "time" to callTime,
                 "timestamp" to timestamp,
                 "source" to "auto"
             )
@@ -234,35 +253,35 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val callerKey = "$packageName:$title"
+        val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
+            title
+        } else {
+            ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
+        }
+        val callerKey = "$packageName:${callNumber.ifEmpty { title }}"
 
         // If an ongoing call notification was removed, calculate total duration and emit completed event
-        if (ongoingCallStartTimes.containsKey(callerKey)) {
+        if (ongoingCallUids.containsKey(callerKey) || ongoingCallStartTimes.containsKey(callerKey)) {
+            val callUid = ongoingCallUids.remove(callerKey) ?: "wacall_done_${sbn.postTime}_${Math.abs(callerKey.hashCode())}"
             val startTime = ongoingCallStartTimes.remove(callerKey) ?: System.currentTimeMillis()
-            val durationSec = ((System.currentTimeMillis() - startTime) / 1000).toInt()
+            val direction = ongoingCallDirections.remove(callerKey) ?: "incoming"
+            val durationSec = Math.max(0, ((System.currentTimeMillis() - startTime) / 1000).toInt())
 
             val now = System.currentTimeMillis()
             val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
             val timestamp = isoFormat.format(Date(now))
             val isWhatsAppBusiness = packageName == "com.whatsapp.w4b"
-            val callerHash = Math.abs(callerKey.hashCode())
-
-            val callNumber = if (title.matches(Regex("^[+0-9\\s\\-()]{7,}$"))) {
-                title
-            } else {
-                ContactLookupHelper.resolvePhoneNumberByName(this, title) ?: ""
-            }
 
             val event = mapOf(
                 "type" to "whatsapp_call_completed",
-                "uid" to "wacall_done_${startTime}_$callerHash",
+                "uid" to callUid, // USE THE SAME STABLE UID TO PREVENT DUPLICATES!
                 "kind" to "whatsapp_call",
                 "packageName" to packageName,
                 "isBusiness" to isWhatsAppBusiness,
                 "accountType" to (if (isWhatsAppBusiness) "WhatsApp Business" else "WhatsApp"),
                 "name" to (if (title.isNotEmpty()) title else "WhatsApp Contact"),
                 "number" to callNumber,
-                "direction" to "incoming",
+                "direction" to direction,
                 "media" to "voice",
                 "duration" to durationSec,
                 "time" to startTime,

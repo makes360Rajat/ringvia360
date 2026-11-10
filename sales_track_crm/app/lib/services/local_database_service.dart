@@ -383,14 +383,18 @@ class LocalDatabaseService {
     if (db == null) return 0;
     int removed = 0;
     try {
-      // 1. Remove duplicate calls where another record exists with same direction, number, and time within 120s
+      // 1. Remove duplicate calls where another record exists with same number, and time within 120s
       final duplicateCalls = await db.rawQuery('''
         SELECT e2.uid as remove_uid, e1.uid as keep_uid, e2.duration as dur2, e1.duration as dur1,
                e2.sync_status as sync2, e1.sync_status as sync1,
+               e2.direction as dir2, e1.direction as dir1,
                e2.recording_path as rec2, e1.recording_path as rec1
         FROM events e1
         INNER JOIN events e2 ON e1.kind = e2.kind
-          AND e1.direction = e2.direction
+          AND (
+            (e1.kind = 'call' AND e1.direction = e2.direction)
+            OR (e1.kind = 'whatsapp_call')
+          )
           AND (
             e1.number = e2.number
             OR (
@@ -412,12 +416,15 @@ class LocalDatabaseService {
           final dur2 = (d['dur2'] as int?) ?? 0;
           final dur1 = (d['dur1'] as int?) ?? 0;
           final sync2 = d['sync2'] as String?;
+          final dir1 = d['dir1'] as String?;
+          final dir2 = d['dir2'] as String?;
           final rec2 = d['rec2'] as String?;
           final rec1 = d['rec1'] as String?;
 
           final updates = <String, dynamic>{};
           if (dur2 > dur1) updates['duration'] = dur2;
           if (sync2 == 'synced') updates['sync_status'] = 'synced';
+          if (dir1 == 'incoming' && dir2 == 'outgoing') updates['direction'] = 'outgoing';
           if ((rec1 == null || rec1.isEmpty) && rec2 != null && rec2.isNotEmpty) {
             updates['recording_path'] = rec2;
             updates['recording'] = 1;
