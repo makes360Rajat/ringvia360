@@ -1,12 +1,18 @@
 package com.CallVia360.app
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Environment
 import android.provider.CallLog
 import android.provider.MediaStore
+import android.provider.Settings
 import android.telephony.TelephonyManager
+import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
@@ -25,11 +31,29 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        val now = System.currentTimeMillis()
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        val timestamp = isoFormat.format(Date(now))
+
         if (intent.action == Intent.ACTION_NEW_OUTGOING_CALL) {
             val outNum = intent.getStringExtra(Intent.EXTRA_PHONE_NUMBER) ?: ""
             if (outNum.isNotEmpty()) {
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 prefs.edit().putString("outgoing_number", outNum).apply()
+
+                val contactDetails = ContactLookupHelper.resolveContactDetails(context, outNum)
+                val contactDisplayName = if (!contactDetails.name.isNullOrEmpty()) contactDetails.name else outNum
+                val photoUri = contactDetails.photoUri ?: ""
+                val event = mapOf(
+                    "type" to "outgoing_call_dialing",
+                    "state" to "DIALING",
+                    "direction" to "outgoing",
+                    "phoneNumber" to outNum,
+                    "contactName" to contactDisplayName,
+                    "photoUri" to photoUri,
+                    "timestamp" to timestamp
+                )
+                TelemetryBridgeChannel.sendTelemetryEvent(event)
             }
             return
         }
@@ -39,9 +63,6 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
         val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE) ?: return
         val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER) ?: ""
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val now = System.currentTimeMillis()
-        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        val timestamp = isoFormat.format(Date(now))
 
         if (incomingNumber.isNotEmpty()) {
             ringingNumber = incomingNumber
@@ -59,19 +80,24 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                     .putString("active_number", ringingNumber)
                     .apply()
 
-                val savedName = ContactLookupHelper.resolveContactName(context, ringingNumber)
-                val contactDisplayName = if (!savedName.isNullOrEmpty()) savedName else if (ringingNumber.isNotEmpty()) ringingNumber else "Incoming Caller"
+                val contactDetails = ContactLookupHelper.resolveContactDetails(context, ringingNumber)
+                val contactDisplayName = if (!contactDetails.name.isNullOrEmpty()) contactDetails.name else if (ringingNumber.isNotEmpty()) ringingNumber else "Incoming Caller"
+                val photoUri = contactDetails.photoUri ?: ""
                 val event = mapOf(
                     "type" to "incoming_call_ringing",
                     "state" to "RINGING",
+                    "direction" to "incoming",
                     "phoneNumber" to (if (ringingNumber.isNotEmpty()) ringingNumber else "Incoming Caller"),
                     "contactName" to contactDisplayName,
+                    "photoUri" to photoUri,
                     "timestamp" to timestamp
                 )
                 TelemetryBridgeChannel.sendTelemetryEvent(event)
+                showCallerIdNotification(context, ringingNumber, contactDisplayName)
             }
 
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                cancelNotification(context, 1003)
                 val isIncoming = prefs.getString("call_state", "") == "RINGING"
                 val answerTime = now
                 prefs.edit()
@@ -80,16 +106,20 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                     .apply()
 
                 val activeNum = if (isIncoming) ringingNumber else (prefs.getString("outgoing_number", "") ?: "")
+                val savedName = ContactLookupHelper.resolveContactName(context, activeNum)
+                val contactDisplayName = if (!savedName.isNullOrEmpty()) savedName else if (activeNum.isNotEmpty()) activeNum else "Caller"
                 val event = mapOf(
                     "type" to "call_answered",
                     "direction" to (if (isIncoming) "incoming" else "outgoing"),
                     "phoneNumber" to activeNum,
+                    "contactName" to contactDisplayName,
                     "timestamp" to timestamp
                 )
                 TelemetryBridgeChannel.sendTelemetryEvent(event)
             }
 
             TelephonyManager.EXTRA_STATE_IDLE -> {
+                cancelNotification(context, 1003)
                 val prevState = prefs.getString("call_state", "")
                 val answerTime = prefs.getLong("answer_time", 0L)
                 val ringingTime = prefs.getLong("ringing_time", 0L)
@@ -164,6 +194,7 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                         )
 
                         TelemetryBridgeChannel.sendTelemetryEvent(event)
+                        showCallEndedNotification(context, finalPhone, finalName)
                     } catch (_: Exception) {
                     } finally {
                         pendingResult.finish()
@@ -171,6 +202,125 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 }.start()
             }
         }
+    }
+
+    private fun showCallerIdNotification(context: Context, number: String, contactName: String) {
+        if (number.isEmpty() || number == "Incoming Caller") return
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val channelId = "callvia360_caller_id"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "CallVia360 Caller ID",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Truecaller-style caller identification"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("action", "caller_id")
+                putExtra("number", number)
+                putExtra("contact_name", contactName)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                1003,
+                launchIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val title = if (contactName.isNotEmpty() && contactName != number && !contactName.equals("unknown", ignoreCase = true)) {
+                "📞 Caller ID: $contactName"
+            } else {
+                "📞 Caller ID: $number"
+            }
+
+            val builder = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.sym_call_incoming)
+                .setContentTitle(title)
+                .setContentText("Incoming call • Tap to view CRM history & notes")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, false)
+
+            notificationManager.notify(1003, builder.build())
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
+                try {
+                    context.startActivity(launchIntent)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun showCallEndedNotification(context: Context, number: String, contactName: String) {
+        if (number.isEmpty() || number == "Unknown Caller") return
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val channelId = "callvia360_sales_outcomes"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "CallVia360 Sales Follow-ups",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Prompts to log lead remarks and follow-ups after calls"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("action", "after_call_dialog")
+                putExtra("number", number)
+                putExtra("contact_name", contactName)
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                1002,
+                launchIntent,
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE else PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val title = if (contactName.isNotEmpty() && contactName != number && !contactName.equals("unknown", ignoreCase = true)) {
+                "📞 Call Ended: $contactName"
+            } else {
+                "📞 Call Ended: $number"
+            }
+
+            val builder = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.stat_notify_chat)
+                .setContentTitle(title)
+                .setContentText("Tap to log lead outcome, remarks & schedule follow-up")
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .setFullScreenIntent(pendingIntent, true)
+                .addAction(android.R.drawable.ic_menu_edit, "Log Lead Outcome", pendingIntent)
+
+            notificationManager.notify(1002, builder.build())
+
+            // If "Display over other apps" (SYSTEM_ALERT_WINDOW) is granted, immediately launch CallVia360 over the dialer
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
+                try {
+                    context.startActivity(launchIntent)
+                } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun cancelNotification(context: Context, id: Int) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancel(id)
+        } catch (_: Exception) {}
     }
 
     private fun fetchLatestCallLogRecord(context: Context, targetPhone: String): Map<String, Any>? {

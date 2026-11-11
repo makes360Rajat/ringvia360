@@ -13,6 +13,7 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
@@ -169,7 +170,7 @@ class MainActivity : FlutterActivity() {
                             "manufacturer" to Build.MANUFACTURER,
                             "model" to Build.MODEL,
                             "os_version" to Build.VERSION.RELEASE,
-                            "app_version" to "1.9.2",
+                            "app_version" to "1.0.2",
                             "batteryPercent" to batteryLevel,
                             "charging" to isCharging,
                             "network" to networkType,
@@ -256,6 +257,111 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         result.error("SETTINGS_ERROR", e.message, null)
                     }
+                }
+
+                "isOverlayPermissionGranted" -> {
+                    val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Settings.canDrawOverlays(this)
+                    } else true
+                    result.success(granted)
+                }
+
+                "openOverlaySettings", "requestOverlayPermission" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            val intent = Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } else {
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e2: Exception) {
+                            result.error("SETTINGS_ERROR", e2.message, null)
+                        }
+                    }
+                }
+
+                "launchWhatsAppChat" -> {
+                    try {
+                        val number = call.argument<String>("number") ?: ""
+                        val cleanDigits = number.replace(Regex("\\D"), "")
+                        val uri = Uri.parse("https://wa.me/$cleanDigits")
+                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("WHATSAPP_LAUNCH_ERROR", e.message, null)
+                    }
+                }
+
+                "dialPhoneNumber" -> {
+                    try {
+                        val number = call.argument<String>("number") ?: ""
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("DIAL_ERROR", e.message, null)
+                    }
+                }
+
+                "launchUrl" -> {
+                    try {
+                        val url = call.argument<String>("url") ?: ""
+                        if (url.isNotEmpty()) {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    } catch (e: Exception) {
+                        result.error("LAUNCH_ERROR", e.message, null)
+                    }
+                }
+
+                "getContactPhoto" -> {
+                    Thread {
+                        val photoUriStr = call.argument<String>("photoUri")
+                        val phoneNumber = call.argument<String>("phoneNumber")
+                        try {
+                            var uri: Uri? = if (!photoUriStr.isNullOrEmpty()) Uri.parse(photoUriStr) else null
+                            if (uri == null && !phoneNumber.isNullOrEmpty()) {
+                                val details = ContactLookupHelper.resolveContactDetails(this, phoneNumber)
+                                if (!details.photoUri.isNullOrEmpty()) {
+                                    uri = Uri.parse(details.photoUri)
+                                }
+                            }
+                            if (uri != null) {
+                                contentResolver.openInputStream(uri)?.use { stream ->
+                                    val bytes = stream.readBytes()
+                                    runOnUiThread { result.success(bytes) }
+                                    return@Thread
+                                }
+                            }
+                            runOnUiThread { result.success(null) }
+                        } catch (_: Exception) {
+                            runOnUiThread { result.success(null) }
+                        }
+                    }.start()
                 }
 
                 "openAllFilesSettings" -> {
@@ -399,10 +505,51 @@ class MainActivity : FlutterActivity() {
         registerSmsObserver()
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        handleLaunchIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleLaunchIntent(intent)
+    }
+
+    private fun handleLaunchIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.getStringExtra("action")
+        if (action == "after_call_dialog") {
+            val number = intent.getStringExtra("number") ?: ""
+            val contactName = intent.getStringExtra("contact_name") ?: ""
+            observerHandler.postDelayed({
+                TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
+                    "type" to "open_after_call",
+                    "number" to number,
+                    "contactName" to contactName,
+                    "time" to System.currentTimeMillis()
+                ))
+            }, 500)
+        } else if (action == "caller_id") {
+            val number = intent.getStringExtra("number") ?: ""
+            val contactName = intent.getStringExtra("contact_name") ?: ""
+            observerHandler.postDelayed({
+                TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
+                    "type" to "incoming_call_ringing",
+                    "number" to number,
+                    "phoneNumber" to number,
+                    "contactName" to contactName,
+                    "direction" to "incoming"
+                ))
+            }, 500)
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         registerCallLogObserver()
         registerSmsObserver()
+        observerHandler.postDelayed(checkLatestCallRunnable, 400)
         val status = checkAllPermissions()
         TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
             "type" to "permissions_updated",
@@ -719,6 +866,10 @@ class MainActivity : FlutterActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
         }
 
+        val overlay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(this)
+        } else true
+
         return mapOf(
             "call_log" to callLog,
             "phone_state" to phoneState,
@@ -730,11 +881,34 @@ class MainActivity : FlutterActivity() {
             "manage_storage" to mediaAudio,
             "storage" to mediaAudio,
             "recordings" to (mediaAudio || recordAudio),
-            "battery_unrestricted" to isIgnoringBattery
+            "battery_unrestricted" to isIgnoringBattery,
+            "overlay" to overlay
         )
     }
 
     private fun requestSpecificPermission(group: String) {
+        if (group == "overlay" || group == "system_alert_window") {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val intent = Intent(
+                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:$packageName")
+                    ).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                }
+            } catch (_: Exception) {
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            }
+            return
+        }
+
         val perms = when (group) {
             "call_log" -> arrayOf(Manifest.permission.READ_CALL_LOG)
             "phone_state" -> arrayOf(Manifest.permission.READ_PHONE_STATE)
@@ -1122,6 +1296,33 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun findNewestRecordingFile(phone: String, name: String): File? {
+        // 1. First check MediaStore for the newest audio file created in the last 3 minutes
+        try {
+            val projection = arrayOf(
+                MediaStore.Audio.Media.DATA,
+                MediaStore.Audio.Media.DATE_MODIFIED
+            )
+            val sel = "(${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DATA} LIKE '%Call%') AND ${MediaStore.Audio.Media.DATE_MODIFIED} > ?"
+            val minTimeSec = (System.currentTimeMillis() - 180000) / 1000
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                sel,
+                arrayOf(minTimeSec.toString()),
+                "${MediaStore.Audio.Media.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val p = cursor.getString(0) ?: ""
+                    if (p.isNotEmpty()) {
+                        val f = File(p)
+                        if (f.exists() && f.length() > 0) {
+                            return f
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
         val candidateDirs = mutableListOf(
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
@@ -1136,7 +1337,7 @@ class MainActivity : FlutterActivity() {
         }
 
         var newestFile: File? = null
-        var newestTime: Long = System.currentTimeMillis() - 120000 // Last 2 minutes
+        var newestTime: Long = System.currentTimeMillis() - 180000 // Last 3 minutes
 
         for (dir in candidateDirs) {
             if (dir.exists() && dir.isDirectory) {

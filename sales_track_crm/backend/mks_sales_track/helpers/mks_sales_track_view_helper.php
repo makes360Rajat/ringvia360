@@ -269,9 +269,16 @@ function mks_st_view_where($view, array $filters, $pending = false)
     $pages = mks_st_pages();
     $kind  = isset($pages[$view]) ? $pages[$view]['kind'] : 'call';
     if ($view === 'whatsapp_calls') {
-        $where = ["AND e.kind IN ('whatsapp_call', 'whatsapp_message')"];
+        $where = [
+            "AND e.kind IN ('whatsapp_call', 'whatsapp_message')",
+            "AND (e.kind != 'whatsapp_call' OR e.direction = 'missed' OR e.duration > 0)",
+            "AND (e.body IS NULL OR (e.body NOT LIKE '%new message%' AND e.body NOT LIKE '%messages from%chat%' AND e.body NOT LIKE 'Checking for new messages%' AND e.body NOT LIKE 'Looking for new messages%'))"
+        ];
     } elseif ($view === 'sms') {
-        $where = ["AND e.kind IN ('sms', 'notification')"];
+        $where = [
+            "AND e.kind IN ('sms', 'notification')",
+            "AND (e.body IS NULL OR (e.body NOT LIKE '%new message%' AND e.body NOT LIKE '%messages from%chat%' AND e.body NOT LIKE 'Checking for new messages%' AND e.body NOT LIKE 'Looking for new messages%'))"
+        ];
     } else {
         $where = ["AND e.kind = '" . $kind . "'"];
     }

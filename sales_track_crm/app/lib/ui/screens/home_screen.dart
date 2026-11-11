@@ -1,11 +1,16 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../models/sales_track_models.dart';
 import '../../services/app_lock_service.dart';
+import '../../services/sales_track_api_service.dart';
 import '../../services/telemetry_sync_service.dart';
-import 'outcome_modal.dart';
 import 'setup_wizard_screen.dart';
+import 'crm_webview_screen.dart';
+import '../widgets/caller_id_dialog.dart';
+import '../widgets/after_call_dialog.dart';
+import '../widgets/app_update_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -24,7 +29,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
-  bool _hasPromptedOutcome = false;
+  int _selectedBottomNavIndex = 0;
+  BuildContext? _afterCallDialogContext;
+  String? _lastPromptedAfterCallUid;
+  bool _hasPromptedCallerId = false;
+  BuildContext? _callerIdDialogContext;
+  BuildContext? _updateDialogContext;
+  bool _hasShownOptionalUpdateDialog = false;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   String? _expandedCallUid;
@@ -49,6 +60,9 @@ class _HomeScreenState extends State<HomeScreen>
     });
     widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _onServiceChanged();
+    });
   }
 
   @override
@@ -66,9 +80,25 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      if (widget.syncService.activeAfterCallEvent != null && _afterCallDialogContext == null) {
+        _lastPromptedAfterCallUid = null;
+      }
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
       widget.syncService.setForeground(true);
+      if (widget.syncService.hasCallLogPermission) {
+        widget.syncService.syncDeviceCallLogs();
+      }
+      if (widget.syncService.hasSmsPermission) {
+        widget.syncService.syncDeviceSms();
+      }
+      widget.syncService.scanLocalRecordings();
+      if (Platform.isIOS) {
+        widget.syncService.syncActiveWhatsAppNotifications();
+        widget.syncService.syncServerEvents();
+      }
+      widget.syncService.syncNow();
+      _onServiceChanged();
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       widget.syncService.setForeground(false);
     }
@@ -80,11 +110,12 @@ class _HomeScreenState extends State<HomeScreen>
     double top = 8,
     double horizontal = 14,
   }) {
+    final bottomInset = (service.isPlayingAudio || service.activeAudioPath != null) ? 108.0 : 40.0;
     return EdgeInsets.fromLTRB(
       horizontal,
       top,
       horizontal,
-      36.0,
+      bottomInset,
     );
   }
 
@@ -94,23 +125,122 @@ class _HomeScreenState extends State<HomeScreen>
       widget.onUnpaired();
       return;
     }
-    final afterCall = widget.syncService.activeAfterCallEvent;
-    if (afterCall != null && !_hasPromptedOutcome) {
-      _hasPromptedOutcome = true;
+
+    // 1. Truecaller-like Active Caller ID Popup
+    final activeCaller = widget.syncService.activeCallerId;
+    if (activeCaller != null && !_hasPromptedCallerId) {
+      _hasPromptedCallerId = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        showModalBottomSheet(
+        if (!mounted) return;
+        showDialog(
           context: context,
-          isScrollControlled: true,
-          backgroundColor: Colors.transparent,
-          builder: (_) => OutcomeModal(
-            event: afterCall,
-            syncService: widget.syncService,
-          ),
+          barrierDismissible: true,
+          builder: (dialogCtx) {
+            _callerIdDialogContext = dialogCtx;
+            return CallerIdDialog(
+              info: activeCaller,
+              syncService: widget.syncService,
+              onDismiss: () {
+                widget.syncService.dismissCallerId();
+              },
+            );
+          },
         ).then((_) {
-          widget.syncService.dismissAfterCallPopup();
-          _hasPromptedOutcome = false;
+          _callerIdDialogContext = null;
+          _hasPromptedCallerId = false;
         });
       });
+    } else if (activeCaller == null && _callerIdDialogContext != null) {
+      try {
+        if (Navigator.of(_callerIdDialogContext!).canPop()) {
+          Navigator.of(_callerIdDialogContext!).pop();
+        }
+      } catch (_) {}
+      _callerIdDialogContext = null;
+      _hasPromptedCallerId = false;
+    }
+
+    // 2. Automated After-Call Sales Outcome & Follow-up Truecaller Dialog
+    final afterCall = widget.syncService.activeAfterCallEvent;
+    if (afterCall != null &&
+        _lastPromptedAfterCallUid != afterCall.uid &&
+        _afterCallDialogContext == null) {
+      _lastPromptedAfterCallUid = afterCall.uid;
+
+      // Close ringing caller ID modal if it was still on screen
+      if (_callerIdDialogContext != null) {
+        try {
+          if (Navigator.of(_callerIdDialogContext!).canPop()) {
+            Navigator.of(_callerIdDialogContext!).pop();
+          }
+        } catch (_) {}
+        _callerIdDialogContext = null;
+        _hasPromptedCallerId = false;
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (widget.syncService.activeAfterCallEvent?.uid != afterCall.uid) return;
+        if (_afterCallDialogContext != null) return;
+
+        showDialog(
+          context: context,
+          barrierDismissible: true,
+          builder: (dialogCtx) {
+            _afterCallDialogContext = dialogCtx;
+            return AfterCallDialog(
+              event: afterCall,
+              syncService: widget.syncService,
+              onDismiss: () {
+                widget.syncService.dismissAfterCallPopup(afterCall);
+              },
+            );
+          },
+        ).then((_) {
+          _afterCallDialogContext = null;
+          widget.syncService.dismissAfterCallPopup(afterCall);
+        });
+      });
+    } else if (afterCall == null) {
+      _lastPromptedAfterCallUid = null;
+    }
+
+    // 3. App Version Update Dialog (Required or Optional)
+    final update = widget.syncService.availableUpdate;
+    if (update != null && _updateDialogContext == null) {
+      final isMandatory = widget.syncService.isUpdateMandatory;
+      if (isMandatory || !_hasShownOptionalUpdateDialog) {
+        if (!isMandatory) _hasShownOptionalUpdateDialog = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (widget.syncService.availableUpdate == null) return;
+          if (_updateDialogContext != null) return;
+
+          showDialog(
+            context: context,
+            barrierDismissible: !isMandatory,
+            builder: (dialogCtx) {
+              _updateDialogContext = dialogCtx;
+              return AppUpdateDialog(
+                updateInfo: update,
+                isMandatory: isMandatory,
+                onUpdate: () {
+                  widget.syncService.launchAppUpdateUrl();
+                },
+                onDismiss: () {
+                  _updateDialogContext = null;
+                  widget.syncService.dismissOptionalUpdate();
+                },
+              );
+            },
+          ).then((_) {
+            _updateDialogContext = null;
+            if (!isMandatory) {
+              widget.syncService.dismissOptionalUpdate();
+            }
+          });
+        });
+      }
     }
     setState(() {});
   }
@@ -211,6 +341,8 @@ class _HomeScreenState extends State<HomeScreen>
         lower == 'unknown caller' ||
         lower == 'unsaved' ||
         lower == 'un saved' ||
+        lower == 'unsaved number' ||
+        lower == 'unsaved contact' ||
         lower == 'private number' ||
         lower == 'no caller id') {
       return false;
@@ -383,69 +515,94 @@ class _HomeScreenState extends State<HomeScreen>
         service.whatsappEvents.where((e) => e.kind == 'whatsapp_call').length;
     final smsCount = service.smsList.length;
 
-    return Scaffold(
-      backgroundColor: colors.background,
-      appBar: AppBar(
-        backgroundColor: colors.cardBackground,
-        elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              width: 10,
-              height: 10,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: service.isPaired ? colors.primary : colors.warning,
-                boxShadow: [
-                  BoxShadow(
-                    color: (service.isPaired ? colors.primary : colors.warning)
-                        .withOpacity(0.55),
-                    blurRadius: 6,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    device?.name ?? 'Sales Phone',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                      color: colors.textPrimary,
+    return PopScope(
+      canPop: _selectedBottomNavIndex == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _selectedBottomNavIndex != 0) {
+          setState(() => _selectedBottomNavIndex = 0);
+        }
+      },
+      child: Scaffold(
+        backgroundColor: colors.background,
+        appBar: _selectedBottomNavIndex == 1
+            ? null
+            : AppBar(
+                backgroundColor: colors.cardBackground,
+                elevation: 0,
+                title: Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: service.isPaired ? colors.primary : colors.warning,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (service.isPaired ? colors.primary : colors.warning)
+                                .withOpacity(0.55),
+                            blurRadius: 6,
+                          ),
+                        ],
+                      ),
                     ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: colors.textSecondary,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            device?.name ?? 'Sales Phone',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: colors.textSecondary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
-                    overflow: TextOverflow.ellipsis,
+                  ],
+                ),
+                actions: [
+                  // CRM Portal Quick Action Button
+                  IconButton(
+                    icon: Icon(
+                      Icons.business_center_rounded,
+                      color: colors.primary,
+                      size: 21,
+                    ),
+                    tooltip: 'Open CRM Portal',
+                    onPressed: () {
+                      if (service.isPlayingAudio) {
+                        service.stopRecording();
+                      }
+                      setState(() => _selectedBottomNavIndex = 1);
+                    },
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          // Theme Toggle Action Button
-          IconButton(
-            icon: Icon(
-              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: colors.textPrimary,
-              size: 20,
-            ),
-            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-            onPressed: () => themeProvider.toggleTheme(context),
-          ),
 
-          // Real-time Sync Action Button
+                  // Theme Toggle Action Button
+                  IconButton(
+                    icon: Icon(
+                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                      color: colors.textPrimary,
+                      size: 20,
+                    ),
+                    tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                    onPressed: () => themeProvider.toggleTheme(context),
+                  ),
+
+                  // Real-time Sync Action Button
           IconButton(
             icon: service.isSyncing
                 ? SizedBox(
@@ -476,6 +633,32 @@ class _HomeScreenState extends State<HomeScreen>
             onSelected: (val) {
               if (val == 'theme_mode') {
                 _showThemeSelectionDialog(context);
+              } else if (val == 'check_updates') {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Checking CRM server for app updates...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                service.checkForAppUpdate(manual: true).then((update) {
+                  if (update == null && mounted) {
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Row(
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                            const SizedBox(width: 10),
+                            Text('You are using the latest version (v${SalesTrackApiService.currentAppVersion})'),
+                          ],
+                        ),
+                        backgroundColor: const Color(0xFF10B981),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  }
+                });
               } else if (val == 'permissions') {
                 Navigator.push(
                   context,
@@ -577,6 +760,16 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
               PopupMenuItem(
+                value: 'check_updates',
+                child: Row(
+                  children: [
+                    Icon(Icons.system_update_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Check for App Updates', style: TextStyle(color: colors.textPrimary)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
                 value: 'permissions',
                 child: Row(
                   children: [
@@ -645,48 +838,99 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      body: SafeArea(
-        top: false,
-        bottom: true,
-        child: Column(
-          children: [
-            // Live Real-Time Sync Progress Banner
-            if (service.isSyncing) _buildSyncProgressBanner(service),
-
-            // Proactive Permission Warning Banner
-            _buildPermissionAlertBanner(service),
-
-            // KPI Metric Banner
-            _buildKpiBanner(
-              totalCalls: totalCalls,
-              connectedCalls: connectedCalls,
-              talkSeconds: totalTalkSeconds,
-              waCalls: whatsappCallsCount,
-              pendingQueue: service.pendingQueueCount,
-              statusMsg: service.statusMessage,
-            ),
-
-            // Tab Content
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
+      body: _selectedBottomNavIndex == 1
+          ? CrmWebviewScreen(
+              syncService: service,
+              isTabMode: true,
+              onBackToSales: () => setState(() => _selectedBottomNavIndex = 0),
+            )
+          : SafeArea(
+              top: false,
+              bottom: true,
+              child: Column(
                 children: [
-                  _buildCallsTab(service),
-                  _buildWhatsAppTab(service),
-                  _buildSmsTab(service),
-                  _buildRecordingsTab(service),
-                  _buildPendingTab(service),
-                  _buildCallListsTab(service),
+                  // Live Real-Time Sync Progress Banner
+                  if (service.isSyncing) _buildSyncProgressBanner(service),
+
+                  // Proactive Permission Warning Banner
+                  _buildPermissionAlertBanner(service),
+
+                  // KPI Metric Banner
+                  _buildKpiBanner(
+                    totalCalls: totalCalls,
+                    connectedCalls: connectedCalls,
+                    talkSeconds: totalTalkSeconds,
+                    waCalls: whatsappCallsCount,
+                    pendingQueue: service.pendingQueueCount,
+                    statusMsg: service.statusMessage,
+                  ),
+
+                  // Tab Content
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildCallsTab(service),
+                        _buildWhatsAppTab(service),
+                        _buildSmsTab(service),
+                        _buildRecordingsTab(service),
+                        _buildPendingTab(service),
+                        _buildCallListsTab(service),
+                      ],
+                    ),
+                  ),
+
+                  // Floating Audio Player bar
+                  if (service.isPlayingAudio || service.activeAudioPath != null)
+                    _buildAudioPlayerBar(service),
                 ],
               ),
             ),
-
-            // Floating Audio Player bar
-            if (service.isPlayingAudio || service.activeAudioPath != null)
-              _buildAudioPlayerBar(service),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: colors.cardBackground,
+          border: Border(
+            top: BorderSide(color: colors.border.withOpacity(0.6), width: 1),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, -2),
+            ),
           ],
         ),
+        child: SafeArea(
+          top: false,
+          bottom: true,
+          child: NavigationBar(
+            height: 64,
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            indicatorColor: colors.primary.withOpacity(0.15),
+            selectedIndex: _selectedBottomNavIndex,
+            onDestinationSelected: (index) {
+              if (widget.syncService.isPlayingAudio) {
+                widget.syncService.stopRecording();
+              }
+              setState(() => _selectedBottomNavIndex = index);
+            },
+            destinations: [
+              NavigationDestination(
+                icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
+                selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
+                label: 'Sales Tracker',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
+                selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
+                label: 'CRM Portal',
+              ),
+            ],
+          ),
+        ),
       ),
+    ),
     );
   }
 
@@ -1030,7 +1274,7 @@ class _HomeScreenState extends State<HomeScreen>
       final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
       final qNorm = q.replaceAll(RegExp(r'\D'), '');
       final bool isSaved = _isSavedContact(c.name, c.number);
-      final String displayName = isSaved ? c.name : 'Un Saved';
+      final String displayName = isSaved ? c.name : (c.number.isNotEmpty ? c.number : 'Unsaved Number');
       if (displayName.toLowerCase().contains(q)) return true;
       if (c.number.toLowerCase().contains(q)) return true;
       if (qNorm.isNotEmpty &&
@@ -1056,7 +1300,7 @@ class _HomeScreenState extends State<HomeScreen>
     final contactName = filtered.isNotEmpty
         ? (_isSavedContact(filtered.first.name, filtered.first.number)
             ? filtered.first.name
-            : 'Un Saved')
+            : (filtered.first.number.isNotEmpty ? filtered.first.number : 'Unsaved Number'))
         : '';
     final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
 
@@ -1301,6 +1545,7 @@ class _HomeScreenState extends State<HomeScreen>
                     if (service.hasCallLogPermission) {
                       await service.syncDeviceCallLogs();
                     }
+                    await service.scanLocalRecordings();
                     await service.syncCallsOnly();
                   },
                   child: ListView.builder(
@@ -1476,7 +1721,7 @@ class _HomeScreenState extends State<HomeScreen>
                         borderRadius: BorderRadius.circular(5),
                       ),
                       child: Text(
-                        'SIM ${call.sim}',
+                        'SIM ${call.sim is int && call.sim > 0 ? call.sim : 1}',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -1544,6 +1789,101 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ],
 
+                const SizedBox(height: 10),
+                // Quick Call Actions Row (Lead outcome, CRM Caller ID, WhatsApp)
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        final eventObj = call is SalesTrackEvent
+                            ? call
+                            : SalesTrackEvent(
+                                uid: call.uid?.toString() ?? 'call-${DateTime.now().millisecondsSinceEpoch}',
+                                kind: 'call',
+                                time: call.time as int,
+                                direction: call.direction?.toString() ?? 'incoming',
+                                number: call.number?.toString() ?? '',
+                                name: call.name?.toString() ?? '',
+                                duration: call.duration as int? ?? 0,
+                                recording: hasRec,
+                                recordingPath: call.recordingPath?.toString(),
+                              );
+                        showDialog(
+                          context: context,
+                          barrierDismissible: true,
+                          builder: (dialogCtx) => AfterCallDialog(
+                            event: eventObj,
+                            syncService: service,
+                            onDismiss: () {
+                              service.dismissAfterCallPopup(eventObj);
+                            },
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.note_alt_outlined, size: 14),
+                      label: const Text('Edit Lead / Log Outcome', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.primary,
+                        foregroundColor: Colors.white,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        final info = CallerIdInfo(
+                          phoneNumber: call.number,
+                          direction: call.direction?.toString() ?? 'incoming',
+                          name: call.name.isNotEmpty ? call.name : call.number,
+                          isSearching: true,
+                        );
+                        showDialog(
+                          context: context,
+                          builder: (_) => CallerIdDialog(
+                            info: info,
+                            syncService: service,
+                            onDismiss: () => service.dismissCallerId(),
+                          ),
+                        );
+                        service.lookupAndEnrichCaller(call.number, call.name, call.direction);
+                      },
+                      icon: const Icon(Icons.badge_outlined, size: 14),
+                      label: const Text('Caller CRM Info', style: TextStyle(fontSize: 11.5)),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: colors.textPrimary,
+                        visualDensity: VisualDensity.compact,
+                        side: BorderSide(color: colors.border),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => service.openWhatsAppChat(call.number),
+                      icon: Icon(Icons.chat_rounded, size: 16, color: colors.whatsappGreen),
+                      tooltip: 'Chat on WhatsApp',
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        backgroundColor: colors.whatsappGreen.withOpacity(0.12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => service.sendSms(number: call.number, name: call.name),
+                      icon: Icon(Icons.sms_rounded, size: 16, color: colors.secondary),
+                      tooltip: 'Send SMS',
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        backgroundColor: colors.secondary.withOpacity(0.12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ],
+                ),
+
                 // Inline Audio Player with Seekbar & Play Button
                 if (hasRec && call.recordingPath != null && call.recordingPath!.isNotEmpty) ...[
                   const SizedBox(height: 10),
@@ -1563,7 +1903,7 @@ class _HomeScreenState extends State<HomeScreen>
     final bool isSaved = _isSavedContact(rawName, number);
     final String title = isSaved ? rawName : 'Un Saved';
     final bool synced = call.syncStatus == 'synced';
-    final int sim = call.sim is int ? call.sim as int : 0;
+    final int sim = (call.sim is int && (call.sim as int) > 0) ? (call.sim as int) : 1;
     final int seconds = call.duration is int ? call.duration as int : 0;
     final String direction = call.direction == 'incoming'
         ? 'Incoming call'
@@ -1636,40 +1976,38 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                       ),
                     ),
-                    if (sim > 0) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: colors.surfaceColor,
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(color: colors.border),
-                        ),
-                        child: Text(
-                          'SIM $sim',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w600,
-                            color: colors.textSecondary,
-                          ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceColor,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: colors.border),
+                      ),
+                      child: Text(
+                        'SIM $sim',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          color: colors.textSecondary,
                         ),
                       ),
-                    ],
+                    ),
                   ],
                 ),
                 if (number.isNotEmpty) ...[
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     number,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: colors.textSecondary),
+                    style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
                   ),
                 ],
-                const SizedBox(height: 5),
+                const SizedBox(height: 6),
                 Row(
                   children: [
-                    Icon(Icons.access_time_rounded, size: 13, color: colors.textMuted),
+                    Icon(Icons.access_time_rounded, size: 13, color: colors.textSecondary),
                     const SizedBox(width: 5),
                     Flexible(
                       child: Text(
@@ -1677,7 +2015,7 @@ class _HomeScreenState extends State<HomeScreen>
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 13,
                           fontWeight: FontWeight.w500,
                           color: colors.textSecondary,
                         ),
@@ -1877,6 +2215,15 @@ class _HomeScreenState extends State<HomeScreen>
     final colors = context.stColors;
 
     if (service.whatsappEvents.isEmpty) {
+      if (Platform.isIOS) {
+        return _buildEmptyState(
+          icon: Icons.chat_rounded,
+          title: 'No WhatsApp Activity Sensed',
+          subtitle: 'Track WhatsApp calls and chat interactions with CRM leads and clients.',
+          actionLabel: 'Refresh WhatsApp',
+          onAction: () => service.syncActiveWhatsAppNotifications(),
+        );
+      }
       return _buildEmptyState(
         icon: Icons.chat_rounded,
         title: 'No WhatsApp Activity Sensed',
@@ -1887,7 +2234,11 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final allEvents = service.whatsappEvents;
+    final allEvents = service.whatsappEvents
+        .where((e) =>
+            !TelemetrySyncService.isMessageCountSummary(e.text) &&
+            !TelemetrySyncService.isMessageCountSummary(e.name))
+        .toList();
     final messageCount = allEvents.where((e) => e.kind == 'whatsapp_message').length;
     final callCount = allEvents.where((e) => e.kind == 'whatsapp_call').length;
 
@@ -1900,7 +2251,7 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Column(
       children: [
-        if (!service.hasWhatsAppAccessPermission)
+        if (!Platform.isIOS && !service.hasWhatsAppAccessPermission)
           Container(
             margin: const EdgeInsets.fromLTRB(14, 8, 14, 6),
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -2144,47 +2495,73 @@ class _HomeScreenState extends State<HomeScreen>
                               size: 20,
                             ),
                           ),
-                          title: Row(
+                          title: Builder(
+                            builder: (context) {
+                              final bool isSavedWa = _isSavedContact(ev.name, ev.number);
+                              final String waTitle = isSavedWa ? ev.name : 'Un Saved';
+                              return Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      waTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 15,
+                                        color: colors.textPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: colors.surfaceColor,
+                                      borderRadius: BorderRadius.circular(5),
+                                      border: Border.all(color: colors.border),
+                                    ),
+                                    child: Text(
+                                      isBusiness ? 'BUSINESS' : 'PERSONAL',
+                                      style: TextStyle(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: isBusiness
+                                            ? colors.whatsappBusiness
+                                            : colors.whatsappGreen,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Text(
-                                  ev.name.isNotEmpty ? ev.name : 'WhatsApp Contact',
+                              if (ev.number.isNotEmpty) ...[
+                                const SizedBox(height: 3),
+                                Text(
+                                  ev.number,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14.5,
-                                    color: colors.textPrimary,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w500,
+                                    color: colors.textSecondary,
                                   ),
                                 ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: (isBusiness
-                                          ? colors.whatsappBusiness
-                                          : colors.whatsappGreen)
-                                      .withOpacity(0.15),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  isBusiness ? 'BUSINESS' : 'PERSONAL',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                    color: isBusiness
-                                        ? colors.whatsappBusiness
-                                        : colors.whatsappGreen,
-                                  ),
-                                ),
+                              ],
+                              const SizedBox(height: 3),
+                              Text(
+                                isCall
+                                    ? 'WhatsApp Call (${_formatDuration(ev.duration)})'
+                                    : (ev.text ?? 'Message'),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
                               ),
                             ],
-                          ),
-                          subtitle: Text(
-                            isCall
-                                ? 'WhatsApp Call (${_formatDuration(ev.duration)})'
-                                : (ev.text ?? 'Message'),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, color: colors.textSecondary),
                           ),
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -2196,28 +2573,34 @@ class _HomeScreenState extends State<HomeScreen>
                               ),
                               const SizedBox(height: 4),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                                 decoration: BoxDecoration(
-                                  color: ev.syncStatus == 'synced'
-                                      ? colors.success.withOpacity(0.12)
-                                      : colors.warning.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(4),
+                                  color: (ev.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                    color: ev.syncStatus == 'synced'
-                                        ? colors.success.withOpacity(0.3)
-                                        : colors.warning.withOpacity(0.3),
-                                    width: 0.8,
+                                    color: (ev.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.4),
+                                    width: 0.9,
                                   ),
                                 ),
-                                child: Text(
-                                  ev.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
-                                  style: TextStyle(
-                                    fontSize: 8.5,
-                                    fontWeight: FontWeight.bold,
-                                    color: ev.syncStatus == 'synced'
-                                        ? colors.success
-                                        : colors.warning,
-                                  ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      ev.syncStatus == 'synced' ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                                      size: 11,
+                                      color: ev.syncStatus == 'synced' ? colors.success : colors.warning,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      ev.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.4,
+                                        color: ev.syncStatus == 'synced' ? colors.success : colors.warning,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
@@ -2237,7 +2620,7 @@ class _HomeScreenState extends State<HomeScreen>
     final colors = context.stColors;
 
     if (service.smsList.isEmpty) {
-      if (!service.hasSmsPermission) {
+      if (!Platform.isIOS && !service.hasSmsPermission) {
         return _buildEmptyState(
           icon: Icons.sms_failed_rounded,
           title: 'SMS Permission Required',
@@ -2249,13 +2632,17 @@ class _HomeScreenState extends State<HomeScreen>
       return _buildEmptyState(
         icon: Icons.sms_rounded,
         title: 'No SMS Messages Loaded',
-        subtitle: 'Carrier SMS logs can be scanned and displayed here.',
-        actionLabel: 'Scan Device SMS',
+        subtitle: 'Carrier SMS logs and interactions fetched locally from device.',
+        actionLabel: 'Refresh SMS',
         onAction: () => service.syncDeviceSms(),
       );
     }
 
-    final sortedSms = List<SalesTrackEvent>.from(service.smsList)
+    final sortedSms = service.smsList
+        .where((e) =>
+            !TelemetrySyncService.isMessageCountSummary(e.text) &&
+            !TelemetrySyncService.isMessageCountSummary(e.name))
+        .toList()
       ..sort((a, b) => b.time.compareTo(a.time));
 
     return Column(
@@ -2359,19 +2746,70 @@ class _HomeScreenState extends State<HomeScreen>
                       backgroundColor: colors.secondary.withOpacity(0.15),
                       child: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
                     ),
-                    title: Text(
-                      sms.name.isNotEmpty ? sms.name : sms.number,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14.5,
-                        color: colors.textPrimary,
-                      ),
+                    title: Builder(
+                      builder: (context) {
+                        final bool isSavedSms = _isSavedContact(sms.name, sms.number);
+                        final String smsTitle = isSavedSms ? sms.name : 'Un Saved';
+                        final int smsSim = sms.sim > 0 ? sms.sim : 1;
+                        return Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                smsTitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  color: colors.textPrimary,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: colors.surfaceColor,
+                                borderRadius: BorderRadius.circular(5),
+                                border: Border.all(color: colors.border),
+                              ),
+                              child: Text(
+                                'SIM $smsSim',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: colors.textSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                    subtitle: Text(
-                      sms.text ?? '',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (sms.number.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            sms.number,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w500,
+                              color: colors.textSecondary,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 3),
+                        Text(
+                          sms.text ?? '',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+                        ),
+                      ],
                     ),
                     trailing: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -2383,28 +2821,34 @@ class _HomeScreenState extends State<HomeScreen>
                         ),
                         const SizedBox(height: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                           decoration: BoxDecoration(
-                            color: sms.syncStatus == 'synced'
-                                ? colors.success.withOpacity(0.12)
-                                : colors.warning.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(4),
+                            color: (sms.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: sms.syncStatus == 'synced'
-                                  ? colors.success.withOpacity(0.3)
-                                  : colors.warning.withOpacity(0.3),
-                              width: 0.8,
+                              color: (sms.syncStatus == 'synced' ? colors.success : colors.warning).withOpacity(0.4),
+                              width: 0.9,
                             ),
                           ),
-                          child: Text(
-                            sms.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
-                            style: TextStyle(
-                              fontSize: 8.5,
-                              fontWeight: FontWeight.bold,
-                              color: sms.syncStatus == 'synced'
-                                  ? colors.success
-                                  : colors.warning,
-                            ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                sms.syncStatus == 'synced' ? Icons.check_circle_rounded : Icons.schedule_rounded,
+                                size: 11,
+                                color: sms.syncStatus == 'synced' ? colors.success : colors.warning,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                sms.syncStatus == 'synced' ? 'SYNCED' : 'PENDING',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.4,
+                                  color: sms.syncStatus == 'synced' ? colors.success : colors.warning,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -2599,9 +3043,12 @@ class _HomeScreenState extends State<HomeScreen>
                 final name = rec['fileName']?.toString() ?? 'Call Recording';
                 final isCurrent = service.activeAudioPath == path;
 
-                final matchingCall = service.calls
-                    .where((c) => c.recordingPath == path)
-                    .firstOrNull;
+                final matchingCall = service.calls.where((c) {
+                  if (c.recordingPath == null) return false;
+                  if (c.recordingPath == path) return true;
+                  final p1 = c.recordingPath!;
+                  return (name.isNotEmpty && p1.endsWith(name)) || path.endsWith(p1) || p1.endsWith(path);
+                }).firstOrNull;
                 final isUploaded = matchingCall?.recordingSyncStatus == 'synced';
 
                 return Card(
@@ -2699,8 +3146,9 @@ class _HomeScreenState extends State<HomeScreen>
     final pendingSms = service.smsList.where((s) => s.syncStatus != 'synced').toList();
     final pendingRecordings = service.calls
         .where((c) =>
-            (c.recording || (c.recordingPath != null && c.recordingPath!.isNotEmpty)) &&
-            c.recordingSyncStatus != 'synced')
+            c.recordingPath != null &&
+            c.recordingPath!.isNotEmpty &&
+            c.recordingSyncStatus == 'pending')
         .toList();
 
     final totalPending = pendingCalls.length +
@@ -2921,7 +3369,7 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.chat_rounded, color: colors.whatsappGreen, size: 20),
         title: Text(
-          wa.name.isNotEmpty ? wa.name : 'WhatsApp Contact',
+          _isSavedContact(wa.name, wa.number) ? wa.name : 'Un Saved',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -2929,7 +3377,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         subtitle: Text(
-          '${wa.text ?? "WhatsApp message"} • ${_formatDialerTime(wa.time as int)}',
+          '${wa.number.isNotEmpty ? "${wa.number} • " : ""}${wa.text ?? "WhatsApp message"} • ${_formatDialerTime(wa.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 11, color: colors.textSecondary),
@@ -2959,7 +3407,7 @@ class _HomeScreenState extends State<HomeScreen>
         dense: true,
         leading: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
         title: Text(
-          sms.name.isNotEmpty ? sms.name : sms.number,
+          _isSavedContact(sms.name, sms.number) ? sms.name : 'Un Saved',
           style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 13.5,
@@ -2967,7 +3415,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         subtitle: Text(
-          '${sms.text ?? "SMS"} • ${_formatDialerTime(sms.time as int)}',
+          '${sms.number.isNotEmpty ? "${sms.number} • " : ""}${sms.text ?? "SMS"} • ${_formatDialerTime(sms.time as int)}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(fontSize: 11, color: colors.textSecondary),

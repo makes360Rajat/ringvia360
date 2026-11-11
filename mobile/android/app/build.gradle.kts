@@ -46,4 +46,8 @@ flutter {
 dependencies {
     // Required for NotificationCompat in CallRecordingService
     implementation("androidx.core:core-ktx:1.13.1")
+    // WorkManager for background sync without app being open
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    // OkHttp for reliable native multipart/json background HTTP requests
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

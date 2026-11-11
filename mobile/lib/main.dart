@@ -17,15 +17,17 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Request permissions required for auto call sensing and wrap-up popup:
-  // - phone             → READ_PHONE_STATE (detects call state changes)
-  // - microphone        → RECORD_AUDIO    (audio capture)
-  // - notification      → POST_NOTIFICATIONS (Android 13+ — call-ended notification)
-  // - systemAlertWindow → SYSTEM_ALERT_WINDOW (display wrap-up popup on top of screen)
+  // - phone                     → READ_PHONE_STATE (detects call state changes)
+  // - microphone                → RECORD_AUDIO    (audio capture)
+  // - notification              → POST_NOTIFICATIONS (Android 13+ — call-ended notification)
+  // - systemAlertWindow         → SYSTEM_ALERT_WINDOW (display wrap-up popup on top of screen)
+  // - ignoreBatteryOptimizations → 24/7 background sync without Android Doze killing worker
   await [
     Permission.phone,
     Permission.microphone,
     Permission.notification,
     Permission.systemAlertWindow,
+    Permission.ignoreBatteryOptimizations,
   ].request();
 
   runApp(const RingVia360App());

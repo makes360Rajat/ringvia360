@@ -183,6 +183,49 @@ class NativeCallSensorService {
     } catch (_) {}
   }
 
+  /// Checks if the app is exempt from Android battery optimization / Doze mode
+  Future<bool> isIgnoringBatteryOptimizations() async {
+    try {
+      final res = await _methodChannel.invokeMethod<bool>('isIgnoringBatteryOptimizations');
+      return res ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Prompts the user to exempt the app from battery optimization for 24/7 background sync
+  Future<void> requestIgnoreBatteryOptimizations() async {
+    try {
+      await _methodChannel.invokeMethod('requestIgnoreBatteryOptimizations');
+    } catch (_) {}
+  }
+
+  /// Triggers an immediate zero-touch background sync pass via WorkManager
+  Future<void> triggerSync() async {
+    try {
+      await _methodChannel.invokeMethod('triggerSync');
+    } catch (_) {}
+  }
+
+  /// Syncs auth credentials down to native Android SharedPreferences
+  Future<void> updateAuthCredentials({
+    required String serverUrl,
+    required String orgId,
+    required String repId,
+    required String repName,
+    String? token,
+  }) async {
+    try {
+      await _methodChannel.invokeMethod('updateAuthCredentials', {
+        'serverUrl': serverUrl,
+        'orgId': orgId,
+        'repId': repId,
+        'repName': repName,
+        'token': token,
+      });
+    } catch (_) {}
+  }
+
   void dispose() {
     _sub?.cancel();
     _controller.close();

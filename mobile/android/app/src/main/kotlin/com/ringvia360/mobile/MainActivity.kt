@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -22,6 +23,12 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // ── 0. Initialize Zero-Touch Background Sync WorkManager ────────────────
+        try {
+            CallSyncWorker.schedulePeriodic(this)
+            CallSyncWorker.triggerImmediate(this)
+        } catch (_: Exception) {}
 
         // ── 1. EventChannel: live call state -> Flutter stream ──────────────────
         EventChannel(
@@ -202,6 +209,71 @@ class MainActivity : FlutterActivity() {
                         }
                     } else {
                         result.success(true)
+                    }
+                }
+
+                "isIgnoringBatteryOptimizations" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                        result.success(pm?.isIgnoringBatteryOptimizations(packageName) ?: true)
+                    } else {
+                        result.success(true)
+                    }
+                }
+
+                "requestIgnoreBatteryOptimizations" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        try {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            // Fallback to standard battery settings
+                            try {
+                                val fallback = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                startActivity(fallback)
+                                result.success(true)
+                            } catch (e2: Exception) {
+                                result.error("BATTERY_OPTI_ERROR", e2.message, null)
+                            }
+                        }
+                    } else {
+                        result.success(true)
+                    }
+                }
+
+                "triggerSync" -> {
+                    try {
+                        CallSyncWorker.triggerImmediate(this)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("SYNC_ERROR", e.message, null)
+                    }
+                }
+
+                "updateAuthCredentials" -> {
+                    try {
+                        val args = call.arguments as? Map<*, *>
+                        val serverUrl = args?.get("serverUrl") as? String
+                        val orgId = args?.get("orgId") as? String
+                        val repId = args?.get("repId") as? String
+                        val repName = args?.get("repName") as? String
+                        val token = args?.get("token") as? String
+
+                        val prefs = getSharedPreferences(CallSyncWorker.AUTH_PREFS, Context.MODE_PRIVATE)
+                        prefs.edit().apply {
+                            if (!serverUrl.isNullOrEmpty()) putString("server_url", serverUrl)
+                            if (!orgId.isNullOrEmpty()) putString("org_id", orgId)
+                            if (!repId.isNullOrEmpty()) putString("rep_id", repId)
+                            if (!repName.isNullOrEmpty()) putString("rep_name", repName)
+                            if (!token.isNullOrEmpty()) putString("token", token)
+                            apply()
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("AUTH_UPDATE_ERROR", e.message, null)
                     }
                 }
 
