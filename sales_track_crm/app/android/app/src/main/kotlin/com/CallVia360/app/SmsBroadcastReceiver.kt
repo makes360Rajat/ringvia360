@@ -12,6 +12,7 @@ import java.util.UUID
 class SmsBroadcastReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        SalesTrackBackgroundService.start(context)
         if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION) return
 
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
@@ -49,5 +50,6 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         )
 
         TelemetryBridgeChannel.sendTelemetryEvent(event)
+        NativeSyncManager.sendOrQueueEvent(context, event)
     }
 }

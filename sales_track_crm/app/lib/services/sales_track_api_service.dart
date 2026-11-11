@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sales_track_models.dart';
@@ -137,6 +138,9 @@ class SalesTrackApiService {
     await prefs.setString(_prefServerUrl, _serverUrl);
     await prefs.setString(_prefToken, token);
     await prefs.setString(_prefDeviceUid, deviceUid);
+    try {
+      MethodChannel('com.CallVia360.app/platform').invokeMethod('startBackgroundService');
+    } catch (_) {}
   }
 
   Future<void> clearCredentials() async {

@@ -42,6 +42,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        SalesTrackBackgroundService.start(this)
         instance = this
         try {
             val active = activeNotifications ?: return
@@ -77,6 +78,10 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val event = parseWhatsAppNotification(sbn) ?: return
         cacheEvent(event)
         TelemetryBridgeChannel.sendTelemetryEvent(event)
+        val type = event["type"]?.toString() ?: ""
+        if (type == "whatsapp_message" || type == "whatsapp_call_completed" || (type == "whatsapp_call" && event["direction"] == "missed")) {
+            NativeSyncManager.sendOrQueueEvent(this, event)
+        }
     }
 
     private fun isMessageCountSummary(str: String): Boolean {
@@ -420,6 +425,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
             cacheEvent(event)
             TelemetryBridgeChannel.sendTelemetryEvent(event)
+            NativeSyncManager.sendOrQueueEvent(this, event)
         }
     }
 }

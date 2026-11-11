@@ -31,6 +31,7 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        SalesTrackBackgroundService.start(context)
         val now = System.currentTimeMillis()
         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         val timestamp = isoFormat.format(Date(now))
@@ -194,6 +195,7 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                         )
 
                         TelemetryBridgeChannel.sendTelemetryEvent(event)
+                        NativeSyncManager.sendOrQueueEvent(context, event)
                         showCallEndedNotification(context, finalPhone, finalName)
                     } catch (_: Exception) {
                     } finally {

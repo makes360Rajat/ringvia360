@@ -100,6 +100,15 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Ensure 24/7 background telemetry service & job watchdog are active
+        try {
+            SalesTrackBackgroundService.start(this)
+            NativeSyncManager.scheduleJob(this)
+            NativeSyncManager.triggerSync(this)
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Failed to start background engine: ${e.message}")
+        }
+
         // Telemetry Stream EventChannel
         EventChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -120,6 +129,15 @@ class MainActivity : FlutterActivity() {
             METHOD_CHANNEL
         ).setMethodCallHandler { call, result ->
             when (call.method) {
+                "startBackgroundService" -> {
+                    SalesTrackBackgroundService.start(this)
+                    NativeSyncManager.scheduleJob(this)
+                    result.success(true)
+                }
+                "syncNowNative" -> {
+                    NativeSyncManager.triggerSync(this)
+                    result.success(true)
+                }
                 "getDeviceInfo" -> {
                     try {
                         val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
