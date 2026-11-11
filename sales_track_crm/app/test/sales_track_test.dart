@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sales_track_crm/models/sales_track_models.dart';
 import 'package:sales_track_crm/services/app_lock_service.dart';
 import 'package:sales_track_crm/services/sales_track_api_service.dart';
+import 'package:sales_track_crm/services/telemetry_sync_service.dart';
 
 void main() {
   group('Sales Track Backend Compatibility Tests', () {
@@ -178,6 +179,103 @@ void main() {
       expect(SalesTrackApiService.defaultServerUrl, equals('https://crm.make360.in'));
       expect(SalesTrackApiService.normalizeServerUrl('crm.example.com'), equals('https://crm.example.com'));
       expect(SalesTrackApiService.normalizeServerUrl('https://crm.example.com/admin/'), equals('https://crm.example.com'));
+    });
+
+    test('isMessageCountSummary detects group summary strings and allows real messages', () {
+      // Should detect and reject summary count strings
+      expect(TelemetrySyncService.isMessageCountSummary('5 new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('4 new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('3 new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('1 new message'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('16 messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('2 messages from 2 chats'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('28 messages from 6 chats'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('Checking for new messages'), isTrue);
+      expect(TelemetrySyncService.isMessageCountSummary('(24 messages)'), isTrue);
+
+      // Should allow real message content
+      expect(TelemetrySyncService.isMessageCountSummary('17'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('Hello, interested in CallVia360'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('Can you please send 5 messages to the team?'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('Thank you'), isFalse);
+
+      // Missed call notifications must NEVER be treated as message summaries
+      expect(TelemetrySyncService.isMessageCountSummary('1 missed call'), isFalse);
+      expect(TelemetrySyncService.isMessageCountSummary('2 missed calls'), isFalse);
+    });
+
+    test('normalizeNumber standardizes formats across spaced and unspaced numbers', () {
+      expect(TelemetrySyncService.normalizeNumber('+91 86994 98813'), equals('+918699498813'));
+      expect(TelemetrySyncService.normalizeNumber('+918699498813'), equals('+918699498813'));
+      expect(TelemetrySyncService.normalizeNumber('86994 98813'), equals('8699498813'));
+      expect(TelemetrySyncService.normalizeNumber('+1 (555) 234-5678'), equals('+15552345678'));
+    });
+
+    test('dedupWhatsAppList merges duplicate WhatsApp call events (calling vs ongoing/completed)', () {
+      final call1 = SalesTrackEvent(
+        uid: 'wacall_1794293915731_1814978277',
+        kind: 'whatsapp_call',
+        time: 1794293915731,
+        direction: 'incoming',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      final call2 = SalesTrackEvent(
+        uid: 'wacall_1794293915943_1814978277',
+        kind: 'whatsapp_call',
+        time: 1794293915943,
+        direction: 'incoming',
+        number: '+918699498813',
+        name: '+91 86994 98813',
+        duration: 7,
+      );
+
+      expect(TelemetrySyncService.isSameWhatsApp(call1, call2), isTrue);
+
+      final merged = TelemetrySyncService.dedupWhatsAppList([call1, call2]);
+      expect(merged.length, equals(1));
+      expect(merged.first.duration, equals(7));
+    });
+
+    test('preserves multiple missed calls from the same number in the same minute', () {
+      final missed1 = SalesTrackEvent(
+        uid: 'wacall_1794294175000_1001',
+        kind: 'whatsapp_call',
+        time: 1794294175000, // 12:00:15
+        direction: 'missed',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      final missed2 = SalesTrackEvent(
+        uid: 'wacall_1794294195000_1002',
+        kind: 'whatsapp_call',
+        time: 1794294195000, // 12:00:35 (20 seconds later in the same minute!)
+        direction: 'missed',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      final missed3 = SalesTrackEvent(
+        uid: 'wacall_1794294215000_1003',
+        kind: 'whatsapp_call',
+        time: 1794294215000, // 12:00:55 (20 seconds later in the same minute!)
+        direction: 'missed',
+        number: '+91 86994 98813',
+        name: '+91 86994 98813',
+        duration: 0,
+      );
+
+      // Must NOT be considered the same call!
+      expect(TelemetrySyncService.isSameWhatsApp(missed1, missed2), isFalse);
+      expect(TelemetrySyncService.isSameWhatsApp(missed2, missed3), isFalse);
+
+      final deduped = TelemetrySyncService.dedupWhatsAppList([missed1, missed2, missed3]);
+      expect(deduped.length, equals(3), reason: 'All 3 distinct missed calls in the same minute must be kept!');
     });
   });
 }

@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthPairingService extends ChangeNotifier {
+  static const MethodChannel _nativeChannel = MethodChannel('com.ringvia360/pending_call');
+
   static const String _prefIsPaired = 'rv360_is_paired';
   static const String _prefToken = 'rv360_auth_token';
+  static const String _prefServerUrl = 'rv360_server_url';
   static const String _prefOrgId = 'rv360_org_id';
   static const String _prefOrgName = 'rv360_org_name';
   static const String _prefRepId = 'rv360_rep_id';
@@ -54,9 +58,24 @@ class AuthPairingService extends ChangeNotifier {
       _repEmail = prefs.getString(_prefRepEmail) ?? 'sneha.kapoor@tcs.com';
       _deviceModel = prefs.getString(_prefDeviceModel) ?? 'Samsung Knox SM-S928B';
       _privatizeToMeOnly = prefs.getBool(_prefPrivatizeMe) ?? false;
+      await _syncToNativePrefs();
     } catch (_) {}
     _isInitialized = true;
     notifyListeners();
+  }
+
+  Future<void> _syncToNativePrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefServerUrl, 'https://ringvia360.com/api/calls.php');
+      await _nativeChannel.invokeMethod('updateAuthCredentials', {
+        'serverUrl': 'https://ringvia360.com/api/calls.php',
+        'orgId': _orgId,
+        'repId': _repId,
+        'repName': _repName,
+        'token': _token,
+      });
+    } catch (_) {}
   }
 
   Future<void> _saveToPreferences() async {
@@ -64,6 +83,7 @@ class AuthPairingService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefIsPaired, _isPaired);
       if (_token != null) await prefs.setString(_prefToken, _token!);
+      await prefs.setString(_prefServerUrl, 'https://ringvia360.com/api/calls.php');
       await prefs.setString(_prefOrgId, _orgId);
       await prefs.setString(_prefOrgName, _orgName);
       await prefs.setString(_prefRepId, _repId);
@@ -71,6 +91,7 @@ class AuthPairingService extends ChangeNotifier {
       await prefs.setString(_prefRepEmail, _repEmail);
       await prefs.setString(_prefDeviceModel, _deviceModel);
       await prefs.setBool(_prefPrivatizeMe, _privatizeToMeOnly);
+      await _syncToNativePrefs();
     } catch (_) {}
   }
 

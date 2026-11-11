@@ -417,9 +417,9 @@ class SalesTrackConfig {
 class SalesTrackEvent {
   String uid;
   final String kind; // 'call', 'whatsapp_call', 'sms'
-  final int time; // epoch ms
-  final String direction; // 'incoming', 'outgoing', 'missed', 'rejected', 'blocked', 'voicemail', 'unknown'
-  final String number;
+  int time; // epoch ms
+  String direction; // 'incoming', 'outgoing', 'missed', 'rejected', 'blocked', 'voicemail', 'unknown'
+  String number;
   String name;
   final int sim;
   int duration; // seconds

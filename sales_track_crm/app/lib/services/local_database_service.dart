@@ -68,6 +68,25 @@ class LocalDatabaseService {
           )
         ''');
       },
+      onOpen: (db) async {
+        // Automatically purge any group count summary notifications
+        try {
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_events_number ON events (number)');
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_events_kind_time ON events (kind, time DESC)');
+          await db.rawDelete('''
+            DELETE FROM events 
+            WHERE kind IN ('whatsapp_message', 'notification', 'sms')
+              AND (
+                text LIKE '%new message%'
+                OR text LIKE '%messages from%'
+                OR text LIKE '%unread message%'
+                OR text GLOB '[0-9]* message*'
+                OR text GLOB '[0-9]* new message*'
+                OR text GLOB '(* message*)'
+              )
+          ''');
+        } catch (_) {}
+      },
     );
   }
 
@@ -83,57 +102,55 @@ class LocalDatabaseService {
       final end = (i + chunkSize < events.length) ? i + chunkSize : events.length;
       final chunk = events.sublist(i, end);
 
-      await db.transaction((txn) async {
-        final batch = txn.batch();
+      final batch = db.batch();
 
-        for (final ev in chunk) {
-          final recSync = (ev.recordingPath != null && ev.recordingPath!.isNotEmpty)
-              ? (ev.syncStatus == 'synced' ? 'synced' : 'pending')
-              : 'none';
+      for (final ev in chunk) {
+        final recSync = (ev.recordingPath != null && ev.recordingPath!.isNotEmpty)
+            ? (ev.recordingSyncStatus == 'synced' ? 'synced' : 'pending')
+            : 'none';
 
-          batch.rawInsert('''
-            INSERT INTO events (
-              uid, kind, time, direction, number, name, sim, duration, recording,
-              media, app, text, source, recording_path, sync_status, recording_sync_status,
-              created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(uid) DO UPDATE SET
-              name = excluded.name,
-              duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
-              recording = CASE WHEN excluded.recording = 1 THEN 1 ELSE recording END,
-              recording_path = COALESCE(excluded.recording_path, recording_path),
-              sync_status = CASE WHEN sync_status = 'synced' THEN 'synced' ELSE excluded.sync_status END,
-              recording_sync_status = CASE 
-                WHEN recording_sync_status = 'synced' THEN 'synced'
-                WHEN excluded.recording_path IS NOT NULL AND excluded.recording_path != '' AND recording_sync_status = 'none' THEN 'pending'
-                ELSE recording_sync_status
-              END,
-              updated_at = ?
-          ''', [
-            ev.uid,
-            ev.kind,
-            ev.time,
-            ev.direction,
-            ev.number,
-            ev.name,
-            ev.sim,
-            ev.duration,
-            ev.recording ? 1 : 0,
-            ev.media,
-            ev.app,
-            ev.text,
-            ev.source,
-            ev.recordingPath,
-            ev.syncStatus,
-            recSync,
-            now,
-            now,
-            now,
-          ]);
-        }
+        batch.rawInsert('''
+          INSERT INTO events (
+            uid, kind, time, direction, number, name, sim, duration, recording,
+            media, app, text, source, recording_path, sync_status, recording_sync_status,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(uid) DO UPDATE SET
+            name = excluded.name,
+            duration = CASE WHEN excluded.duration > 0 THEN excluded.duration ELSE duration END,
+            recording = CASE WHEN excluded.recording = 1 THEN 1 ELSE recording END,
+            recording_path = COALESCE(excluded.recording_path, recording_path),
+            sync_status = CASE WHEN sync_status = 'synced' THEN 'synced' ELSE excluded.sync_status END,
+            recording_sync_status = CASE 
+              WHEN recording_sync_status = 'synced' THEN 'synced'
+              WHEN excluded.recording_path IS NOT NULL AND excluded.recording_path != '' AND recording_sync_status = 'none' THEN 'pending'
+              ELSE recording_sync_status
+            END,
+            updated_at = ?
+        ''', [
+          ev.uid,
+          ev.kind,
+          ev.time,
+          ev.direction,
+          ev.number,
+          ev.name,
+          ev.sim,
+          ev.duration,
+          ev.recording ? 1 : 0,
+          ev.media,
+          ev.app,
+          ev.text,
+          ev.source,
+          ev.recordingPath,
+          ev.syncStatus,
+          recSync,
+          now,
+          now,
+          now,
+        ]);
+      }
 
-        await batch.commit(noResult: true);
-      });
+      await batch.commit(noResult: true);
 
       if (events.length > chunkSize) {
         await Future.delayed(Duration.zero);
@@ -186,7 +203,7 @@ class LocalDatabaseService {
   Future<List<SalesTrackEvent>> getPendingEvents({String? kind, int limit = 500}) async {
     final db = await database;
     if (db == null) return [];
-    String query = "SELECT * FROM events WHERE sync_status != 'synced'";
+    String query = "SELECT * FROM events WHERE sync_status = 'pending' AND NOT (kind = 'whatsapp_call' AND direction != 'missed' AND duration = 0)";
     final args = <dynamic>[];
 
     if (kind != null && kind.isNotEmpty) {
@@ -366,14 +383,15 @@ class LocalDatabaseService {
     if (db == null) return 0;
     int removed = 0;
     try {
-      // 1. Remove duplicate calls where another record exists with same direction, number, and time within 120s
+      // 1. Remove duplicate calls where another record exists with same number, and time within natural window (5s for dialer, 120s for WhatsApp)
       final duplicateCalls = await db.rawQuery('''
         SELECT e2.uid as remove_uid, e1.uid as keep_uid, e2.duration as dur2, e1.duration as dur1,
                e2.sync_status as sync2, e1.sync_status as sync1,
-               e2.recording_path as rec2, e1.recording_path as rec1
+               e2.direction as dir2, e1.direction as dir1,
+               e2.recording_path as rec2, e1.recording_path as rec1,
+               e1.kind as call_kind
         FROM events e1
         INNER JOIN events e2 ON e1.kind = e2.kind
-          AND e1.direction = e2.direction
           AND (
             e1.number = e2.number
             OR (
@@ -384,8 +402,11 @@ class LocalDatabaseService {
           )
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
-          AND ABS(e1.time - e2.time) <= 120000
-        WHERE e1.kind IN ('call', 'whatsapp_call') AND e1.number != ''
+          AND (
+            (e1.kind = 'call' AND ABS(e1.time - e2.time) <= 5000)
+            OR (e1.kind = 'whatsapp_call' AND ABS(e1.time - e2.time) <= 120000)
+          )
+        WHERE e1.kind IN ('call', 'whatsapp_call')
       ''');
 
       for (final d in duplicateCalls) {
@@ -395,12 +416,15 @@ class LocalDatabaseService {
           final dur2 = (d['dur2'] as int?) ?? 0;
           final dur1 = (d['dur1'] as int?) ?? 0;
           final sync2 = d['sync2'] as String?;
+          final dir1 = d['dir1'] as String?;
+          final dir2 = d['dir2'] as String?;
           final rec2 = d['rec2'] as String?;
           final rec1 = d['rec1'] as String?;
 
           final updates = <String, dynamic>{};
           if (dur2 > dur1) updates['duration'] = dur2;
           if (sync2 == 'synced') updates['sync_status'] = 'synced';
+          if (dir1 == 'incoming' && (dir2 == 'outgoing' || dir2 == 'missed')) updates['direction'] = dir2;
           if ((rec1 == null || rec1.isEmpty) && rec2 != null && rec2.isNotEmpty) {
             updates['recording_path'] = rec2;
             updates['recording'] = 1;
@@ -459,6 +483,21 @@ class LocalDatabaseService {
           removed++;
         }
       }
+
+      // 3. Purge any phantom/summary messages (e.g. "5 new messages", "4 new messages", "Checking for new messages")
+      final purged = await db.rawDelete('''
+        DELETE FROM events 
+        WHERE kind IN ('whatsapp_message', 'notification')
+          AND (
+            text LIKE '%new message%' 
+            OR text LIKE '%unread message%'
+            OR text LIKE '%messages from%chat%'
+            OR text LIKE 'Checking for new messages%'
+            OR text LIKE 'Looking for new messages%'
+            OR (text LIKE '%(%' AND text LIKE '%messages)%')
+          )
+      ''');
+      removed += purged;
     } catch (_) {}
     return removed;
   }
@@ -674,5 +713,27 @@ class LocalDatabaseService {
       chunks.add(list.sublist(i, i + size > list.length ? list.length : i + size));
     }
     return chunks;
+  }
+
+  /// Purge all group count summary notifications (e.g. "5 new messages", "3 messages from 2 chats")
+  Future<int> purgeSummaryNotifications() async {
+    final db = await database;
+    if (db == null) return 0;
+    try {
+      return await db.rawDelete('''
+        DELETE FROM events 
+        WHERE kind IN ('whatsapp_message', 'notification', 'sms')
+          AND (
+            text LIKE '%new message%'
+            OR text LIKE '%messages from%'
+            OR text LIKE '%unread message%'
+            OR text GLOB '[0-9]* message*'
+            OR text GLOB '[0-9]* new message*'
+            OR text GLOB '(* message*)'
+          )
+      ''');
+    } catch (_) {
+      return 0;
+    }
   }
 }

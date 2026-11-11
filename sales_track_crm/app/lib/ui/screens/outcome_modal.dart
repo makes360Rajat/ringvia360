@@ -122,6 +122,8 @@ class _OutcomeModalState extends State<OutcomeModal> {
 
     setState(() => _isSubmitting = true);
 
+    widget.syncService.ensureCallSyncedToServer(widget.event);
+
     final success = await widget.syncService.submitCallOutcome(
       uid: widget.event.uid,
       outcomeKey: _selectedOutcomeKey!,
@@ -152,8 +154,15 @@ class _OutcomeModalState extends State<OutcomeModal> {
     final isDark = context.isDarkMode;
     final config = widget.syncService.config;
 
-    return SafeArea(
-      top: false,
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          widget.syncService.dismissAfterCallPopup(widget.event);
+        }
+      },
+      child: SafeArea(
+        top: false,
       child: Container(
         padding: EdgeInsets.only(
           bottom: MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 20,
@@ -228,7 +237,7 @@ class _OutcomeModalState extends State<OutcomeModal> {
                   ),
                   IconButton(
                     onPressed: () {
-                      widget.syncService.dismissAfterCallPopup();
+                      widget.syncService.dismissAfterCallPopup(widget.event);
                       Navigator.of(context).pop();
                     },
                     icon: Icon(Icons.close_rounded, color: colors.textMuted),
@@ -560,6 +569,7 @@ class _OutcomeModalState extends State<OutcomeModal> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

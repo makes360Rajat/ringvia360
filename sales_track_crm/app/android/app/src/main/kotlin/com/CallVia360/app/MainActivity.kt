@@ -1296,6 +1296,33 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun findNewestRecordingFile(phone: String, name: String): File? {
+        // 1. First check MediaStore for the newest audio file created in the last 3 minutes
+        try {
+            val projection = arrayOf(
+                MediaStore.Audio.Media.DATA,
+                MediaStore.Audio.Media.DATE_MODIFIED
+            )
+            val sel = "(${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DATA} LIKE '%Call%') AND ${MediaStore.Audio.Media.DATE_MODIFIED} > ?"
+            val minTimeSec = (System.currentTimeMillis() - 180000) / 1000
+            contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                sel,
+                arrayOf(minTimeSec.toString()),
+                "${MediaStore.Audio.Media.DATE_MODIFIED} DESC"
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val p = cursor.getString(0) ?: ""
+                    if (p.isNotEmpty()) {
+                        val f = File(p)
+                        if (f.exists() && f.length() > 0) {
+                            return f
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+
         val candidateDirs = mutableListOf(
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
@@ -1310,7 +1337,7 @@ class MainActivity : FlutterActivity() {
         }
 
         var newestFile: File? = null
-        var newestTime: Long = System.currentTimeMillis() - 120000 // Last 2 minutes
+        var newestTime: Long = System.currentTimeMillis() - 180000 // Last 3 minutes
 
         for (dir in candidateDirs) {
             if (dir.exists() && dir.isDirectory) {

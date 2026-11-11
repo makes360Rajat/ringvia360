@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, File;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,6 +24,13 @@ class TelemetrySyncService extends ChangeNotifier {
   bool _isSyncing = false;
   String _statusMessage = 'Initializing local storage...';
   DateTime? _lastSyncTime;
+
+  // Progressive Initialization State
+  double _initProgress = 0.05;
+  String _initStatusMessage = 'Starting CallVia360...';
+
+  double get initProgress => _initProgress;
+  String get initStatusMessage => _initStatusMessage;
 
   // Real-time Sync Progress & Granular Counts
   double _syncProgress = 0.0;
@@ -296,6 +303,10 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> _init() async {
     try {
+      _initProgress = 0.12;
+      _initStatusMessage = 'Connecting to local storage...';
+      notifyListeners();
+
       await api.init();
       _isPaired = api.isPaired;
 
@@ -307,17 +318,27 @@ class TelemetrySyncService extends ChangeNotifier {
 
       checkForAppUpdate();
 
+      _initProgress = 0.30;
+      _initStatusMessage = 'Loading saved settings & telemetry state...';
+      notifyListeners();
       await _loadSavedMeta();
       _listenToNativeEvents();
+
+      _initProgress = 0.55;
+      _initStatusMessage = 'Verifying telephony & system permissions...';
+      notifyListeners();
       await checkPermissions();
 
-      // Always load local device data and persisted history upfront
+      _initProgress = 0.80;
+      _initStatusMessage = 'Loading local calls & conversation records...';
+      notifyListeners();
+      // Load local database history fast without blocking the UI
       await _loadPersistedHistory();
-      await scanLocalRecordings();
-      if (hasCallLogPermission) await syncDeviceCallLogs();
-      if (hasSmsPermission) await syncDeviceSms();
-      await syncActiveWhatsAppNotifications();
       await refreshPendingCounts();
+
+      _initProgress = 0.95;
+      _initStatusMessage = 'Preparing CRM workspace...';
+      notifyListeners();
 
       if (Platform.isIOS) {
         _iosLivePollingTimer?.cancel();
@@ -330,29 +351,41 @@ class TelemetrySyncService extends ChangeNotifier {
         });
       }
 
-      if (_isPaired) {
-        // Immediately report health and start heartbeat loop so CRM dashboard shows live health at once
-        Future.delayed(const Duration(milliseconds: 100), () async {
-          await fetchPlatformDeviceInfo();
-          await sendHeartbeat();
-          _startHeartbeatLoop();
-
-          try {
-            await syncServerEvents();
-            await fetchCallLists();
-            await syncNow();
-          } catch (e) {
-            debugPrint('Background sync error: $e');
-          }
-        });
-      } else {
-        _statusMessage = 'Enter 6-digit pairing code to connect';
-      }
+      _initProgress = 1.0;
+      _initStatusMessage = 'Ready';
+      notifyListeners();
     } catch (e, st) {
       debugPrint('Error during TelemetrySyncService init: $e\n$st');
     } finally {
       _isInitialized = true;
       notifyListeners();
+
+      // Run heavy background synchronization asynchronously so UI opens instantaneously!
+      Future.microtask(() async {
+        try {
+          if (hasCallLogPermission) await syncDeviceCallLogs();
+          if (hasSmsPermission) await syncDeviceSms();
+          await scanLocalRecordings();
+          await syncActiveWhatsAppNotifications();
+          await refreshPendingCounts();
+
+          if (_isPaired) {
+            await fetchPlatformDeviceInfo();
+            await sendHeartbeat();
+            _startHeartbeatLoop();
+            await syncServerEvents();
+            await fetchCallLists();
+            // Automatically push complete call history and all pending items to the server
+            await syncAllCallHistoryToServer();
+            await syncNow();
+          } else {
+            _statusMessage = 'Enter 6-digit pairing code to connect';
+            notifyListeners();
+          }
+        } catch (e) {
+          debugPrint('Background init sync error: $e');
+        }
+      });
     }
   }
 
@@ -809,12 +842,13 @@ class TelemetrySyncService extends ChangeNotifier {
       syncNow();
     } else if (type == 'whatsapp_call' || type == 'whatsapp_call_completed') {
       final uid = raw['uid']?.toString() ?? 'wacall-${DateTime.now().millisecondsSinceEpoch}';
+      final rawNumber = raw['number']?.toString() ?? '';
       final event = SalesTrackEvent(
         uid: uid,
         kind: 'whatsapp_call',
         time: (raw['time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
         direction: raw['direction']?.toString() ?? 'incoming',
-        number: raw['number']?.toString() ?? '',
+        number: normalizeNumber(rawNumber),
         name: raw['name']?.toString() ?? 'WhatsApp Contact',
         duration: (raw['duration'] as num?)?.toInt() ?? 0,
         media: raw['media']?.toString() ?? 'voice',
@@ -822,11 +856,22 @@ class TelemetrySyncService extends ChangeNotifier {
         source: 'auto',
       );
 
+      final isFinalized = type == 'whatsapp_call_completed' || event.direction == 'missed' || event.duration > 0;
+      event.syncStatus = isFinalized ? 'pending' : 'in_progress';
+
       final existingIndex = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
       if (existingIndex >= 0) {
         final existing = _whatsappEvents[existingIndex];
-        if (existing.syncStatus == 'synced') event.syncStatus = 'synced';
+        // Reuse existing UID to prevent creating a second phantom call in SQLite and CRM
+        event.uid = existing.uid;
         if (existing.duration > event.duration) event.duration = existing.duration;
+        if (existing.direction != 'unknown' && event.direction == 'incoming' && (existing.direction == 'outgoing' || existing.direction == 'missed')) {
+          event.direction = existing.direction;
+        }
+        if (existing.time < event.time) event.time = existing.time;
+        if (existing.syncStatus == 'synced' && event.duration == existing.duration) {
+          event.syncStatus = 'synced';
+        }
         _whatsappEvents[existingIndex] = event;
       } else {
         _whatsappEvents.insert(0, event);
@@ -836,17 +881,29 @@ class TelemetrySyncService extends ChangeNotifier {
       _whatsappEvents.addAll(cleanWa);
 
       LocalDatabaseService.instance.saveEvents([event]);
+      LocalDatabaseService.instance.cleanupDuplicates();
       _persistWhatsApp();
-      _enqueueEvent(event);
+
+      // Only enqueue and upload to CRM once finalized (completed with talk time, or missed call)
+      // Never upload a ringing 0-duration call while ongoing, as that locks CRM records with duration '-'
+      if (isFinalized) {
+        _enqueueEvent(event);
+        // Instant direct push to CRM server (< 300ms)! Completely bypasses recording upload queues
+        _directSyncWhatsAppCall(event);
+      }
       notifyListeners();
-      syncNow();
     } else if (type == 'whatsapp_message') {
+      final text = raw['text']?.toString() ?? '';
+      String name = raw['sender']?.toString() ?? raw['name']?.toString() ?? 'WhatsApp Contact';
+      if (isMessageCountSummary(text) || isMessageCountSummary(name)) {
+        return; // Drop message count summary notifications immediately
+      }
       final uid = raw['uid']?.toString() ?? 'wamsg-${DateTime.now().millisecondsSinceEpoch}';
       String number = raw['number']?.toString() ?? '';
-      String name = raw['sender']?.toString() ?? raw['name']?.toString() ?? 'WhatsApp Contact';
       if (number.isEmpty && RegExp(r'^\+?[0-9\s\-()]{7,}$').hasMatch(name)) {
         number = name;
       }
+      number = normalizeNumber(number);
       final event = SalesTrackEvent(
         uid: uid,
         kind: 'whatsapp_message',
@@ -855,7 +912,7 @@ class TelemetrySyncService extends ChangeNotifier {
         number: number,
         name: name,
         app: raw['packageName']?.toString() ?? 'com.whatsapp',
-        text: raw['text']?.toString() ?? '',
+        text: text,
         source: 'auto',
       );
 
@@ -875,8 +932,14 @@ class TelemetrySyncService extends ChangeNotifier {
       _persistWhatsApp();
       _enqueueEvent(event);
       notifyListeners();
-      syncNow();
+      // Instant direct push to CRM server (< 300ms)
+      _directSyncWhatsAppCall(event);
     } else if (type == 'notification') {
+      final text = raw['text']?.toString() ?? '';
+      final name = raw['name']?.toString() ?? raw['title']?.toString() ?? 'Notification';
+      if (isMessageCountSummary(text) || isMessageCountSummary(name)) {
+        return; // Drop message count summary notifications immediately
+      }
       final uid = raw['uid']?.toString() ?? 'notif-${DateTime.now().millisecondsSinceEpoch}';
       final event = SalesTrackEvent(
         uid: uid,
@@ -884,9 +947,9 @@ class TelemetrySyncService extends ChangeNotifier {
         time: (raw['time'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch,
         direction: raw['direction']?.toString() ?? 'incoming',
         number: raw['number']?.toString() ?? '',
-        name: raw['name']?.toString() ?? raw['title']?.toString() ?? 'Notification',
+        name: name,
         app: raw['packageName']?.toString() ?? '',
-        text: raw['text']?.toString() ?? '',
+        text: text,
         source: 'auto',
       );
 
@@ -984,11 +1047,131 @@ class TelemetrySyncService extends ChangeNotifier {
     return true;
   }
 
-  void dismissAfterCallPopup() {
+  String? _lastEnsuredCallUid;
+  DateTime? _lastEnsuredCallTime;
+
+  /// Ensures that a call event is guaranteed to be sent to the CRM server in all cases.
+  /// Used whenever an after-call / log-lead dialog is dismissed or submitted, ensuring
+  /// that cancelling or crossing out the dialog view never drops the call from the server.
+  Future<void> ensureCallSyncedToServer(SalesTrackEvent event) async {
+    final now = DateTime.now();
+    if (_lastEnsuredCallUid == event.uid &&
+        _lastEnsuredCallTime != null &&
+        now.difference(_lastEnsuredCallTime!).inSeconds < 5 &&
+        event.syncStatus == 'synced') {
+      return;
+    }
+    _lastEnsuredCallUid = event.uid;
+    _lastEnsuredCallTime = now;
+
+    try {
+      // 1. Mark as pending and persist to local SQLite
+      event.syncStatus = 'pending';
+      await LocalDatabaseService.instance.saveEvents([event]);
+
+      // Update in-memory lists
+      int callIdx = _calls.indexWhere((c) => c.uid == event.uid);
+      if (callIdx < 0) {
+        callIdx = _calls.indexWhere((c) => isSameCall(c, event));
+      }
+      if (callIdx >= 0) {
+        _calls[callIdx].syncStatus = 'pending';
+      }
+
+      int waIdx = _whatsappEvents.indexWhere((w) => w.uid == event.uid);
+      if (waIdx < 0) {
+        waIdx = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
+      }
+      if (waIdx >= 0) {
+        _whatsappEvents[waIdx].syncStatus = 'pending';
+      }
+
+      _pendingUids.remove(event.uid);
+      _enqueueEvent(event);
+
+      // 2. Direct upload to CRM server immediately if paired
+      if (_isPaired) {
+        final res = await api.syncEvents([event], health: _buildHealthPayload());
+        if (res.success && res.data != null) {
+          final stored = List<String>.from(res.data!['stored'] ?? []);
+          final duplicate = List<String>.from(res.data!['duplicate'] ?? []);
+          final skipped = (res.data!['skipped'] as List? ?? []).map((s) => s['uid']?.toString()).whereType<String>().toList();
+          final rejected = (res.data!['rejected'] as List? ?? []).map((r) => r['uid']?.toString()).whereType<String>().toList();
+
+          final finishedUids = {...stored, ...duplicate, ...skipped, ...rejected}.toList();
+          if (finishedUids.isEmpty) {
+            finishedUids.add(event.uid);
+          }
+
+          event.syncStatus = 'synced';
+          await LocalDatabaseService.instance.markEventsSynced(finishedUids);
+          _pendingQueue.removeWhere((e) => finishedUids.contains(e.uid));
+          _pendingUids.removeWhere((u) => finishedUids.contains(u));
+
+          if (callIdx >= 0) _calls[callIdx].syncStatus = 'synced';
+          if (waIdx >= 0) _whatsappEvents[waIdx].syncStatus = 'synced';
+
+          final recordingsWanted = List<String>.from(res.data!['recordings_wanted'] ?? []);
+          if (recordingsWanted.contains(event.uid) && event.recordingPath != null && event.recordingPath!.isNotEmpty) {
+            await _uploadWantedRecordings([event.uid]);
+          }
+        }
+      }
+
+      // Also trigger a general sync to flush any remaining items
+      syncNow();
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error ensuring call synced to server: $e');
+      syncNow();
+    }
+  }
+
+  Future<void> dismissAfterCallPopup([SalesTrackEvent? event]) async {
+    final target = event ?? _activeAfterCallEvent;
     _activeAfterCallEvent = null;
     notifyListeners();
-    // Guarantee that call data and audio are immediately uploaded to the server
-    syncNow();
+
+    if (target != null) {
+      await ensureCallSyncedToServer(target);
+    } else {
+      syncNow();
+    }
+  }
+
+  /// Instant direct push for WhatsApp events to the CRM server (< 300ms)
+  /// completely independent of heavy audio recording upload queues.
+  Future<void> _directSyncWhatsAppCall(SalesTrackEvent event) async {
+    if (!_isPaired || _device == null) return;
+    try {
+      final res = await api.syncEvents([event], health: _buildHealthPayload());
+      if (res.success && res.data != null) {
+        final stored = List<String>.from(res.data!['stored'] ?? []);
+        final duplicate = List<String>.from(res.data!['duplicate'] ?? []);
+        final skipped = (res.data!['skipped'] as List? ?? []).map((s) => s['uid']?.toString()).whereType<String>().toList();
+        final rejected = (res.data!['rejected'] as List? ?? []).map((r) => r['uid']?.toString()).whereType<String>().toList();
+
+        final finishedUids = {...stored, ...duplicate, ...skipped, ...rejected}.toList();
+        if (finishedUids.isEmpty) finishedUids.add(event.uid);
+
+        event.syncStatus = 'synced';
+        await LocalDatabaseService.instance.markEventsSynced(finishedUids);
+        final idx = _whatsappEvents.indexWhere((w) => w.uid == event.uid);
+        if (idx >= 0) {
+          _whatsappEvents[idx].syncStatus = 'synced';
+        }
+        _pendingQueue.removeWhere((e) => finishedUids.contains(e.uid));
+        _pendingUids.removeWhere((u) => finishedUids.contains(u));
+        await refreshPendingCounts();
+        notifyListeners();
+      } else {
+        // Fallback to queue if temporary failure
+        syncNow(targetKind: 'whatsapp', uploadRecordings: false);
+      }
+    } catch (e) {
+      debugPrint('Direct WhatsApp sync error: $e');
+      syncNow(targetKind: 'whatsapp', uploadRecordings: false);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1000,6 +1183,15 @@ class TelemetrySyncService extends ChangeNotifier {
       return digits.substring(digits.length - 10);
     }
     return digits;
+  }
+
+  static String normalizeNumber(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return '';
+    final hasPlus = trimmed.startsWith('+');
+    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return trimmed;
+    return hasPlus ? '+$digits' : digits;
   }
 
   static bool numbersMatch(String a, String b) {
@@ -1016,12 +1208,12 @@ class TelemetrySyncService extends ChangeNotifier {
     // Match callLogId if both have it (e.g. call-1371-...)
     final aMatch = RegExp(r'^call-(\d+)').firstMatch(a.uid);
     final bMatch = RegExp(r'^call-(\d+)').firstMatch(b.uid);
-    if (aMatch != null && bMatch != null && aMatch.group(1) == bMatch.group(1)) {
-      return true;
+    if (aMatch != null && bMatch != null) {
+      return aMatch.group(1) == bMatch.group(1);
     }
 
     if (numbersMatch(a.number, b.number) && a.direction == b.direction) {
-      if ((a.time - b.time).abs() < 120000) return true;
+      if ((a.time - b.time).abs() <= 3000) return true;
     }
     return false;
   }
@@ -1031,7 +1223,7 @@ class TelemetrySyncService extends ChangeNotifier {
 
     final Map<String, int> uidIndex = {};
     final Map<String, int> logIdIndex = {};
-    final Map<String, int> timeNumIndex = {};
+    final Map<String, List<int>> numberBucket = {};
     final List<SalesTrackEvent> result = [];
 
     for (final call in list) {
@@ -1048,20 +1240,19 @@ class TelemetrySyncService extends ChangeNotifier {
         }
       }
 
-      String numKey = extractNumberKey(call.number);
-      if (numKey.isEmpty) {
-        numKey = call.number.replaceAll(RegExp(r'[\s\-+]'), '').toLowerCase();
-      }
-      if (existingIdx < 0 && numKey.isNotEmpty) {
-        final bucket = call.time ~/ 120000;
-        for (final b in [bucket, bucket - 1, bucket + 1]) {
-          final k = '${call.direction}_${numKey}_$b';
-          if (timeNumIndex.containsKey(k)) {
-            final candIdx = timeNumIndex[k]!;
-            if ((result[candIdx].time - call.time).abs() <= 120000) {
-              existingIdx = candIdx;
-              break;
-            }
+      final key = extractNumberKey(call.number);
+      if (existingIdx < 0 && key.isNotEmpty && numberBucket.containsKey(key)) {
+        for (final idx in numberBucket[key]!) {
+          if (isSameCall(result[idx], call)) {
+            existingIdx = idx;
+            break;
+          }
+        }
+      } else if (existingIdx < 0 && key.isEmpty) {
+        for (int i = 0; i < result.length; i++) {
+          if (isSameCall(result[i], call)) {
+            existingIdx = i;
+            break;
           }
         }
       }
@@ -1072,8 +1263,8 @@ class TelemetrySyncService extends ChangeNotifier {
         if (call.uid.isNotEmpty) uidIndex[call.uid] = newIdx;
         final match = RegExp(r'^call-(\d+)-').firstMatch(call.uid);
         if (match != null) logIdIndex[match.group(1)!] = newIdx;
-        if (numKey.isNotEmpty) {
-          timeNumIndex['${call.direction}_${numKey}_${call.time ~/ 120000}'] = newIdx;
+        if (key.isNotEmpty) {
+          numberBucket.putIfAbsent(key, () => []).add(newIdx);
         }
       } else {
         final existing = result[existingIdx];
@@ -1207,32 +1398,85 @@ class TelemetrySyncService extends ChangeNotifier {
       if (a.text != null && b.text != null && a.text!.isNotEmpty && b.text!.isNotEmpty && a.text != b.text) {
         return false;
       }
+      if ((a.time - b.time).abs() <= 60000 &&
+          (a.name == b.name || numbersMatch(a.number, b.number))) {
+        return true;
+      }
+      return false;
     }
-    if ((a.time - b.time).abs() <= 60000 &&
-        (a.name == b.name || numbersMatch(a.number, b.number))) {
-      return true;
+    if (a.kind == 'whatsapp_call') {
+      final isRingingA = a.duration == 0 && a.direction != 'missed';
+      final isRingingB = b.duration == 0 && b.direction != 'missed';
+      if ((a.time - b.time).abs() <= (isRingingA || isRingingB ? 120000 : 5000) &&
+          (numbersMatch(a.number, b.number) ||
+           numbersMatch(a.name, b.number) ||
+           numbersMatch(b.name, a.number))) {
+        return true;
+      }
+      return false;
     }
+    return false;
+  }
+
+  /// Returns true if the string represents an Android group summary or message count (e.g. "5 new messages")
+  static bool isMessageCountSummary(String? str) {
+    if (str == null) return false;
+    final trimmed = str.trim();
+    if (trimmed.isEmpty) return false;
+    final lower = trimmed.toLowerCase();
+    if (RegExp(r'^\(?\d+\s+(new\s+|unread\s+)?messages?[\s\.\,\!\?]*\)?$').hasMatch(lower)) return true;
+    if (RegExp(r'^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$').hasMatch(lower)) return true;
+    if (lower.contains('new message') && RegExp(r'.*\b\d+\s+new\s+messages?\b.*').hasMatch(lower) && lower.length < 35) return true;
+    if (lower.contains('checking for new messages') || lower.contains('looking for new messages')) return true;
+    if (lower.contains('whatsapp web is currently active') || lower.contains('whatsapp web')) return true;
+    if (lower.contains('messages from') && lower.contains('chat')) return true;
+    if (RegExp(r'.*\(\d+\s+messages?\)$').hasMatch(lower)) return true;
     return false;
   }
 
   static List<SalesTrackEvent> dedupWhatsAppList(List<SalesTrackEvent> list) {
     if (list.isEmpty) return [];
     final List<SalesTrackEvent> result = [];
+    final Map<String, List<int>> numberBucket = {};
+
     for (final wa in list) {
+      if (isMessageCountSummary(wa.text) || isMessageCountSummary(wa.name)) continue;
       int existingIdx = -1;
-      for (int i = 0; i < result.length; i++) {
-        if (isSameWhatsApp(result[i], wa)) {
-          existingIdx = i;
-          break;
+
+      final key = extractNumberKey(wa.number).isNotEmpty
+          ? extractNumberKey(wa.number)
+          : wa.name.toLowerCase().trim();
+
+      if (key.isNotEmpty && numberBucket.containsKey(key)) {
+        for (final idx in numberBucket[key]!) {
+          if (isSameWhatsApp(result[idx], wa)) {
+            existingIdx = idx;
+            break;
+          }
+        }
+      } else if (key.isEmpty) {
+        for (int i = 0; i < result.length; i++) {
+          if (isSameWhatsApp(result[i], wa)) {
+            existingIdx = i;
+            break;
+          }
         }
       }
+
       if (existingIdx < 0) {
+        final newIdx = result.length;
         result.add(wa);
+        if (key.isNotEmpty) {
+          numberBucket.putIfAbsent(key, () => []).add(newIdx);
+        }
       } else {
         final existing = result[existingIdx];
         if (wa.syncStatus == 'synced') existing.syncStatus = 'synced';
         if (wa.duration > existing.duration) existing.duration = wa.duration;
         if (existing.name.isEmpty && wa.name.isNotEmpty) existing.name = wa.name;
+        if (existing.number.isEmpty && wa.number.isNotEmpty) existing.number = wa.number;
+        if (existing.direction == 'incoming' && wa.direction == 'outgoing') existing.direction = 'outgoing';
+        if (existing.time > wa.time) existing.time = wa.time;
       }
     }
     result.sort((a, b) => b.time.compareTo(a.time));
@@ -1249,45 +1493,62 @@ class TelemetrySyncService extends ChangeNotifier {
 
         final Map<String, int> uidMap = {};
         final Map<String, int> logIdMap = {};
-        final Map<String, int> timeNumMap = {};
+        final Map<String, List<int>> callNumMap = {};
+        final Map<String, List<int>> waNumMap = {};
 
         for (int i = 0; i < _calls.length; i++) {
           final c = _calls[i];
           if (c.uid.isNotEmpty) uidMap[c.uid] = i;
           final match = RegExp(r'^call-(\d+)-').firstMatch(c.uid);
           if (match != null) logIdMap[match.group(1)!] = i;
-          final numKey = extractNumberKey(c.number);
-          if (numKey.isNotEmpty) {
-            timeNumMap['${c.direction}_${numKey}_${c.time ~/ 120000}'] = i;
-          }
+          final k = extractNumberKey(c.number);
+          if (k.isNotEmpty) callNumMap.putIfAbsent(k, () => []).add(i);
         }
 
-        final Map<String, int> waMap = {};
         for (int i = 0; i < _whatsappEvents.length; i++) {
           final w = _whatsappEvents[i];
-          final numKey = extractNumberKey(w.number);
-          waMap['${w.direction}_${numKey}_${w.time ~/ 120000}'] = i;
+          final k = extractNumberKey(w.number).isNotEmpty ? extractNumberKey(w.number) : w.name.toLowerCase().trim();
+          if (k.isNotEmpty) waNumMap.putIfAbsent(k, () => []).add(i);
         }
 
         for (final item in rawLogs) {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
           
           if (event.kind == 'whatsapp_call') {
-            final numKey = extractNumberKey(event.number);
-            final key = '${event.direction}_${numKey}_${event.time ~/ 120000}';
-            final waIdx = waMap[key] ?? -1;
-            if (waIdx >= 0) {
-              if (_whatsappEvents[waIdx].syncStatus == 'synced') {
-                event.syncStatus = 'synced';
+            int existing = -1;
+            final waKey = extractNumberKey(event.number).isNotEmpty ? extractNumberKey(event.number) : event.name.toLowerCase().trim();
+            if (waKey.isNotEmpty && waNumMap.containsKey(waKey)) {
+              for (final idx in waNumMap[waKey]!) {
+                if (isSameWhatsApp(_whatsappEvents[idx], event)) {
+                  existing = idx;
+                  break;
+                }
               }
-              _whatsappEvents[waIdx] = event;
+            } else if (waKey.isEmpty) {
+              for (int i = 0; i < _whatsappEvents.length; i++) {
+                if (isSameWhatsApp(_whatsappEvents[i], event)) {
+                  existing = i;
+                  break;
+                }
+              }
+            }
+
+            if (existing >= 0) {
+              final old = _whatsappEvents[existing];
+              event.uid = old.uid; // Preserve UID so CRM never creates a duplicate call!
+              if (old.syncStatus == 'synced') event.syncStatus = 'synced';
+              if (old.duration > event.duration) event.duration = old.duration;
+              if (old.direction == 'outgoing' && event.direction == 'incoming') event.direction = 'outgoing';
+              if (old.time < event.time) event.time = old.time;
+              _whatsappEvents[existing] = event;
               if (event.syncStatus != 'synced') {
                 _enqueueEvent(event);
               }
             } else {
               _whatsappEvents.add(event);
               _enqueueEvent(event);
-              waMap[key] = _whatsappEvents.length - 1;
+              newCount++;
+              if (waKey.isNotEmpty) waNumMap.putIfAbsent(waKey, () => []).add(_whatsappEvents.length - 1);
             }
           } else {
             int existing = -1;
@@ -1298,10 +1559,21 @@ class TelemetrySyncService extends ChangeNotifier {
               if (match != null && logIdMap.containsKey(match.group(1)!)) {
                 existing = logIdMap[match.group(1)!]!;
               } else {
-                final numKey = extractNumberKey(event.number);
-                final key = '${event.direction}_${numKey}_${event.time ~/ 120000}';
-                if (timeNumMap.containsKey(key)) {
-                  existing = timeNumMap[key]!;
+                final k = extractNumberKey(event.number);
+                if (k.isNotEmpty && callNumMap.containsKey(k)) {
+                  for (final idx in callNumMap[k]!) {
+                    if (isSameCall(_calls[idx], event)) {
+                      existing = idx;
+                      break;
+                    }
+                  }
+                } else if (k.isEmpty) {
+                  for (int i = 0; i < _calls.length; i++) {
+                    if (isSameCall(_calls[i], event)) {
+                      existing = i;
+                      break;
+                    }
+                  }
                 }
               }
             }
@@ -1432,19 +1704,40 @@ class TelemetrySyncService extends ChangeNotifier {
         int newCount = 0;
         for (final item in rawList) {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
+          if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) continue;
+          event.number = normalizeNumber(event.number);
+          final isFinalized = event.kind != 'whatsapp_call' || event.direction == 'missed' || event.duration > 0;
+          if (!isFinalized) {
+            event.syncStatus = 'in_progress';
+          }
           final existing = _whatsappEvents.indexWhere((w) => isSameWhatsApp(w, event));
           if (existing >= 0) {
-            if (_whatsappEvents[existing].syncStatus == 'synced') {
+            final old = _whatsappEvents[existing];
+            event.uid = old.uid; // Preserve original UID so CRM never creates a duplicate call!
+            if (old.syncStatus == 'synced') {
               event.syncStatus = 'synced';
             }
+            if (old.duration > event.duration) {
+              event.duration = old.duration;
+            }
+            if (old.direction == 'outgoing' && event.direction == 'incoming') {
+              event.direction = 'outgoing';
+            }
+            if (old.time < event.time) {
+              event.time = old.time;
+            }
             _whatsappEvents[existing] = event;
-            if (event.syncStatus != 'synced') {
+            final isFinalized = event.kind != 'whatsapp_call' || event.direction == 'missed' || event.duration > 0;
+            if (event.syncStatus != 'synced' && isFinalized) {
               _enqueueEvent(event);
             }
           } else {
             _whatsappEvents.add(event);
-            _enqueueEvent(event);
-            newCount++;
+            final isFinalized = event.kind != 'whatsapp_call' || event.direction == 'missed' || event.duration > 0;
+            if (isFinalized) {
+              _enqueueEvent(event);
+              newCount++;
+            }
           }
         }
         if (newCount > 0 || _whatsappEvents.isNotEmpty) {
@@ -1610,6 +1903,9 @@ class TelemetrySyncService extends ChangeNotifier {
     if (_config.isNumberExcluded(event.number)) return;
     if (_config.trackSim > 0 && event.sim > 0 && event.sim != _config.trackSim) return;
 
+    // Filter out group summary notifications (e.g. "5 new messages")
+    if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) return;
+
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
     if (event.kind == 'whatsapp_message') {
@@ -1629,12 +1925,17 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> syncNow({String? targetKind, bool uploadRecordings = true, bool alreadyMarkedSyncing = false}) async {
     if (!_isPaired) return;
-    if (_isSyncing && !alreadyMarkedSyncing) {
+    final isWhatsAppOnly = targetKind != null && targetKind.startsWith('whatsapp');
+    if (isWhatsAppOnly) {
+      uploadRecordings = false;
+    }
+
+    if (_isSyncing && !alreadyMarkedSyncing && !isWhatsAppOnly) {
       _syncPendingAgain = true;
       return;
     }
 
-    if (!alreadyMarkedSyncing) {
+    if (!alreadyMarkedSyncing && !isWhatsAppOnly) {
       _isSyncing = true;
       _syncProgress = 0.05;
     }
@@ -1665,7 +1966,22 @@ class TelemetrySyncService extends ChangeNotifier {
           limit: batchSize,
         );
 
-        if (batch.isEmpty) break;
+        if (batch.isEmpty) {
+          keepSyncing = false;
+          break;
+        }
+
+        // Filter out summary/count messages before upload and purge them from DB
+        final summaryEvents = batch.where((ev) => isMessageCountSummary(ev.text) || isMessageCountSummary(ev.name)).toList();
+        if (summaryEvents.isNotEmpty) {
+          final summaryUids = summaryEvents.map((e) => e.uid).toList();
+          await LocalDatabaseService.instance.markEventsSynced(summaryUids);
+          _pendingQueue.removeWhere((e) => summaryUids.contains(e.uid));
+          _pendingUids.removeWhere((u) => summaryUids.contains(u));
+          batch.removeWhere((ev) => summaryUids.contains(ev.uid));
+        }
+
+        if (batch.isEmpty) continue;
 
         _syncProgressMessage = 'Uploading ${batch.length} ${targetKind ?? "telemetry"} events to CRM...';
         notifyListeners();
@@ -1729,13 +2045,27 @@ class TelemetrySyncService extends ChangeNotifier {
 
       // Upload audio recordings if enabled
       if (uploadRecordings && _config.trackingRecordings) {
-        bool recsSuccess = true;
-        while (recsSuccess) {
-          final recsToUpload = await LocalDatabaseService.instance.getPendingRecordings(limit: 10);
+        while (true) {
+          final recsToUpload = await LocalDatabaseService.instance.getPendingRecordings(limit: 10, includeFailed: true);
           if (recsToUpload.isEmpty) break;
+          int batchProcessed = 0;
           for (int i = 0; i < recsToUpload.length; i++) {
             final rec = recsToUpload[i];
             if (rec.recordingPath != null && rec.recordingPath!.isNotEmpty) {
+              final file = File(rec.recordingPath!);
+              if (!await file.exists()) {
+                // Audio file was cleaned up from storage: clear pending status
+                await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+                for (final call in _calls) {
+                  if (call.uid == rec.uid) {
+                    call.recordingSyncStatus = 'none';
+                    call.recording = false;
+                  }
+                }
+                batchProcessed++;
+                continue;
+              }
+
               _syncProgressMessage = 'Uploading audio recording (${rec.name.isNotEmpty ? rec.name : rec.number})...';
               _syncProgress = 0.85;
               notifyListeners();
@@ -1748,11 +2078,21 @@ class TelemetrySyncService extends ChangeNotifier {
 
               if (upRes.success || upRes.data?['already'] == true) {
                 await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+                for (final call in _calls) {
+                  if (call.uid == rec.uid) call.recordingSyncStatus = 'synced';
+                }
+                batchProcessed++;
               } else {
                 await LocalDatabaseService.instance.markRecordingFailed(rec.uid);
-                recsSuccess = false;
+                for (final call in _calls) {
+                  if (call.uid == rec.uid) call.recordingSyncStatus = 'failed';
+                }
               }
             }
+          }
+          if (batchProcessed == 0) {
+            // All remaining in this batch failed, break out so sync does not hang
+            break;
           }
         }
       }
@@ -1872,6 +2212,9 @@ class TelemetrySyncService extends ChangeNotifier {
           }
           if (upRes.success || upRes.data?['already'] == true) {
             await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+            for (final call in _calls) {
+              if (call.uid == rec.uid) call.recordingSyncStatus = 'synced';
+            }
           } else {
             await LocalDatabaseService.instance.markRecordingFailed(rec.uid);
           }
@@ -1934,7 +2277,64 @@ class TelemetrySyncService extends ChangeNotifier {
     await _persistQueue();
     await refreshPendingCounts();
 
+    if (kind == null || kind == 'call') {
+      await syncAllCallHistoryToServer(force: true);
+    }
+
     await syncNow(targetKind: kind, uploadRecordings: true);
+  }
+
+  /// Automatically pushes complete call history to the CRM server.
+  /// Deduplicates on server so previously stored calls return 'duplicate' safely,
+  /// guaranteeing that missing historical calls are fully populated on the CRM server.
+  Future<void> syncAllCallHistoryToServer({bool force = false}) async {
+    if (!_isPaired || _device == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final syncKey = 'mks_full_history_synced_${_device!.id}';
+    final alreadyDone = prefs.getBool(syncKey) ?? false;
+    if (alreadyDone && !force) {
+      return;
+    }
+
+    try {
+      _statusMessage = 'Syncing complete call history with CRM server...';
+      notifyListeners();
+
+      final allCalls = await LocalDatabaseService.instance.getEvents(kind: 'call', limit: 10000);
+      final callsToUpload = allCalls.isNotEmpty ? allCalls : _calls;
+
+      if (callsToUpload.isEmpty) {
+        await prefs.setBool(syncKey, true);
+        return;
+      }
+
+      const batchSize = 50;
+      for (int i = 0; i < callsToUpload.length; i += batchSize) {
+        final end = (i + batchSize < callsToUpload.length) ? i + batchSize : callsToUpload.length;
+        final batch = callsToUpload.sublist(i, end);
+
+        final res = await api.syncEvents(batch, health: _buildHealthPayload());
+        if (res.success && res.data != null) {
+          final stored = List<String>.from(res.data!['stored'] ?? []);
+          final duplicate = List<String>.from(res.data!['duplicate'] ?? []);
+          final skipped = (res.data!['skipped'] as List? ?? []).map((s) => s['uid']?.toString()).whereType<String>().toList();
+          final finished = {...stored, ...duplicate, ...skipped}.toList();
+          if (finished.isNotEmpty) {
+            await LocalDatabaseService.instance.markEventsSynced(finished);
+            for (final c in _calls) {
+              if (finished.contains(c.uid)) c.syncStatus = 'synced';
+            }
+          }
+        }
+      }
+
+      await prefs.setBool(syncKey, true);
+      await refreshPendingCounts();
+      _statusMessage = 'All call history synchronized with CRM';
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error syncing all call history: $e');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2169,6 +2569,26 @@ class TelemetrySyncService extends ChangeNotifier {
     // Save to local SQLite database so caller lookup and offline history are immediately updated
     await LocalDatabaseService.instance.saveOutcome(submission);
 
+    // Guarantee the base call is synced to server
+    SalesTrackEvent? callEvent;
+    for (final c in _calls) {
+      if (c.uid == uid) {
+        callEvent = c;
+        break;
+      }
+    }
+    if (callEvent == null) {
+      for (final w in _whatsappEvents) {
+        if (w.uid == uid) {
+          callEvent = w;
+          break;
+        }
+      }
+    }
+    if (callEvent != null) {
+      ensureCallSyncedToServer(callEvent);
+    }
+
     _activeAfterCallEvent = null;
     notifyListeners();
 
@@ -2390,20 +2810,20 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> _loadPersistedHistory() async {
     // 1. Try loading from SQLite first (Offline-First source of truth)
     try {
-      final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call');
-      final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp');
-      final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms');
+      final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call', limit: 3000);
+      final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp', limit: 1000);
+      final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms', limit: 1500);
 
       if (dbCalls.isNotEmpty || dbWa.isNotEmpty || dbSms.isNotEmpty) {
         _calls.clear();
-        _calls.addAll(dedupCallsList(dbCalls));
+        _calls.addAll(dbCalls);
         _whatsappEvents.clear();
-        _whatsappEvents.addAll(dedupWhatsAppList(dbWa));
+        _whatsappEvents.addAll(dbWa);
         _smsList.clear();
-        _smsList.addAll(dedupSmsList(dbSms));
-        await LocalDatabaseService.instance.cleanupDuplicates();
+        _smsList.addAll(dbSms);
 
-        final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 10000);
+        final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 5000);
+        pendingFromDb.removeWhere((e) => isMessageCountSummary(e.text) || isMessageCountSummary(e.name));
         _pendingQueue.clear();
         _pendingQueue.addAll(pendingFromDb);
         _pendingUids.clear();
