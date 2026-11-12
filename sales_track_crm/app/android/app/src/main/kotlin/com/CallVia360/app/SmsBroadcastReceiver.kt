@@ -81,7 +81,6 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             "source" to "auto"
         )
 
-        TelemetryBridgeChannel.sendTelemetryEvent(event)
         NativeSyncManager.sendOrQueueEvent(context, event)
     }
 }

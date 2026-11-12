@@ -35,19 +35,12 @@ class _PairingScreenState extends State<PairingScreen> {
   @override
   void initState() {
     super.initState();
-    final currentUrl = widget.syncService.api.serverUrl;
-    final initialUrl = currentUrl.isNotEmpty
-        ? SalesTrackApiService.normalizeServerUrl(currentUrl)
-        : SalesTrackApiService.defaultServerUrl;
-
-    _urlController = TextEditingController(text: initialUrl.isNotEmpty ? initialUrl : SalesTrackApiService.defaultServerUrl);
+    _urlController = TextEditingController(text: 'https://');
     _urlController.selection = TextSelection.fromPosition(
-      TextPosition(offset: _urlController.text.length),
+      const TextPosition(offset: 8),
     );
 
-    if (_codeController.text.isEmpty) {
-      _codeController.text = '289018';
-    }
+    _codeController.text = '';
 
     // Automatically test connection to CRM server
     if (_urlController.text.isNotEmpty && _urlController.text != 'https://' && _urlController.text != 'http://') {

@@ -2741,12 +2741,16 @@ function mks_st_cleanup_duplicate_events()
                    e1.contact_name as name1, e2.contact_name as name2,
                    e1.uid as uid1, e2.uid as uid2
             FROM {$table} e1
-            INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
+            INNER JOIN {$table} e2 ON (e1.staff_id = e2.staff_id OR (e1.device_id IS NOT NULL AND e1.device_id > 0 AND e1.device_id = e2.device_id))
                 AND e1.kind = e2.kind 
                 AND (
                     (e1.number_key IS NOT NULL AND e1.number_key != '' AND e1.number_key = e2.number_key)
                     OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
                     OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
+                    OR (
+                        REPLACE(REPLACE(REPLACE(COALESCE(e1.number, ''), ' ', ''), '-', ''), '+', '') != ''
+                        AND REPLACE(REPLACE(REPLACE(COALESCE(e1.number, ''), ' ', ''), '-', ''), '+', '') = REPLACE(REPLACE(REPLACE(COALESCE(e2.number, ''), ' ', ''), '-', ''), '+', '')
+                    )
                 )
                 AND e1.id < e2.id
                 AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 120
@@ -2793,7 +2797,7 @@ function mks_st_cleanup_duplicate_events()
                e1.contact_name as name1, e2.contact_name as name2,
                e1.uid as uid1, e2.uid as uid2
             FROM {$table} e1
-            INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
+            INNER JOIN {$table} e2 ON (e1.staff_id = e2.staff_id OR (e1.device_id IS NOT NULL AND e1.device_id > 0 AND e1.device_id = e2.device_id))
                 AND (
                     e1.kind = e2.kind 
                     OR (e1.kind IN ('sms', 'notification') AND e2.kind IN ('sms', 'notification'))
@@ -2803,11 +2807,11 @@ function mks_st_cleanup_duplicate_events()
                     OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
                     OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
                     OR (
+                        REPLACE(REPLACE(REPLACE(COALESCE(e1.number, ''), ' ', ''), '-', ''), '+', '') != ''
+                        AND REPLACE(REPLACE(REPLACE(COALESCE(e1.number, ''), ' ', ''), '-', ''), '+', '') = REPLACE(REPLACE(REPLACE(COALESCE(e2.number, ''), ' ', ''), '-', ''), '+', '')
+                    )
+                    OR (
                         e1.body IS NOT NULL AND e1.body != '' AND e1.body = e2.body
-                        AND (
-                            (e1.number IS NOT NULL AND e2.number IS NOT NULL AND (e1.number LIKE CONCAT('%', e2.number, '%') OR e2.number LIKE CONCAT('%', e1.number, '%')))
-                            OR (e1.number_raw IS NOT NULL AND e2.number_raw IS NOT NULL AND (e1.number_raw LIKE CONCAT('%', e2.number_raw, '%') OR e2.number_raw LIKE CONCAT('%', e1.number_raw, '%')))
-                        )
                     )
                 )
                 AND e1.id < e2.id
@@ -2824,6 +2828,13 @@ function mks_st_cleanup_duplicate_events()
                 $b2 = trim((string) $d['body2']);
                 if ($b1 !== '' && $b2 !== '' && $b1 !== $b2) {
                     continue; // Distinct messages
+                }
+
+                $d1 = preg_replace('/\D/', '', (string) ($d['num1'] ?: $d['raw1']));
+                $d2 = preg_replace('/\D/', '', (string) ($d['num2'] ?: $d['raw2']));
+                if ($d1 !== '' && $d2 !== '' && $d1 !== $d2 && strpos($d1, $d2) === false && strpos($d2, $d1) === false) {
+                    // Distinct phone numbers
+                    continue;
                 }
 
                 // Delete duplicate record first to release any constraints
