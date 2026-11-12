@@ -529,103 +529,37 @@ class _HomeScreenState extends State<HomeScreen>
             : AppBar(
                 backgroundColor: colors.cardBackground,
                 elevation: 0,
-                titleSpacing: 14,
                 title: Row(
                   children: [
                     Container(
-                      width: 40,
-                      height: 40,
+                      width: 10,
+                      height: 10,
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            (service.isPaired ? colors.primary : colors.warning).withOpacity(0.2),
-                            (service.isPaired ? colors.primary : colors.warning).withOpacity(0.08),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: (service.isPaired ? colors.primary : colors.warning).withOpacity(0.4),
-                          width: 1.2,
-                        ),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Icon(
-                            Icons.phone_in_talk_rounded,
-                            color: service.isPaired ? colors.primary : colors.warning,
-                            size: 20,
-                          ),
-                          Positioned(
-                            right: 3,
-                            top: 3,
-                            child: Container(
-                              width: 8,
-                              height: 8,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: service.isPaired ? colors.primary : colors.warning,
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: (service.isPaired ? colors.primary : colors.warning)
-                                        .withOpacity(0.6),
-                                    blurRadius: 4,
-                                  ),
-                                ],
-                              ),
-                            ),
+                        shape: BoxShape.circle,
+                        color: service.isPaired ? colors.primary : colors.warning,
+                        boxShadow: [
+                          BoxShadow(
+                            color: (service.isPaired ? colors.primary : colors.warning)
+                                .withOpacity(0.55),
+                            blurRadius: 6,
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  device?.name ?? 'Sales Phone',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: -0.3,
-                                    color: colors.textPrimary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                                decoration: BoxDecoration(
-                                  color: (service.isPaired ? colors.primary : colors.warning)
-                                      .withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(
-                                    color: (service.isPaired ? colors.primary : colors.warning)
-                                        .withOpacity(0.3),
-                                    width: 0.8,
-                                  ),
-                                ),
-                                child: Text(
-                                  service.isPaired ? 'ACTIVE' : 'UNPAIRED',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.5,
-                                    color: service.isPaired ? colors.primary : colors.warning,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          Text(
+                            device?.name ?? 'Sales Phone',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(height: 1),
                           Text(
                             staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
                             style: TextStyle(
@@ -641,50 +575,6 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
                 actions: [
-                  // CRM Portal Quick Action Button
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () {
-                          if (service.isPlayingAudio) {
-                            service.stopRecording();
-                          }
-                          setState(() => _selectedBottomNavIndex = 1);
-                        },
-                        borderRadius: BorderRadius.circular(10),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: colors.primary.withOpacity(0.12),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: colors.primary.withOpacity(0.3), width: 0.8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.business_center_rounded,
-                                color: colors.primary,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 5),
-                              Text(
-                                'CRM',
-                                style: TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: colors.primary,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
                   // Theme Toggle Action Button
                   IconButton(
                     icon: Container(
@@ -913,103 +803,50 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
         ],
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(54),
-          child: Container(
-            margin: const EdgeInsets.fromLTRB(14, 4, 14, 8),
-            padding: const EdgeInsets.all(3.5),
-            decoration: BoxDecoration(
-              color: colors.surfaceColor,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: colors.border.withOpacity(0.7)),
-            ),
-            child: TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              indicatorSize: TabBarIndicatorSize.tab,
-              indicator: BoxDecoration(
-                color: colors.primary,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: colors.primary.withOpacity(0.35),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+        bottom: TabBar(
+          controller: _tabController,
+          isScrollable: true,
+          indicatorColor: colors.primary,
+          indicatorWeight: 3,
+          labelColor: colors.primary,
+          unselectedLabelColor: colors.textSecondary,
+          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
+          tabs: [
+            Tab(text: 'Calls ($totalCalls)'),
+            Tab(text: 'WhatsApp (${service.whatsappEvents.length})'),
+            Tab(text: 'SMS ($smsCount)'),
+            Tab(text: 'Recordings (${service.localRecordings.length})'),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Pending Sync'),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
+                          ? colors.warning
+                          : colors.surfaceColor,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${service.pendingQueueCount + service.pendingRecordingsCount}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
+                            ? Colors.black
+                            : colors.textMuted,
+                      ),
+                    ),
                   ),
                 ],
               ),
-              labelColor: Colors.white,
-              unselectedLabelColor: colors.textSecondary,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
-              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12.5),
-              dividerColor: Colors.transparent,
-              padding: EdgeInsets.zero,
-              tabs: [
-                Tab(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('Calls ($totalCalls)'),
-                  ),
-                ),
-                Tab(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('WhatsApp (${service.whatsappEvents.length})'),
-                  ),
-                ),
-                Tab(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('SMS ($smsCount)'),
-                  ),
-                ),
-                Tab(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('Recordings (${service.localRecordings.length})'),
-                  ),
-                ),
-                Tab(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Text('Queue'),
-                        const SizedBox(width: 6),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                                ? colors.warning
-                                : colors.surfaceColor.withOpacity(0.6),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Text(
-                            '${service.pendingQueueCount + service.pendingRecordingsCount}',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                                  ? Colors.black
-                                  : colors.textMuted,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Tab(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    child: Text('Call Lists (${service.callLists.length})'),
-                  ),
-                ),
-              ],
             ),
-          ),
+            Tab(text: 'Call Lists (${service.callLists.length})'),
+          ],
         ),
       ),
       body: _selectedBottomNavIndex == 1
