@@ -529,37 +529,103 @@ class _HomeScreenState extends State<HomeScreen>
             : AppBar(
                 backgroundColor: colors.cardBackground,
                 elevation: 0,
+                titleSpacing: 14,
                 title: Row(
                   children: [
                     Container(
-                      width: 10,
-                      height: 10,
+                      width: 40,
+                      height: 40,
                       decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: service.isPaired ? colors.primary : colors.warning,
-                        boxShadow: [
-                          BoxShadow(
-                            color: (service.isPaired ? colors.primary : colors.warning)
-                                .withOpacity(0.55),
-                            blurRadius: 6,
+                        gradient: LinearGradient(
+                          colors: [
+                            (service.isPaired ? colors.primary : colors.warning).withOpacity(0.2),
+                            (service.isPaired ? colors.primary : colors.warning).withOpacity(0.08),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: (service.isPaired ? colors.primary : colors.warning).withOpacity(0.4),
+                          width: 1.2,
+                        ),
+                      ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Icon(
+                            Icons.phone_in_talk_rounded,
+                            color: service.isPaired ? colors.primary : colors.warning,
+                            size: 20,
+                          ),
+                          Positioned(
+                            right: 3,
+                            top: 3,
+                            child: Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: service.isPaired ? colors.primary : colors.warning,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (service.isPaired ? colors.primary : colors.warning)
+                                        .withOpacity(0.6),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            device?.name ?? 'Sales Phone',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              color: colors.textPrimary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  device?.name ?? 'Sales Phone',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.3,
+                                    color: colors.textPrimary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                decoration: BoxDecoration(
+                                  color: (service.isPaired ? colors.primary : colors.warning)
+                                      .withOpacity(0.12),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: (service.isPaired ? colors.primary : colors.warning)
+                                        .withOpacity(0.3),
+                                    width: 0.8,
+                                  ),
+                                ),
+                                child: Text(
+                                  service.isPaired ? 'ACTIVE' : 'UNPAIRED',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.5,
+                                    color: service.isPaired ? colors.primary : colors.warning,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
+                          const SizedBox(height: 1),
                           Text(
                             staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
                             style: TextStyle(
@@ -576,60 +642,115 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 actions: [
                   // CRM Portal Quick Action Button
-                  IconButton(
-                    icon: Icon(
-                      Icons.business_center_rounded,
-                      color: colors.primary,
-                      size: 21,
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () {
+                          if (service.isPlayingAudio) {
+                            service.stopRecording();
+                          }
+                          setState(() => _selectedBottomNavIndex = 1);
+                        },
+                        borderRadius: BorderRadius.circular(10),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: colors.primary.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: colors.primary.withOpacity(0.3), width: 0.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.business_center_rounded,
+                                color: colors.primary,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                'CRM',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: colors.primary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    tooltip: 'Open CRM Portal',
-                    onPressed: () {
-                      if (service.isPlayingAudio) {
-                        service.stopRecording();
-                      }
-                      setState(() => _selectedBottomNavIndex = 1);
-                    },
                   ),
 
                   // Theme Toggle Action Button
                   IconButton(
-                    icon: Icon(
-                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                      color: colors.textPrimary,
-                      size: 20,
+                    icon: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                        border: Border.all(color: colors.border.withOpacity(0.6)),
+                      ),
+                      child: Icon(
+                        isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                        color: colors.textPrimary,
+                        size: 17,
+                      ),
                     ),
                     tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
                     onPressed: () => themeProvider.toggleTheme(context),
                   ),
 
                   // Real-time Sync Action Button
-          IconButton(
-            icon: service.isSyncing
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                  IconButton(
+                    icon: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                        border: Border.all(color: colors.border.withOpacity(0.6)),
+                      ),
+                      child: service.isSyncing
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                              ),
+                            )
+                          : Icon(
+                              Icons.sync_rounded,
+                              color: colors.textPrimary,
+                              size: 19,
+                            ),
                     ),
-                  )
-                : Icon(
-                    Icons.sync_rounded,
-                    color: colors.textPrimary,
-                    size: 22,
+                    tooltip: service.isSyncing ? 'Syncing with CRM...' : 'Sync Phone & Server',
+                    onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
                   ),
-            tooltip: service.isSyncing ? 'Syncing with CRM...' : 'Sync Phone & Server',
-            onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
-          ),
 
-          // Popup Menu
-          PopupMenuButton<String>(
-            color: colors.cardBackground,
-            icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: colors.border),
-            ),
+                  // Popup Menu
+                  PopupMenuButton<String>(
+                    color: colors.cardBackground,
+                    icon: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                        border: Border.all(color: colors.border.withOpacity(0.6)),
+                      ),
+                      child: Icon(Icons.more_vert_rounded, color: colors.textPrimary, size: 18),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: colors.border),
+                    ),
             onSelected: (val) {
               if (val == 'theme_mode') {
                 _showThemeSelectionDialog(context);
@@ -792,50 +913,103 @@ class _HomeScreenState extends State<HomeScreen>
             ],
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          indicatorColor: colors.primary,
-          indicatorWeight: 3,
-          labelColor: colors.primary,
-          unselectedLabelColor: colors.textSecondary,
-          labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-          unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-          tabs: [
-            Tab(text: 'Calls ($totalCalls)'),
-            Tab(text: 'WhatsApp (${service.whatsappEvents.length})'),
-            Tab(text: 'SMS ($smsCount)'),
-            Tab(text: 'Recordings (${service.localRecordings.length})'),
-            Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Pending Sync'),
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                          ? colors.warning
-                          : colors.surfaceColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${service.pendingQueueCount + service.pendingRecordingsCount}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                            ? Colors.black
-                            : colors.textMuted,
-                      ),
-                    ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(54),
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(14, 4, 14, 8),
+            padding: const EdgeInsets.all(3.5),
+            decoration: BoxDecoration(
+              color: colors.surfaceColor,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: colors.border.withOpacity(0.7)),
+            ),
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: colors.primary,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.primary.withOpacity(0.35),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
+              labelColor: Colors.white,
+              unselectedLabelColor: colors.textSecondary,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12.5),
+              dividerColor: Colors.transparent,
+              padding: EdgeInsets.zero,
+              tabs: [
+                Tab(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('Calls ($totalCalls)'),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('WhatsApp (${service.whatsappEvents.length})'),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('SMS ($smsCount)'),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('Recordings (${service.localRecordings.length})'),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Queue'),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
+                                ? colors.warning
+                                : colors.surfaceColor.withOpacity(0.6),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '${service.pendingQueueCount + service.pendingRecordingsCount}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
+                                  ? Colors.black
+                                  : colors.textMuted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Tab(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Text('Call Lists (${service.callLists.length})'),
+                  ),
+                ),
+              ],
             ),
-            Tab(text: 'Call Lists (${service.callLists.length})'),
-          ],
+          ),
         ),
       ),
       body: _selectedBottomNavIndex == 1
@@ -889,44 +1063,46 @@ class _HomeScreenState extends State<HomeScreen>
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: colors.cardBackground,
-          border: Border(
-            top: BorderSide(color: colors.border.withOpacity(0.6), width: 1),
-          ),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border.all(color: colors.border.withOpacity(0.6), width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
+              color: Colors.black.withOpacity(context.isDarkMode ? 0.3 : 0.06),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
             ),
           ],
         ),
-        child: SafeArea(
-          top: false,
-          bottom: true,
-          child: NavigationBar(
-            height: 64,
-            elevation: 0,
-            backgroundColor: Colors.transparent,
-            indicatorColor: colors.primary.withOpacity(0.15),
-            selectedIndex: _selectedBottomNavIndex,
-            onDestinationSelected: (index) {
-              if (widget.syncService.isPlayingAudio) {
-                widget.syncService.stopRecording();
-              }
-              setState(() => _selectedBottomNavIndex = index);
-            },
-            destinations: [
-              NavigationDestination(
-                icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
-                selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
-                label: 'Sales Tracker',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
-                selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
-                label: 'CRM Portal',
-              ),
-            ],
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          child: SafeArea(
+            top: false,
+            bottom: true,
+            child: NavigationBar(
+              height: 64,
+              elevation: 0,
+              backgroundColor: Colors.transparent,
+              indicatorColor: colors.primary.withOpacity(0.16),
+              selectedIndex: _selectedBottomNavIndex,
+              onDestinationSelected: (index) {
+                if (widget.syncService.isPlayingAudio) {
+                  widget.syncService.stopRecording();
+                }
+                setState(() => _selectedBottomNavIndex = index);
+              },
+              destinations: [
+                NavigationDestination(
+                  icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
+                  selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
+                  label: 'Sales Tracker',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
+                  selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
+                  label: 'CRM Portal',
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1099,10 +1275,19 @@ class _HomeScreenState extends State<HomeScreen>
     final colors = context.stColors;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colors.cardBackground,
-        border: Border(bottom: BorderSide(color: colors.border)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border.withOpacity(0.8), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(context.isDarkMode ? 0.2 : 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -1145,19 +1330,43 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(Icons.info_outline_rounded, size: 14, color: colors.textMuted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  statusMsg,
-                  style: TextStyle(fontSize: 12, color: colors.textSecondary),
-                  overflow: TextOverflow.ellipsis,
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: colors.surfaceColor.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colors.primary,
+                    boxShadow: [
+                      BoxShadow(
+                        color: colors.primary.withOpacity(0.55),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    statusMsg,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: colors.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1179,35 +1388,40 @@ class _HomeScreenState extends State<HomeScreen>
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            margin: const EdgeInsets.symmetric(horizontal: 2.5),
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 3),
+            margin: const EdgeInsets.symmetric(horizontal: 2),
             decoration: BoxDecoration(
-              color: colors.surfaceColor,
-              borderRadius: BorderRadius.circular(12),
+              color: colors.surfaceColor.withOpacity(0.65),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: isDark ? colors.surfaceLight.withOpacity(0.3) : colors.border,
+                color: isDark ? colors.surfaceLight.withOpacity(0.3) : colors.border.withOpacity(0.7),
                 width: 0.8,
               ),
             ),
             child: Column(
               children: [
                 Container(
-                  padding: const EdgeInsets.all(5),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    gradient: LinearGradient(
+                      colors: [color.withOpacity(0.2), color.withOpacity(0.08)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(9),
                   ),
                   child: Icon(icon, size: 15, color: color),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 6),
                 Text(
                   value,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
                     color: color,
+                    letterSpacing: -0.2,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -1215,7 +1429,7 @@ class _HomeScreenState extends State<HomeScreen>
                   label,
                   style: TextStyle(
                     fontSize: 10,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                     color: colors.textMuted,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -1314,73 +1528,93 @@ class _HomeScreenState extends State<HomeScreen>
       children: [
         // Calls Sync Actions Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
           child: Row(
             children: [
               ElevatedButton.icon(
                 onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
                 icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: colors.primary,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  elevation: 1.5,
+                  shadowColor: colors.primary.withOpacity(0.4),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'call'),
                 icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12)),
+                label: const Text('Resync All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  side: BorderSide(color: colors.border.withOpacity(0.8)),
+                  backgroundColor: colors.cardBackground,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
               const Spacer(),
               if (service.pendingCallsCount > 0)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.warning.withOpacity(0.35)),
+                    color: colors.warning.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: colors.warning.withOpacity(0.4), width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
-                      const SizedBox(width: 4),
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: colors.warning,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
                       Text(
                         '${service.pendingCallsCount} Pending',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          color: colors.warning,
+                        ),
                       ),
                     ],
                   ),
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.success.withOpacity(0.35)),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: colors.success.withOpacity(0.35), width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                      const SizedBox(width: 4),
+                      Icon(Icons.check_circle_rounded, size: 13, color: colors.success),
+                      const SizedBox(width: 5),
                       Text(
                         'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          color: colors.success,
+                        ),
                       ),
                     ],
                   ),
@@ -1393,16 +1627,23 @@ class _HomeScreenState extends State<HomeScreen>
         Container(
           padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
           child: Container(
-            height: 42,
+            height: 44,
             decoration: BoxDecoration(
-              color: colors.surfaceColor,
-              borderRadius: BorderRadius.circular(21),
-              border: Border.all(color: colors.border),
+              color: colors.cardBackground,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: colors.border.withOpacity(0.85), width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               children: [
-                Icon(Icons.search_rounded, size: 20, color: colors.textMuted),
+                Icon(Icons.search_rounded, size: 20, color: colors.primary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -1440,7 +1681,14 @@ class _HomeScreenState extends State<HomeScreen>
                         _expandedCallUid = null;
                       });
                     },
-                    child: Icon(Icons.close_rounded, size: 18, color: colors.textMuted),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                      ),
+                      child: Icon(Icons.close_rounded, size: 16, color: colors.textMuted),
+                    ),
                   ),
               ],
             ),
@@ -1636,9 +1884,11 @@ class _HomeScreenState extends State<HomeScreen>
       checkmarkColor: colors.primary,
       backgroundColor: colors.surfaceColor,
       side: BorderSide(
-        color: isSelected ? colors.primary : colors.border,
+        color: isSelected ? colors.primary : colors.border.withOpacity(0.7),
+        width: isSelected ? 1.2 : 0.8,
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       labelStyle: TextStyle(
         fontSize: 11.5,
         fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
@@ -1917,16 +2167,16 @@ class _HomeScreenState extends State<HomeScreen>
 
     Widget badge(String text, IconData glyph, Color color) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
         decoration: BoxDecoration(
           color: color.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.4), width: 0.9),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.35), width: 0.8),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(glyph, size: 11, color: color),
+            Icon(glyph, size: 10.5, color: color),
             const SizedBox(width: 4),
             Text(
               text,
@@ -1943,7 +2193,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1952,12 +2202,19 @@ class _HomeScreenState extends State<HomeScreen>
             height: 44,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
-              color: iconColor.withOpacity(0.12),
-              border: Border.all(color: iconColor.withOpacity(0.3)),
+              gradient: LinearGradient(
+                colors: [
+                  iconColor.withOpacity(0.18),
+                  iconColor.withOpacity(0.06),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              border: Border.all(color: iconColor.withOpacity(0.35), width: 1.2),
             ),
-            child: Icon(icon, color: iconColor, size: 22),
+            child: Icon(icon, color: iconColor, size: 21),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1972,23 +2229,24 @@ class _HomeScreenState extends State<HomeScreen>
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
                           color: colors.textPrimary,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: colors.surfaceColor,
-                        borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: colors.border),
+                        borderRadius: BorderRadius.circular(7),
+                        border: Border.all(color: colors.border.withOpacity(0.8), width: 0.8),
                       ),
                       child: Text(
                         'SIM $sim',
                         style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
                           color: colors.textSecondary,
                         ),
                       ),
@@ -1996,26 +2254,26 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
                 if (number.isNotEmpty) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2.5),
                   Text(
                     number,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: colors.textSecondary),
                   ),
                 ],
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 Row(
                   children: [
-                    Icon(Icons.access_time_rounded, size: 13, color: colors.textSecondary),
-                    const SizedBox(width: 5),
+                    Icon(Icons.access_time_rounded, size: 12.5, color: colors.textMuted),
+                    const SizedBox(width: 4.5),
                     Flexible(
                       child: Text(
                         'Call at ${_formatDialerTime(call.time as int)}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w500,
                           color: colors.textSecondary,
                         ),
@@ -2023,22 +2281,22 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 2.5),
                 Text.rich(
                   TextSpan(
                     children: [
                       TextSpan(
                         text: direction,
                         style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
                           color: iconColor,
                         ),
                       ),
                       TextSpan(
                         text:
                             ' \u2022 ${seconds > 0 ? _talkTime(seconds) : (call.direction == 'outgoing' ? 'Not connected' : '0 secs')}',
-                        style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: colors.textSecondary),
                       ),
                     ],
                   ),
@@ -2060,17 +2318,22 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               if (hasRec) ...[
                 const SizedBox(height: 6),
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: colors.primary.withOpacity(0.3), width: 0.8),
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.mic_rounded, size: 13, color: colors.primary),
+                      Icon(Icons.mic_rounded, size: 11, color: colors.primary),
                       const SizedBox(width: 3),
                       Text(
                         'REC',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.5,
                           color: colors.primary,
@@ -2301,73 +2564,93 @@ class _HomeScreenState extends State<HomeScreen>
 
         // WhatsApp Sync Actions Bar
         Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
+          padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
           child: Row(
             children: [
               ElevatedButton.icon(
                 onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
                 icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: colors.whatsappGreen,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  elevation: 1.5,
+                  shadowColor: colors.whatsappGreen.withOpacity(0.4),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
                 onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'whatsapp'),
                 icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12)),
+                label: const Text('Resync All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  side: BorderSide(color: colors.border.withOpacity(0.8)),
+                  backgroundColor: colors.cardBackground,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
               const Spacer(),
               if (service.pendingWhatsAppCount > 0)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.warning.withOpacity(0.35)),
+                    color: colors.warning.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: colors.warning.withOpacity(0.4), width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
-                      const SizedBox(width: 4),
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: colors.warning,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
                       Text(
                         '${service.pendingWhatsAppCount} Pending',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          color: colors.warning,
+                        ),
                       ),
                     ],
                   ),
                 )
               else
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.success.withOpacity(0.35)),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: colors.success.withOpacity(0.35), width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                      const SizedBox(width: 4),
+                      Icon(Icons.check_circle_rounded, size: 13, color: colors.success),
+                      const SizedBox(width: 5),
                       Text(
                         'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.2,
+                          color: colors.success,
+                        ),
                       ),
                     ],
                   ),
@@ -2386,14 +2669,18 @@ class _HomeScreenState extends State<HomeScreen>
                 label: Text('All (${service.whatsappEvents.length})'),
                 selected: _waFilter == 'all',
                 onSelected: (_) => setState(() => _waFilter = 'all'),
-                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                selectedColor: colors.whatsappGreen.withOpacity(0.18),
                 checkmarkColor: colors.whatsappGreen,
                 backgroundColor: colors.surfaceColor,
-                side: BorderSide(color: _waFilter == 'all' ? colors.whatsappGreen : colors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _waFilter == 'all' ? colors.whatsappGreen : colors.border.withOpacity(0.7),
+                  width: _waFilter == 'all' ? 1.2 : 0.8,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 labelStyle: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: _waFilter == 'all' ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: _waFilter == 'all' ? FontWeight.w700 : FontWeight.w500,
                   color: _waFilter == 'all' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
@@ -2402,14 +2689,18 @@ class _HomeScreenState extends State<HomeScreen>
                 label: Text('Messages ($messageCount)'),
                 selected: _waFilter == 'messages',
                 onSelected: (_) => setState(() => _waFilter = 'messages'),
-                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                selectedColor: colors.whatsappGreen.withOpacity(0.18),
                 checkmarkColor: colors.whatsappGreen,
                 backgroundColor: colors.surfaceColor,
-                side: BorderSide(color: _waFilter == 'messages' ? colors.whatsappGreen : colors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _waFilter == 'messages' ? colors.whatsappGreen : colors.border.withOpacity(0.7),
+                  width: _waFilter == 'messages' ? 1.2 : 0.8,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 labelStyle: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: _waFilter == 'messages' ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: _waFilter == 'messages' ? FontWeight.w700 : FontWeight.w500,
                   color: _waFilter == 'messages' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
@@ -2418,14 +2709,18 @@ class _HomeScreenState extends State<HomeScreen>
                 label: Text('Calls ($callCount)'),
                 selected: _waFilter == 'calls',
                 onSelected: (_) => setState(() => _waFilter = 'calls'),
-                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                selectedColor: colors.whatsappGreen.withOpacity(0.18),
                 checkmarkColor: colors.whatsappGreen,
                 backgroundColor: colors.surfaceColor,
-                side: BorderSide(color: _waFilter == 'calls' ? colors.whatsappGreen : colors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _waFilter == 'calls' ? colors.whatsappGreen : colors.border.withOpacity(0.7),
+                  width: _waFilter == 'calls' ? 1.2 : 0.8,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 labelStyle: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: _waFilter == 'calls' ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: _waFilter == 'calls' ? FontWeight.w700 : FontWeight.w500,
                   color: _waFilter == 'calls' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
