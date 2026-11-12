@@ -440,7 +440,7 @@ class LocalDatabaseService {
         }
       }
 
-      // 2. Remove duplicate SMS & messages where another record exists with same kind, direction, number, and time within 60s
+      // 2. Remove duplicate SMS & messages where another record exists with same kind, direction, number, and time within window (60s, or 300s if texts match)
       final duplicateSms = await db.rawQuery('''
         SELECT e2.uid as remove_uid, e1.uid as keep_uid, e2.sync_status as sync2, e2.text as text2, e1.text as text1
         FROM events e1
@@ -453,11 +453,21 @@ class LocalDatabaseService {
               AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e1.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10) =
                   SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e2.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10)
             )
+            OR (
+              e1.text IS NOT NULL AND e1.text != '' AND e1.text = e2.text
+              AND (
+                e1.number LIKE '%' || e2.number || '%'
+                OR e2.number LIKE '%' || e1.number || '%'
+              )
+            )
           )
           AND (e1.text IS NULL OR e2.text IS NULL OR e1.text = '' OR e2.text = '' OR e1.text = e2.text)
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
-          AND ABS(e1.time - e2.time) <= 60000
+          AND (
+            ABS(e1.time - e2.time) <= 60000
+            OR (e1.text IS NOT NULL AND e1.text != '' AND e1.text = e2.text AND ABS(e1.time - e2.time) <= 300000)
+          )
         WHERE e1.kind IN ('sms', 'whatsapp_message', 'notification') AND e1.number != ''
       ''');
 

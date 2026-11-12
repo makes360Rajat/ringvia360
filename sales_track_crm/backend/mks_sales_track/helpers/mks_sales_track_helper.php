@@ -2330,11 +2330,17 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                 if (!isset($rows[$u2])) continue;
                 $r2 = $rows[$u2];
 
-                $kindsMatch = ($r1['kind'] === $r2['kind']);
+                $kindsMatch = ($r1['kind'] === $r2['kind'])
+                    || (in_array($r1['kind'], ['sms', 'notification'], true) && in_array($r2['kind'], ['sms', 'notification'], true));
+
+                $d1 = preg_replace('/\D/', '', (string) $r1['number']);
+                $d2 = preg_replace('/\D/', '', (string) $r2['number']);
+                $numDigitsMatch = ($d1 !== '' && $d2 !== '' && ($d1 === $d2 || strpos($d1, $d2) !== false || strpos($d2, $d1) !== false));
 
                 $numMatch = (!empty($r1['number_key']) && $r1['number_key'] === $r2['number_key'])
                     || (!empty($r1['number_raw']) && $r1['number_raw'] === $r2['number_raw'])
-                    || (!empty($r1['number']) && $r1['number'] === $r2['number']);
+                    || (!empty($r1['number']) && $r1['number'] === $r2['number'])
+                    || $numDigitsMatch;
 
                 if ($kindsMatch && $numMatch) {
                     if (!$isCall1) {
@@ -2342,6 +2348,9 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                         $b2 = trim((string) (isset($r2['body']) ? $r2['body'] : ''));
                         if ($b1 !== '' && $b2 !== '' && $b1 !== $b2) {
                             continue; // Different message texts - NOT a duplicate!
+                        }
+                        if ($b1 !== '' && $b1 === $b2) {
+                            $window1 = 300;
                         }
                     } else {
                         // Check distinct CallLog IDs
@@ -2388,8 +2397,8 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
         }
 
         if ($times) {
-            $fromTime = date('Y-m-d H:i:s', min($times) - 120);
-            $toTime   = date('Y-m-d H:i:s', max($times) + 120);
+            $fromTime = date('Y-m-d H:i:s', min($times) - 300);
+            $toTime   = date('Y-m-d H:i:s', max($times) + 300);
 
             $held = $CI->db->select('id, uid, device_id, kind, number_key, number_raw, number, occurred_at, duration, direction, recording_status, contact_name, body')
                 ->where('staff_id', (int) $device['staff_id'])
@@ -2402,19 +2411,26 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
             foreach ($rows as $uid => $row) {
                 $rowTs = strtotime($row['occurred_at']);
                 $isCallKind = in_array($row['kind'], ['call', 'whatsapp_call'], true);
-                $windowSec = $isCallKind ? 120 : 60;
+                $rb = trim((string) (isset($row['body']) ? $row['body'] : ''));
+                $windowSec = $isCallKind ? 120 : ($rb !== '' ? 300 : 60);
+
+                $rd = preg_replace('/\D/', '', (string) $row['number']);
 
                 foreach ($held as $h) {
-                    $kindsMatch = ($h['kind'] === $row['kind']);
+                    $kindsMatch = ($h['kind'] === $row['kind'])
+                        || (in_array($h['kind'], ['sms', 'notification'], true) && in_array($row['kind'], ['sms', 'notification'], true));
+
+                    $hd = preg_replace('/\D/', '', (string) $h['number']);
+                    $numDigitsMatch = ($rd !== '' && $hd !== '' && ($rd === $hd || strpos($rd, $hd) !== false || strpos($hd, $rd) !== false));
 
                     $numMatch = (!empty($row['number_key']) && $h['number_key'] === $row['number_key'])
                         || (!empty($row['number_raw']) && $h['number_raw'] === $row['number_raw'])
-                        || (!empty($row['number']) && $h['number'] === $row['number']);
+                        || (!empty($row['number']) && $h['number'] === $row['number'])
+                        || $numDigitsMatch;
 
                     if ($kindsMatch && $numMatch) {
                         if (!$isCallKind) {
                             $hb = trim((string) (isset($h['body']) ? $h['body'] : ''));
-                            $rb = trim((string) (isset($row['body']) ? $row['body'] : ''));
                             if ($hb !== '' && $rb !== '' && $hb !== $rb) {
                                 continue; // Different message texts - NOT a duplicate!
                             }
@@ -2563,6 +2579,10 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
 
     if (function_exists('mks_st_after_calls') && $rows) {
         mks_st_after_calls($device, $rows);
+    }
+
+    if (function_exists('mks_st_cleanup_duplicate_events')) {
+        mks_st_cleanup_duplicate_events();
     }
 
     return $result;
@@ -2762,44 +2782,66 @@ function mks_st_cleanup_duplicate_events()
             }
         }
 
-        // 2. Cleanup SMS, whatsapp_message, and notification duplicates within 60s
+        // 2. Cleanup SMS, whatsapp_message, and notification duplicates (300s window, or 900s if identical body)
         $smsDups = $CI->db->query("
             SELECT e1.id as keep_id, e2.id as remove_id,
                e1.kind as kind1, e2.kind as kind2,
                e1.body as body1, e2.body as body2,
+               e1.number as num1, e2.number as num2,
+               e1.number_raw as raw1, e2.number_raw as raw2,
+               e1.number_key as key1, e2.number_key as key2,
                e1.contact_name as name1, e2.contact_name as name2,
                e1.uid as uid1, e2.uid as uid2
             FROM {$table} e1
             INNER JOIN {$table} e2 ON e1.staff_id = e2.staff_id 
                 AND (
                     e1.kind = e2.kind 
-                    OR (e1.kind IN ('sms', 'whatsapp_message', 'notification') AND e2.kind IN ('sms', 'whatsapp_message', 'notification'))
+                    OR (e1.kind IN ('sms', 'notification') AND e2.kind IN ('sms', 'notification'))
                 )
                 AND (
                     (e1.number_key IS NOT NULL AND e1.number_key != '' AND e1.number_key = e2.number_key)
                     OR (e1.number_raw IS NOT NULL AND e1.number_raw != '' AND e1.number_raw = e2.number_raw)
                     OR (e1.number IS NOT NULL AND e1.number != '' AND e1.number = e2.number)
+                    OR (
+                        e1.body IS NOT NULL AND e1.body != '' AND e1.body = e2.body
+                        AND (
+                            (e1.number IS NOT NULL AND e2.number IS NOT NULL AND (e1.number LIKE CONCAT('%', e2.number, '%') OR e2.number LIKE CONCAT('%', e1.number, '%')))
+                            OR (e1.number_raw IS NOT NULL AND e2.number_raw IS NOT NULL AND (e1.number_raw LIKE CONCAT('%', e2.number_raw, '%') OR e2.number_raw LIKE CONCAT('%', e1.number_raw, '%')))
+                        )
+                    )
                 )
                 AND e1.id < e2.id
-                AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 60
+                AND (
+                    ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 300
+                    OR (e1.body IS NOT NULL AND e1.body != '' AND e1.body = e2.body AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 900)
+                )
             WHERE e1.kind IN ('sms', 'whatsapp_message', 'notification')
         ");
 
         if ($smsDups && $smsDups->num_rows() > 0) {
             foreach ($smsDups->result_array() as $d) {
+                $b1 = trim((string) $d['body1']);
+                $b2 = trim((string) $d['body2']);
+                if ($b1 !== '' && $b2 !== '' && $b1 !== $b2) {
+                    continue; // Distinct messages
+                }
+
                 // Delete duplicate record first to release any constraints
                 $CI->db->where('id', (int) $d['remove_id'])->delete($table);
                 $removed++;
 
                 $update = [];
-                if ($d['kind1'] === 'notification' && in_array($d['kind2'], ['sms', 'whatsapp_message'], true)) {
-                    $update['kind'] = $d['kind2'];
+                if ($d['kind1'] === 'notification' && $d['kind2'] === 'sms') {
+                    $update['kind'] = 'sms';
                 }
                 if (empty($d['body1']) && !empty($d['body2'])) {
                     $update['body'] = $d['body2'];
                 }
-                if (empty($d['name1']) && !empty($d['name2'])) {
+                if ((empty($d['name1']) || $d['name1'] === 'Un Saved') && !empty($d['name2']) && $d['name2'] !== 'Un Saved') {
                     $update['contact_name'] = $d['name2'];
+                }
+                if ((empty($d['num1']) || strlen((string) $d['num1']) < strlen((string) $d['num2'])) && !empty($d['num2'])) {
+                    $update['number'] = $d['num2'];
                 }
                 // NOTE: DO NOT update uid - keep_id already has its own unique uid, preventing duplicate key errors
                 if (!empty($update)) {

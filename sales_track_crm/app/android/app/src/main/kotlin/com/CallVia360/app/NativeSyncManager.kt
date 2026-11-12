@@ -38,6 +38,46 @@ object NativeSyncManager {
     private val executor = Executors.newSingleThreadExecutor()
     private val queueLock = Any()
     private val processedUids = LinkedHashSet<String>()
+    private val processedSmsFingerprints = LinkedHashSet<String>()
+
+    fun markSmsProcessed(address: String, body: String, timeMs: Long, uid: String) {
+        synchronized(processedUids) {
+            if (uid.isNotEmpty()) {
+                processedUids.add(uid)
+                if (processedUids.size > 500) {
+                    val it = processedUids.iterator()
+                    if (it.hasNext()) { it.next(); it.remove() }
+                }
+            }
+            val digits = address.replace(Regex("[^0-9]"), "")
+            val key = if (digits.length >= 5) digits.takeLast(10) else address.trim().lowercase()
+            val cleanBody = body.trim().replace(Regex("\\s+"), " ")
+            val bodyHash = (cleanBody.hashCode().toLong() and 0xFFFFFFFFL).toString(16)
+            val bucket = timeMs / 60000 // 1-minute bucket
+            processedSmsFingerprints.add("${key}_${bodyHash}_$bucket")
+            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket - 1}")
+            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket + 1}")
+            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket - 2}")
+            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket + 2}")
+            if (processedSmsFingerprints.size > 800) {
+                val it = processedSmsFingerprints.iterator()
+                if (it.hasNext()) { it.next(); it.remove() }
+            }
+        }
+    }
+
+    fun isSmsAlreadyProcessed(address: String, body: String, timeMs: Long, uid: String): Boolean {
+        synchronized(processedUids) {
+            if (uid.isNotEmpty() && processedUids.contains(uid)) return true
+            val digits = address.replace(Regex("[^0-9]"), "")
+            val key = if (digits.length >= 5) digits.takeLast(10) else address.trim().lowercase()
+            val cleanBody = body.trim().replace(Regex("\\s+"), " ")
+            val bodyHash = (cleanBody.hashCode().toLong() and 0xFFFFFFFFL).toString(16)
+            val bucket = timeMs / 60000
+            if (processedSmsFingerprints.contains("${key}_${bodyHash}_$bucket")) return true
+        }
+        return false
+    }
 
     fun isMessageCountSummary(str: String?): Boolean {
         if (str == null) return false
@@ -77,10 +117,17 @@ object NativeSyncManager {
         val kind = event["kind"]?.toString() ?: ""
         val text = event["text"]?.toString() ?: ""
         val name = event["name"]?.toString() ?: ""
+        val uid = event["uid"]?.toString() ?: ""
+        val number = event["number"]?.toString() ?: ""
+        val timeMs = (event["time"] as? Number)?.toLong() ?: System.currentTimeMillis()
 
         if (isMessageCountSummary(text) || isMessageCountSummary(name)) {
             Log.d(TAG, "Dropped message count summary: $text")
             return
+        }
+
+        if (kind == "sms") {
+            markSmsProcessed(number, text, timeMs, uid)
         }
 
         // 1. Forward to Flutter UI if app is open
@@ -349,8 +396,10 @@ object NativeSyncManager {
                         val direction = if (type == Telephony.Sms.MESSAGE_TYPE_SENT) "outgoing" else "incoming"
                         val uid = "sms-${id}-$dateMs"
 
-                        if (processedUids.contains(uid)) continue
+                        if (isSmsAlreadyProcessed(address, body, dateMs, uid)) continue
                         if (isMessageCountSummary(body)) continue
+
+                        markSmsProcessed(address, body, dateMs, uid)
 
                         val resolvedName = ContactLookupHelper.resolveContactName(context, address) ?: address
                         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)

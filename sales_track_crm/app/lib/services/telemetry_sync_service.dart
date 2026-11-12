@@ -823,9 +823,14 @@ class TelemetrySyncService extends ChangeNotifier {
       );
 
       final existingIndex = _smsList.indexWhere((s) => isSameSms(s, event));
+      bool shouldEnqueue = true;
       if (existingIndex >= 0) {
         final existing = _smsList[existingIndex];
-        if (existing.syncStatus == 'synced') event.syncStatus = 'synced';
+        event.uid = existing.uid; // Preserve original UID so CRM never creates a duplicate
+        if (existing.syncStatus == 'synced') {
+          event.syncStatus = 'synced';
+          shouldEnqueue = false;
+        }
         if (existing.name.isNotEmpty && event.name.isEmpty) event.name = existing.name;
         _smsList[existingIndex] = event;
       } else {
@@ -837,9 +842,13 @@ class TelemetrySyncService extends ChangeNotifier {
 
       LocalDatabaseService.instance.saveEvents([event]);
       _persistSms();
-      _enqueueEvent(event);
+      if (shouldEnqueue) {
+        _enqueueEvent(event);
+      }
       notifyListeners();
-      syncNow();
+      if (shouldEnqueue) {
+        syncNow();
+      }
     } else if (type == 'whatsapp_call' || type == 'whatsapp_call_completed') {
       final uid = raw['uid']?.toString() ?? 'wacall-${DateTime.now().millisecondsSinceEpoch}';
       final rawNumber = raw['number']?.toString() ?? '';
@@ -1202,6 +1211,26 @@ class TelemetrySyncService extends ChangeNotifier {
     return a.trim().toLowerCase() == b.trim().toLowerCase();
   }
 
+  static bool smsNumbersMatch(String a, String b) {
+    if (a.isEmpty || b.isEmpty) return false;
+    if (numbersMatch(a, b)) return true;
+    final digitsA = a.replaceAll(RegExp(r'\D'), '');
+    final digitsB = b.replaceAll(RegExp(r'\D'), '');
+    if (digitsA.isNotEmpty && digitsB.isNotEmpty) {
+      if (digitsA == digitsB) return true;
+      if (digitsA.length >= 5 && digitsB.contains(digitsA)) return true;
+      if (digitsB.length >= 5 && digitsA.contains(digitsB)) return true;
+    }
+    final cleanA = a.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+    final cleanB = b.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+    if (cleanA.isNotEmpty && cleanB.isNotEmpty) {
+      if (cleanA == cleanB) return true;
+      if (cleanA.length >= 5 && cleanB.contains(cleanA)) return true;
+      if (cleanB.length >= 5 && cleanA.contains(cleanB)) return true;
+    }
+    return false;
+  }
+
   static bool isSameCall(SalesTrackEvent a, SalesTrackEvent b) {
     if (a.uid.isNotEmpty && b.uid.isNotEmpty && a.uid == b.uid) return true;
 
@@ -1312,13 +1341,16 @@ class TelemetrySyncService extends ChangeNotifier {
     if (aMatch != null && bMatch != null && aMatch.group(1) == bMatch.group(1)) {
       return true;
     }
-    if (a.text != null && b.text != null && a.text!.isNotEmpty && b.text!.isNotEmpty && a.text != b.text) {
+    final textA = a.text?.trim() ?? '';
+    final textB = b.text?.trim() ?? '';
+    if (textA.isNotEmpty && textB.isNotEmpty && textA != textB) {
       return false;
     }
-    if (a.direction == b.direction &&
-        numbersMatch(a.number, b.number) &&
-        (a.time - b.time).abs() <= 60000) {
-      return true;
+    if (a.direction == b.direction && smsNumbersMatch(a.number, b.number)) {
+      final window = (textA.isNotEmpty && textA == textB) ? 300000 : 60000;
+      if ((a.time - b.time).abs() <= window) {
+        return true;
+      }
     }
     return false;
   }
@@ -1361,6 +1393,16 @@ class TelemetrySyncService extends ChangeNotifier {
                 break;
               }
             }
+          }
+        }
+      }
+
+      // Check alphanumeric sender variants and 5-min window if text body is identical
+      if (existingIdx < 0 && (sms.text?.trim().isNotEmpty ?? false)) {
+        for (int i = result.length - 1; i >= 0 && i >= result.length - 40; i--) {
+          if (isSameSms(result[i], sms)) {
+            existingIdx = i;
+            break;
           }
         }
       }
@@ -1666,8 +1708,13 @@ class TelemetrySyncService extends ChangeNotifier {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
           final existing = _smsList.indexWhere((s) => isSameSms(s, event));
           if (existing >= 0) {
-            if (_smsList[existing].syncStatus == 'synced') {
+            final old = _smsList[existing];
+            event.uid = old.uid; // Preserve original UID so CRM never creates a duplicate!
+            if (old.syncStatus == 'synced') {
               event.syncStatus = 'synced';
+            }
+            if (old.name.isNotEmpty && event.name.isEmpty) {
+              event.name = old.name;
             }
             _smsList[existing] = event;
             if (event.syncStatus != 'synced') {

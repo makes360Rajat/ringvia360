@@ -15,6 +15,11 @@ defined('BASEPATH') or exit('No direct script access allowed');
  */
 
 $mks_view    = isset($mks_view) ? (string) $mks_view : 'calls';
+
+if ($mks_view === 'sms' && function_exists('mks_st_cleanup_duplicate_events')) {
+    mks_st_cleanup_duplicate_events();
+}
+
 $mks_columns = mks_st_view_columns($mks_view);
 $mks_from    = mks_st_events_from();
 $mks_filters = mks_st_posted_filters();
