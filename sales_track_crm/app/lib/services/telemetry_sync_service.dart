@@ -301,11 +301,15 @@ class TelemetrySyncService extends ChangeNotifier {
     _init();
   }
 
+  void _updateInitProgress(double progress, String message) {
+    _initProgress = progress;
+    _initStatusMessage = message;
+    notifyListeners();
+  }
+
   Future<void> _init() async {
     try {
-      _initProgress = 0.12;
-      _initStatusMessage = 'Connecting to local storage...';
-      notifyListeners();
+      _updateInitProgress(0.10, 'Connecting to local storage & credentials...');
 
       await api.init();
       _isPaired = api.isPaired;
@@ -318,27 +322,21 @@ class TelemetrySyncService extends ChangeNotifier {
 
       checkForAppUpdate();
 
-      _initProgress = 0.30;
-      _initStatusMessage = 'Loading saved settings & telemetry state...';
-      notifyListeners();
+      _updateInitProgress(0.25, 'Loading saved settings & telemetry state...');
       await _loadSavedMeta();
       _listenToNativeEvents();
 
-      _initProgress = 0.55;
-      _initStatusMessage = 'Verifying telephony & system permissions...';
-      notifyListeners();
+      _updateInitProgress(0.38, 'Verifying telephony & system permissions...');
       await checkPermissions();
 
-      _initProgress = 0.80;
-      _initStatusMessage = 'Loading local calls & conversation records...';
-      notifyListeners();
-      // Load local database history fast without blocking the UI
+      _updateInitProgress(0.48, 'Loading local conversation history...');
+      // Load local database history with real-time granular progress
       await _loadPersistedHistory();
+
+      _updateInitProgress(0.90, 'Checking pending synchronization queue...');
       await refreshPendingCounts();
 
-      _initProgress = 0.95;
-      _initStatusMessage = 'Preparing CRM workspace...';
-      notifyListeners();
+      _updateInitProgress(0.97, 'Preparing CRM workspace...');
 
       if (Platform.isIOS) {
         _iosLivePollingTimer?.cancel();
@@ -351,9 +349,8 @@ class TelemetrySyncService extends ChangeNotifier {
         });
       }
 
-      _initProgress = 1.0;
-      _initStatusMessage = 'Ready';
-      notifyListeners();
+      await Future.delayed(const Duration(milliseconds: 180));
+      _updateInitProgress(1.0, 'Ready');
     } catch (e, st) {
       debugPrint('Error during TelemetrySyncService init: $e\n$st');
     } finally {
@@ -2857,9 +2854,18 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> _loadPersistedHistory() async {
     // 1. Try loading from SQLite first (Offline-First source of truth)
     try {
+      _updateInitProgress(0.50, 'Loading local call records...');
       final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call', limit: 3000);
+
+      _updateInitProgress(0.62, 'Loading WhatsApp conversations...');
       final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp', limit: 1000);
+
+      _updateInitProgress(0.74, 'Loading SMS messages...');
       final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms', limit: 1500);
+
+      _updateInitProgress(0.84, 'Loading pending sync items...');
+      final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 5000);
+      pendingFromDb.removeWhere((e) => isMessageCountSummary(e.text) || isMessageCountSummary(e.name));
 
       if (dbCalls.isNotEmpty || dbWa.isNotEmpty || dbSms.isNotEmpty) {
         _calls.clear();
@@ -2869,8 +2875,6 @@ class TelemetrySyncService extends ChangeNotifier {
         _smsList.clear();
         _smsList.addAll(dbSms);
 
-        final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 5000);
-        pendingFromDb.removeWhere((e) => isMessageCountSummary(e.text) || isMessageCountSummary(e.name));
         _pendingQueue.clear();
         _pendingQueue.addAll(pendingFromDb);
         _pendingUids.clear();
@@ -2887,6 +2891,7 @@ class TelemetrySyncService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     if (_calls.isEmpty) {
+      _updateInitProgress(0.54, 'Reading cached calls...');
       final cachedCalls = prefs.getStringList('mks_cached_calls') ?? [];
       final tempCalls = <SalesTrackEvent>[];
       for (final str in cachedCalls) {
@@ -2902,6 +2907,7 @@ class TelemetrySyncService extends ChangeNotifier {
     }
 
     if (_smsList.isEmpty) {
+      _updateInitProgress(0.76, 'Reading cached SMS...');
       final cachedSms = prefs.getStringList('mks_cached_sms') ?? [];
       for (final str in cachedSms) {
         try {
@@ -2914,6 +2920,7 @@ class TelemetrySyncService extends ChangeNotifier {
     }
 
     if (_whatsappEvents.isEmpty) {
+      _updateInitProgress(0.66, 'Reading cached WhatsApp...');
       final cachedWa = prefs.getStringList('mks_cached_whatsapp') ?? [];
       for (final str in cachedWa) {
         try {

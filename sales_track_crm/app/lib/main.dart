@@ -71,8 +71,7 @@ class _AppRootRouterState extends State<AppRootRouter> {
     final colors = context.stColors;
 
     if (!syncService.isInitialized) {
-      final progress = syncService.initProgress.clamp(0.0, 1.0);
-      final percent = (progress * 100).toInt();
+      final targetProgress = syncService.initProgress.clamp(0.0, 1.0);
       return Scaffold(
         backgroundColor: colors.background,
         body: SafeArea(
@@ -127,46 +126,57 @@ class _AppRootRouterState extends State<AppRootRouter> {
                   ),
                   const SizedBox(height: 38),
 
-                  // Linear Progress Bar
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      height: 8,
-                      child: LinearProgressIndicator(
-                        value: progress,
-                        backgroundColor: colors.border.withOpacity(0.4),
-                        valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Progress Percentage & Dynamic Status
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          syncService.initStatusMessage,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: colors.textSecondary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                  // Fluid animated progress bar with continuous real-time percentages
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0.05, end: targetProgress),
+                    duration: const Duration(milliseconds: 320),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, animatedVal, _) {
+                      final percent = (animatedVal * 100).toInt().clamp(0, 100);
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: SizedBox(
+                              height: 8,
+                              child: LinearProgressIndicator(
+                                value: animatedVal,
+                                backgroundColor: colors.border.withOpacity(0.4),
+                                valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        '$percent%',
-                        style: TextStyle(
-                          color: colors.primary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
+                          const SizedBox(height: 14),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  syncService.initStatusMessage,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: colors.textSecondary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '$percent%',
+                                style: TextStyle(
+                                  color: colors.primary,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),
