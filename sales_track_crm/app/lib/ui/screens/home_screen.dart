@@ -916,10 +916,11 @@ class _HomeScreenState extends State<HomeScreen>
             top: false,
             bottom: true,
             child: NavigationBar(
-              height: 64,
+              height: 56,
               elevation: 0,
               backgroundColor: Colors.transparent,
               indicatorColor: colors.primary.withOpacity(0.16),
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
               selectedIndex: _selectedBottomNavIndex,
               onDestinationSelected: (index) {
                 if (widget.syncService.isPlayingAudio) {
@@ -931,12 +932,12 @@ class _HomeScreenState extends State<HomeScreen>
                 NavigationDestination(
                   icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
                   selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
-                  label: 'Sales Tracker',
+                  label: '',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
                   selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
-                  label: 'CRM Portal',
+                  label: '',
                 ),
               ],
             ),
