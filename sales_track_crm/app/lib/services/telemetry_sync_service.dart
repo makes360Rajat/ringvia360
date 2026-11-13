@@ -644,6 +644,7 @@ class TelemetrySyncService extends ChangeNotifier {
     _heartbeatTimer?.cancel();
     _quickCheckTimer?.cancel();
     _periodicSyncTimer?.cancel();
+    _slowSensingTimer?.cancel();
     await api.clearCredentials();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('mks_crm_device');
@@ -1522,8 +1523,12 @@ class TelemetrySyncService extends ChangeNotifier {
     return result;
   }
 
+  bool _isFetchingCallLogs = false;
+  bool _isFetchingSms = false;
+
   Future<void> syncDeviceCallLogs() async {
-    if (!hasCallLogPermission) return;
+    if (!hasCallLogPermission || _isFetchingCallLogs) return;
+    _isFetchingCallLogs = true;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceCallLogs');
       final rawLogs = (raw as List?)?.whereType<Map>().toList();
@@ -1692,11 +1697,14 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error fetching historical call logs: $e');
+    } finally {
+      _isFetchingCallLogs = false;
     }
   }
 
   Future<void> syncDeviceSms() async {
-    if (!hasSmsPermission) return;
+    if (!hasSmsPermission || _isFetchingSms) return;
+    _isFetchingSms = true;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceSms');
       final rawSms = (raw as List?)?.whereType<Map>().toList();
@@ -1737,6 +1745,8 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error fetching historical SMS: $e');
+    } finally {
+      _isFetchingSms = false;
     }
   }
 
@@ -2385,6 +2395,7 @@ class TelemetrySyncService extends ChangeNotifier {
   // 6. HEARTBEAT LOOP & CRM COMMANDS
   // ---------------------------------------------------------------------------
   Timer? _periodicSyncTimer;
+  Timer? _slowSensingTimer;
 
   // A quick check with the CRM every minute while the app is on screen, so a
   // phone revoked or deleted in the CRM unpairs within a minute.
@@ -2439,30 +2450,26 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     });
 
-    // Background sync checker: flushes pending queue, senses new calls, and continuously verifies CRM pairing status every 30s
+    // Lightweight sync queue flusher: uploads pending queue without hammering SQLite/ContentProviders
     _periodicSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (_isPaired && !_isSyncing) {
         await refreshPendingCounts();
         if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
           await syncNow();
-        } else {
-          // Sensing check: detect newly arrived calls, SMS, or WhatsApp events from device
-          if (hasCallLogPermission) {
-            await syncDeviceCallLogs();
-          }
-          if (hasSmsPermission) {
-            await syncDeviceSms();
-          }
-          await syncActiveWhatsAppNotifications();
-          await refreshPendingCounts();
-          if (_pendingQueue.isNotEmpty || pendingEventsCount > 0 || _pendingRecordingsCount > 0) {
-            await syncNow();
-          } else {
-            // Heartbeat check: validates CRM connection and detects immediate device revocation or deletion
-            await sendHeartbeat();
-          }
         }
       }
+    });
+
+    // Infrequent sensing check (every 10 minutes) as a fallback safety net only while in foreground
+    _slowSensingTimer?.cancel();
+    _slowSensingTimer = Timer.periodic(const Duration(minutes: 10), (_) async {
+      if (!_foreground || !_isPaired || _isSyncing) return;
+      try {
+        if (hasCallLogPermission) await syncDeviceCallLogs();
+        if (hasSmsPermission) await syncDeviceSms();
+        await syncActiveWhatsAppNotifications();
+        await refreshPendingCounts();
+      } catch (_) {}
     });
 
     sendHeartbeat();
@@ -3014,6 +3021,7 @@ class TelemetrySyncService extends ChangeNotifier {
   void dispose() {
     _iosLivePollingTimer?.cancel();
     _periodicSyncTimer?.cancel();
+    _slowSensingTimer?.cancel();
     _eventSubscription?.cancel();
     _heartbeatTimer?.cancel();
     _quickCheckTimer?.cancel();

@@ -6,6 +6,10 @@ import android.provider.ContactsContract
 
 object ContactLookupHelper {
 
+    private var cachedQuickMap: Map<String, String>? = null
+    private var lastQuickMapTime: Long = 0L
+    private const val CACHE_TTL_MS = 60_000L // 60s cache
+
     data class ContactDetails(val name: String?, val photoUri: String?)
 
     fun resolveContactDetails(context: Context, phoneNumber: String?): ContactDetails {
@@ -81,6 +85,12 @@ object ContactLookupHelper {
     }
 
     fun getQuickLookupMap(context: Context): Map<String, String> {
+        val now = System.currentTimeMillis()
+        cachedQuickMap?.let {
+            if (now - lastQuickMapTime < CACHE_TTL_MS) {
+                return it
+            }
+        }
         val map = mutableMapOf<String, String>()
         try {
             val projection = arrayOf(
@@ -109,6 +119,8 @@ object ContactLookupHelper {
                 }
             }
         } catch (_: Exception) {}
+        cachedQuickMap = map
+        lastQuickMapTime = now
         return map
     }
 

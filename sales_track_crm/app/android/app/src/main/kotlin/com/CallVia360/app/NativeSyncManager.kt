@@ -9,6 +9,8 @@ import android.database.sqlite.SQLiteDatabase
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.CallLog
 import android.provider.Telephony
 import android.util.Log
@@ -37,6 +39,10 @@ object NativeSyncManager {
     private const val JOB_ID = 36001
     private val executor = Executors.newSingleThreadExecutor()
     private val queueLock = Any()
+    private val debounceLock = Any()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingCallLogRunnable: Runnable? = null
+    private var pendingSmsRunnable: Runnable? = null
     private val processedUids = LinkedHashSet<String>()
     private val processedSmsFingerprints = LinkedHashSet<String>()
 
@@ -267,6 +273,8 @@ object NativeSyncManager {
                             triggerSync(context)
                         }
                     }
+                } else if (responseCode == 401) {
+                    Log.w(TAG, "Sync server returned 401 Unauthorized; token may need refreshing. Pausing retries.")
                 } else {
                     Log.w(TAG, "Sync server returned non-200 status: $responseCode")
                     scheduleJob(context)
@@ -280,18 +288,30 @@ object NativeSyncManager {
 
     /**
      * Watchdog: inspects CallLog for any recent calls (within last 15 mins) that may not be synced.
+     * Debounced by 1200ms to eliminate redundant triggers when system states or observers change rapidly.
      */
     fun checkAndSyncLatestCallLog(context: Context) {
-        executor.execute {
-            try {
-                val projection = arrayOf(
-                    CallLog.Calls._ID,
-                    CallLog.Calls.NUMBER,
-                    CallLog.Calls.CACHED_NAME,
-                    CallLog.Calls.DURATION,
-                    CallLog.Calls.TYPE,
-                    CallLog.Calls.DATE
-                )
+        synchronized(debounceLock) {
+            pendingCallLogRunnable?.let { mainHandler.removeCallbacks(it) }
+            pendingCallLogRunnable = Runnable {
+                executor.execute {
+                    performCheckAndSyncLatestCallLog(context.applicationContext)
+                }
+            }
+            mainHandler.postDelayed(pendingCallLogRunnable!!, 1200L)
+        }
+    }
+
+    private fun performCheckAndSyncLatestCallLog(context: Context) {
+        try {
+            val projection = arrayOf(
+                CallLog.Calls._ID,
+                CallLog.Calls.NUMBER,
+                CallLog.Calls.CACHED_NAME,
+                CallLog.Calls.DURATION,
+                CallLog.Calls.TYPE,
+                CallLog.Calls.DATE
+            )
                 val cutoff = System.currentTimeMillis() - (15 * 60 * 1000)
                 val selection = "${CallLog.Calls.DATE} >= ?"
                 val selectionArgs = arrayOf(cutoff.toString())
@@ -359,21 +379,32 @@ object NativeSyncManager {
                 Log.e(TAG, "checkAndSyncLatestCallLog error: ${e.message}")
             }
         }
-    }
 
     /**
      * Watchdog: inspects SMS for any recent messages (within last 15 mins) that may not be synced.
+     * Debounced by 1200ms to consolidate ContentObserver and Google Messages notification bursts.
      */
     fun checkAndSyncLatestSms(context: Context) {
-        executor.execute {
-            try {
-                val projection = arrayOf(
-                    Telephony.Sms._ID,
-                    Telephony.Sms.ADDRESS,
-                    Telephony.Sms.BODY,
-                    Telephony.Sms.DATE,
-                    Telephony.Sms.TYPE
-                )
+        synchronized(debounceLock) {
+            pendingSmsRunnable?.let { mainHandler.removeCallbacks(it) }
+            pendingSmsRunnable = Runnable {
+                executor.execute {
+                    performCheckAndSyncLatestSms(context.applicationContext)
+                }
+            }
+            mainHandler.postDelayed(pendingSmsRunnable!!, 1200L)
+        }
+    }
+
+    private fun performCheckAndSyncLatestSms(context: Context) {
+        try {
+            val projection = arrayOf(
+                Telephony.Sms._ID,
+                Telephony.Sms.ADDRESS,
+                Telephony.Sms.BODY,
+                Telephony.Sms.DATE,
+                Telephony.Sms.TYPE
+            )
                 val cutoff = System.currentTimeMillis() - (15 * 60 * 1000)
                 val selection = "${Telephony.Sms.DATE} >= ?"
                 val selectionArgs = arrayOf(cutoff.toString())
@@ -453,7 +484,6 @@ object NativeSyncManager {
                 Log.e(TAG, "checkAndSyncLatestSms error: ${e.message}")
             }
         }
-    }
 
     /**
      * Schedules native JobScheduler watchdog periodic job.

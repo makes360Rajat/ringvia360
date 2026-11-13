@@ -8,6 +8,7 @@ class LocalDatabaseService {
   LocalDatabaseService._internal();
 
   Database? _db;
+  DateTime? _lastCleanupTime;
 
   Future<Database?> get database async {
     try {
@@ -378,7 +379,12 @@ class LocalDatabaseService {
   }
 
   /// Clean up duplicate records stored in SQLite so local counts strictly match in-memory lists
-  Future<int> cleanupDuplicates() async {
+  Future<int> cleanupDuplicates({bool force = false}) async {
+    final now = DateTime.now();
+    if (!force && _lastCleanupTime != null && now.difference(_lastCleanupTime!) < const Duration(minutes: 3)) {
+      return 0;
+    }
+    _lastCleanupTime = now;
     final db = await database;
     if (db == null) return 0;
     int removed = 0;
