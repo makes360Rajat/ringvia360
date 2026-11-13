@@ -62,6 +62,12 @@ class _HomeScreenState extends State<HomeScreen>
     widget.syncService.checkPermissions();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _onServiceChanged();
+      if (widget.syncService.hasSmsPermission) {
+        widget.syncService.syncDeviceSms();
+      }
+      if (widget.syncService.hasCallLogPermission) {
+        widget.syncService.syncDeviceCallLogs();
+      }
     });
   }
 

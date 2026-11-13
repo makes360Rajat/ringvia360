@@ -51,9 +51,10 @@ object MmsLookupHelper {
             }
 
             // 2. Preload addresses from content://mms/addr
-            // Type 137 = PduHeaders.FROM, Type 151 = PduHeaders.TO
+            // Type 137 = PduHeaders.FROM, Type 151 = PduHeaders.TO, Type 130 = CC/Recipient
             val fromAddresses = mutableMapOf<String, String>()
             val toAddresses = mutableMapOf<String, String>()
+            val otherAddresses = mutableMapOf<String, String>()
             val addrUri = Uri.parse("content://mms/addr")
             val addrProjection = arrayOf("msg_id", "type", "address")
             context.contentResolver.query(addrUri, addrProjection, null, null, null)?.use { cursor ->
@@ -65,10 +66,10 @@ object MmsLookupHelper {
                     val type = if (typeIdx != -1) cursor.getInt(typeIdx) else 0
                     val addr = if (addrIdx != -1) cursor.getString(addrIdx) else null
                     if (addr.isNullOrEmpty() || addr.contains("insert-address-token")) continue
-                    if (type == 137) {
-                        fromAddresses[msgId] = addr
-                    } else if (type == 151) {
-                        toAddresses[msgId] = addr
+                    when (type) {
+                        137 -> fromAddresses[msgId] = addr
+                        151 -> toAddresses[msgId] = addr
+                        else -> otherAddresses[msgId] = addr
                     }
                 }
             }
@@ -103,9 +104,9 @@ object MmsLookupHelper {
                     if (body.isEmpty()) continue
 
                     val address = if (direction == "incoming") {
-                        fromAddresses[id] ?: toAddresses[id] ?: ""
+                        fromAddresses[id] ?: otherAddresses[id] ?: toAddresses[id] ?: ""
                     } else {
-                        toAddresses[id] ?: fromAddresses[id] ?: ""
+                        toAddresses[id] ?: otherAddresses[id] ?: fromAddresses[id] ?: ""
                     }
                     if (address.isEmpty()) continue
 
@@ -114,14 +115,18 @@ object MmsLookupHelper {
                     val resolvedName = contactsMap[key] ?: contactsMap[address] ?: address
                     val dateIso = isoFormat.format(Date(dateMs))
 
+                    Log.d(TAG, "MMS/RCS loaded: id=$id, dir=$direction, addr=$address, name=$resolvedName, body=$body")
+
                     list.add(mapOf(
                         "uid" to "mms-$id-$dateMs",
                         "kind" to "sms",
+                        "type" to "sms",
                         "direction" to direction,
                         "number" to address,
                         "name" to resolvedName,
                         "sim" to 1,
                         "text" to body,
+                        "body" to body,
                         "time" to dateMs,
                         "timestamp" to dateIso,
                         "source" to "auto"
@@ -134,3 +139,4 @@ object MmsLookupHelper {
         return list
     }
 }
+

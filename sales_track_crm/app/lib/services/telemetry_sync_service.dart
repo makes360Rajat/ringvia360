@@ -1333,8 +1333,8 @@ class TelemetrySyncService extends ChangeNotifier {
 
   static bool isSameSms(SalesTrackEvent a, SalesTrackEvent b) {
     if (a.uid.isNotEmpty && b.uid.isNotEmpty && a.uid == b.uid) return true;
-    final aMatch = RegExp(r'^(?:sms|mms)-(\d+)').firstMatch(a.uid);
-    final bMatch = RegExp(r'^(?:sms|mms)-(\d+)').firstMatch(b.uid);
+    final aMatch = RegExp(r'^((?:sms|mms)-\d+)').firstMatch(a.uid);
+    final bMatch = RegExp(r'^((?:sms|mms)-\d+)').firstMatch(b.uid);
     if (aMatch != null && bMatch != null && aMatch.group(1) == bMatch.group(1)) {
       return true;
     }
@@ -1368,7 +1368,7 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       if (existingIdx < 0) {
-        final match = RegExp(r'^(?:sms|mms)-(\d+)-').firstMatch(sms.uid);
+        final match = RegExp(r'^((?:sms|mms)-\d+)-').firstMatch(sms.uid);
         if (match != null && logIdIndex.containsKey(match.group(1)!)) {
           existingIdx = logIdIndex[match.group(1)!]!;
         }
@@ -1408,7 +1408,7 @@ class TelemetrySyncService extends ChangeNotifier {
         final newIdx = result.length;
         result.add(sms);
         if (sms.uid.isNotEmpty) uidIndex[sms.uid] = newIdx;
-        final match = RegExp(r'^(?:sms|mms)-(\d+)-').firstMatch(sms.uid);
+        final match = RegExp(r'^((?:sms|mms)-\d+)-').firstMatch(sms.uid);
         if (match != null) logIdIndex[match.group(1)!] = newIdx;
         if (numKey.isNotEmpty) {
           timeNumIndex['${sms.direction}_${numKey}_${sms.time ~/ 60000}'] = newIdx;
