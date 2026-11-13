@@ -428,6 +428,27 @@ object NativeSyncManager {
                         sendOrQueueEvent(context, event)
                     }
                 }
+
+                // Check recent MMS and RCS messages
+                val mmsList = MmsLookupHelper.queryMmsMessages(context, limit = 20, sinceMs = cutoff)
+                for (event in mmsList) {
+                    val uid = event["uid"]?.toString() ?: ""
+                    val number = event["number"]?.toString() ?: ""
+                    val text = event["text"]?.toString() ?: ""
+                    val timeMs = (event["time"] as? Number)?.toLong() ?: 0L
+
+                    if (isSmsAlreadyProcessed(number, text, timeMs, uid)) continue
+                    if (isMessageCountSummary(text)) continue
+
+                    markSmsProcessed(number, text, timeMs, uid)
+                    processedUids.add(uid)
+                    if (processedUids.size > 200) {
+                        val it = processedUids.iterator()
+                        if (it.hasNext()) { it.next(); it.remove() }
+                    }
+
+                    sendOrQueueEvent(context, event)
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "checkAndSyncLatestSms error: ${e.message}")
             }

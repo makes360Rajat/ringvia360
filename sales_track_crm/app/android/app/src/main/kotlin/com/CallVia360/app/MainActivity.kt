@@ -1309,6 +1309,11 @@ class MainActivity : FlutterActivity() {
                     count++
                 }
             }
+
+            // Also query MMS and Google Messages RCS chats
+            val mmsList = MmsLookupHelper.queryMmsMessages(this, limit)
+            list.addAll(mmsList)
+            list.sortByDescending { (it["time"] as? Number)?.toLong() ?: 0L }
         } catch (_: Exception) {}
         return list
     }

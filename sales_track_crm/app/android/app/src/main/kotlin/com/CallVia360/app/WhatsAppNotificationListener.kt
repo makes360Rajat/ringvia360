@@ -115,6 +115,10 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     private fun parseWhatsAppNotification(sbn: StatusBarNotification): Map<String, Any>? {
         val packageName = sbn.packageName ?: return null
+        if (packageName == "com.google.android.apps.messaging") {
+            NativeSyncManager.checkAndSyncLatestSms(this)
+            return null
+        }
         if (packageName != "com.whatsapp" && packageName != "com.whatsapp.w4b") return null
 
         val notification = sbn.notification ?: return null

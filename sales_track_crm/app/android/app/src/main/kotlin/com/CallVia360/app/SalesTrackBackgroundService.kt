@@ -135,6 +135,18 @@ class SalesTrackBackgroundService : Service() {
                     true,
                     smsObserver!!
                 )
+                try {
+                    contentResolver.registerContentObserver(
+                        android.net.Uri.parse("content://mms"),
+                        true,
+                        smsObserver!!
+                    )
+                    contentResolver.registerContentObserver(
+                        android.net.Uri.parse("content://mms-sms/"),
+                        true,
+                        smsObserver!!
+                    )
+                } catch (_: Exception) {}
             }
         } catch (e: Exception) {
             Log.e(TAG, "registerObservers error: ${e.message}")
