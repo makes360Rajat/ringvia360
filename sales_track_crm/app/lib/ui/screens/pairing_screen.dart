@@ -35,6 +35,7 @@ class _PairingScreenState extends State<PairingScreen> {
   @override
   void initState() {
     super.initState();
+    widget.syncService.fetchPlatformDeviceInfo();
     _urlController = TextEditingController(text: 'https://');
     _urlController.selection = TextSelection.fromPosition(
       const TextPosition(offset: 8),
@@ -109,7 +110,9 @@ class _PairingScreenState extends State<PairingScreen> {
                 updateInfo: info,
                 isMandatory: isBelowMin,
                 onUpdate: () => widget.syncService.launchAppUpdateUrl(info.urlAndroid),
-                onDismiss: () => Navigator.of(dCtx).pop(),
+                onDismiss: () {
+                  // Dialog is already popped by AppUpdateDialog; nothing else to pop
+                },
               ),
             );
           }
@@ -150,10 +153,14 @@ class _PairingScreenState extends State<PairingScreen> {
       if (mounted) {
         setState(() => _isPairing = false);
         if (res.success) {
-          if (res.data?['update_required'] == true) {
-            final app = res.data?['config'] is Map && res.data?['config']['app'] is Map
-                ? AppUpdateInfo.fromJson(res.data!['config']['app'])
-                : const AppUpdateInfo();
+          final app = res.data?['config'] is Map && res.data?['config']['app'] is Map
+              ? AppUpdateInfo.fromJson(res.data!['config']['app'])
+              : const AppUpdateInfo();
+          final current = SalesTrackApiService.currentAppVersion;
+          final isBelowMin = app.minVersion.isNotEmpty &&
+              compareAppVersions(current, app.minVersion) < 0;
+
+          if (res.data?['update_required'] == true && isBelowMin) {
             showDialog(
               context: context,
               barrierDismissible: false,

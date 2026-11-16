@@ -59,12 +59,8 @@ object NativeSyncManager {
             val key = if (digits.length >= 5) digits.takeLast(10) else address.trim().lowercase()
             val cleanBody = body.trim().replace(Regex("\\s+"), " ")
             val bodyHash = (cleanBody.hashCode().toLong() and 0xFFFFFFFFL).toString(16)
-            val bucket = timeMs / 60000 // 1-minute bucket
+            val bucket = timeMs / 15000 // 15-second window for same-instant duplicate suppression
             processedSmsFingerprints.add("${key}_${bodyHash}_$bucket")
-            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket - 1}")
-            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket + 1}")
-            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket - 2}")
-            processedSmsFingerprints.add("${key}_${bodyHash}_${bucket + 2}")
             if (processedSmsFingerprints.size > 800) {
                 val it = processedSmsFingerprints.iterator()
                 if (it.hasNext()) { it.next(); it.remove() }
@@ -79,7 +75,7 @@ object NativeSyncManager {
             val key = if (digits.length >= 5) digits.takeLast(10) else address.trim().lowercase()
             val cleanBody = body.trim().replace(Regex("\\s+"), " ")
             val bodyHash = (cleanBody.hashCode().toLong() and 0xFFFFFFFFL).toString(16)
-            val bucket = timeMs / 60000
+            val bucket = timeMs / 15000
             if (processedSmsFingerprints.contains("${key}_${bodyHash}_$bucket")) return true
         }
         return false
@@ -315,7 +311,7 @@ object NativeSyncManager {
                 val cutoff = System.currentTimeMillis() - (15 * 60 * 1000)
                 val selection = "${CallLog.Calls.DATE} >= ?"
                 val selectionArgs = arrayOf(cutoff.toString())
-                val sortOrder = "${CallLog.Calls.DATE} DESC LIMIT 10"
+                val sortOrder = "${CallLog.Calls.DATE} DESC"
 
                 context.contentResolver.query(
                     CallLog.Calls.CONTENT_URI,
@@ -324,7 +320,9 @@ object NativeSyncManager {
                     selectionArgs,
                     sortOrder
                 )?.use { cursor ->
-                    while (cursor.moveToNext()) {
+                    var count = 0
+                    while (cursor.moveToNext() && count < 10) {
+                        count++
                         val id = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls._ID))
                         val number = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.NUMBER)) ?: ""
                         val name = cursor.getString(cursor.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)) ?: ""
@@ -408,7 +406,7 @@ object NativeSyncManager {
                 val cutoff = System.currentTimeMillis() - (15 * 60 * 1000)
                 val selection = "${Telephony.Sms.DATE} >= ?"
                 val selectionArgs = arrayOf(cutoff.toString())
-                val sortOrder = "${Telephony.Sms.DATE} DESC LIMIT 10"
+                val sortOrder = "${Telephony.Sms.DATE} DESC"
 
                 context.contentResolver.query(
                     Telephony.Sms.CONTENT_URI,
@@ -417,7 +415,9 @@ object NativeSyncManager {
                     selectionArgs,
                     sortOrder
                 )?.use { cursor ->
-                    while (cursor.moveToNext()) {
+                    var count = 0
+                    while (cursor.moveToNext() && count < 10) {
+                        count++
                         val id = cursor.getString(cursor.getColumnIndexOrThrow(Telephony.Sms._ID))
                         val address = cursor.getString(cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)) ?: ""
                         val body = cursor.getString(cursor.getColumnIndexOrThrow(Telephony.Sms.BODY)) ?: ""
@@ -477,6 +477,9 @@ object NativeSyncManager {
                         val it = processedUids.iterator()
                         if (it.hasNext()) { it.next(); it.remove() }
                     }
+
+                    Log.d("RCS_SYNC", "📱 [RCS MMS WATCHDOG] Sensed new MMS/RCS message: num=$number, text=\"$text\"")
+                    println("📱 [RCS MMS WATCHDOG] Sensed new MMS/RCS message: num=$number, text=\"$text\"")
 
                     sendOrQueueEvent(context, event)
                 }
@@ -570,7 +573,7 @@ object NativeSyncManager {
         try {
             val dbFile = context.getDatabasePath("sales_track_local.db")
             if (!dbFile.exists()) return
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
             db.use { database ->
                 val uid = event["uid"]?.toString() ?: return
                 val values = ContentValues().apply {
@@ -605,7 +608,7 @@ object NativeSyncManager {
         try {
             val dbFile = context.getDatabasePath("sales_track_local.db")
             if (!dbFile.exists() || uids.isEmpty()) return
-            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
+            val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE or SQLiteDatabase.ENABLE_WRITE_AHEAD_LOGGING)
             db.use { database ->
                 val now = System.currentTimeMillis()
                 val values = ContentValues().apply {

@@ -498,7 +498,7 @@ public class TelemetryBridgePlugin: NSObject, FlutterPlugin, FlutterStreamHandle
         defaults.set(deviceUid, forKey: "device_uid")
       }
 
-      let appVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.2"
+      let appVer = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.5"
       let appBuild = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "3"
       let osVer = UIDevice.current.systemVersion
 

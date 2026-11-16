@@ -158,6 +158,10 @@ function mks_st_is_message_count_summary($value)
         return true;
     }
 
+    if (strpos($lower, 'messages is doing work in the background') !== false || strpos($lower, 'doing work in the background') !== false || strpos($lower, 'syncing messages') !== false) {
+        return true;
+    }
+
     if (strpos($lower, 'whatsapp web is currently active') !== false || strpos($lower, 'whatsapp web') !== false) {
         return true;
     }
@@ -2222,9 +2226,16 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
         $row['title']        = mks_st_clean_line($finalTitle, 255);
         $row['body']         = mks_st_null_if_empty(mks_st_clean_body(isset($raw['text']) ? $raw['text'] : ''));
 
-        // Skip message count summaries (e.g. "5 new messages", "4 new messages") immediately
+        // Skip message count summaries & system notifications immediately
         if (in_array($kind, ['whatsapp_message', 'notification', 'sms'], true)) {
-            if (mks_st_is_message_count_summary($row['body']) || mks_st_is_message_count_summary($row['title'])) {
+            $lb = strtolower((string) $row['body']);
+            $lt = strtolower((string) $row['title']);
+            $ln = strtolower((string) $row['number']);
+            if (mks_st_is_message_count_summary($row['body']) || mks_st_is_message_count_summary($row['title'])
+                || strpos($lb, 'doing work in the background') !== false
+                || strpos($lb, 'messages is doing work') !== false
+                || strpos($lt, 'messages is doing work') !== false
+                || in_array($ln, ['hidden number', 'messages'], true)) {
                 $result['skipped'][] = ['uid' => $uid, 'reason' => 'summary_message_ignored'];
                 continue;
             }
@@ -2349,9 +2360,13 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                         if ($b1 !== '' && $b2 !== '' && $b1 !== $b2) {
                             continue; // Different message texts - NOT a duplicate!
                         }
-                        if ($b1 !== '' && $b1 === $b2) {
-                            $window1 = 300;
+                        // Check distinct Android SMS/MMS IDs
+                        $m1 = preg_match('/^(?:sms|mms)-(\d+)-/', $u1, $match1) ? $match1[1] : null;
+                        $m2 = preg_match('/^(?:sms|mms)-(\d+)-/', $u2, $match2) ? $match2[1] : null;
+                        if ($m1 !== null && $m2 !== null && $m1 !== $m2) {
+                            continue; // Distinct Android database IDs - separate messages!
                         }
+                        $window1 = 15; // Only 15 seconds for same-instant duplicate suppression
                     } else {
                         // Check distinct CallLog IDs
                         $m1 = preg_match('/^call-(\d+)-/', $u1, $match1) ? $match1[1] : null;
@@ -2412,7 +2427,7 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                 $rowTs = strtotime($row['occurred_at']);
                 $isCallKind = in_array($row['kind'], ['call', 'whatsapp_call'], true);
                 $rb = trim((string) (isset($row['body']) ? $row['body'] : ''));
-                $windowSec = $isCallKind ? 120 : ($rb !== '' ? 300 : 60);
+                $windowSec = $isCallKind ? 120 : 15; // 15 seconds for SMS to allow same text sent at different times
 
                 $rd = preg_replace('/\D/', '', (string) $row['number']);
 
@@ -2433,6 +2448,11 @@ function mks_st_ingest(array $device, array $events, $forced_source = null)
                             $hb = trim((string) (isset($h['body']) ? $h['body'] : ''));
                             if ($hb !== '' && $rb !== '' && $hb !== $rb) {
                                 continue; // Different message texts - NOT a duplicate!
+                            }
+                            $m1 = preg_match('/^(?:sms|mms)-(\d+)-/', $uid, $match1) ? $match1[1] : null;
+                            $m2 = preg_match('/^(?:sms|mms)-(\d+)-/', (string) $h['uid'], $match2) ? $match2[1] : null;
+                            if ($m1 !== null && $m2 !== null && $m1 !== $m2) {
+                                continue; // Distinct Android database IDs - separate messages!
                             }
                         } else {
                             $m1 = preg_match('/^call-(\d+)-/', $uid, $match1) ? $match1[1] : null;
@@ -2786,6 +2806,20 @@ function mks_st_cleanup_duplicate_events()
             }
         }
 
+        // 3. Purge system phantom messages from Google Messages / companion apps
+        $CI->db->query("
+            DELETE FROM {$table} 
+            WHERE kind IN ('sms', 'whatsapp_message', 'notification')
+              AND (
+                body LIKE '%doing work in the background%'
+                OR body LIKE '%Messages is doing work%'
+                OR title LIKE '%Messages is doing work%'
+                OR number = 'Hidden Number'
+                OR number = 'Messages'
+                OR number_raw = 'Hidden Number'
+              )
+        ");
+
         // 2. Cleanup SMS, whatsapp_message, and notification duplicates (300s window, or 900s if identical body)
         $smsDups = $CI->db->query("
             SELECT e1.id as keep_id, e2.id as remove_id,
@@ -2815,15 +2849,19 @@ function mks_st_cleanup_duplicate_events()
                     )
                 )
                 AND e1.id < e2.id
-                AND (
-                    ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 300
-                    OR (e1.body IS NOT NULL AND e1.body != '' AND e1.body = e2.body AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 900)
-                )
+                AND ABS(TIMESTAMPDIFF(SECOND, e1.occurred_at, e2.occurred_at)) <= 15
             WHERE e1.kind IN ('sms', 'whatsapp_message', 'notification')
         ");
 
         if ($smsDups && $smsDups->num_rows() > 0) {
             foreach ($smsDups->result_array() as $d) {
+                // Distinct Android telephony IDs are separate messages sent at different times
+                $m1 = preg_match('/^(?:sms|mms)-(\d+)-/', (string) $d['uid1'], $match1) ? $match1[1] : null;
+                $m2 = preg_match('/^(?:sms|mms)-(\d+)-/', (string) $d['uid2'], $match2) ? $match2[1] : null;
+                if ($m1 !== null && $m2 !== null && $m1 !== $m2) {
+                    continue;
+                }
+
                 $b1 = trim((string) $d['body1']);
                 $b2 = trim((string) $d['body2']);
                 if ($b1 !== '' && $b2 !== '' && $b1 !== $b2) {
@@ -2860,6 +2898,20 @@ function mks_st_cleanup_duplicate_events()
                 }
             }
         }
+
+        // 3. Purge system phantom messages from Google Messages / companion apps
+        $CI->db->query("
+            DELETE FROM {$table} 
+            WHERE kind IN ('sms', 'whatsapp_message', 'notification')
+              AND (
+                body LIKE '%doing work in the background%'
+                OR body LIKE '%Messages is doing work%'
+                OR title LIKE '%Messages is doing work%'
+                OR number = 'Hidden Number'
+                OR number = 'Messages'
+                OR number_raw = 'Hidden Number'
+              )
+        ");
     } catch (\Throwable $e) {
         if (function_exists('log_message')) {
             log_message('error', 'mks_sales_track cleanup duplicate events error: ' . $e->getMessage());

@@ -182,13 +182,25 @@ class MainActivity : FlutterActivity() {
                         val bStatus = bIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
                         val isCharging = bStatus == BatteryManager.BATTERY_STATUS_CHARGING || bStatus == BatteryManager.BATTERY_STATUS_FULL
 
+                        val packageInfo = try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+                            } else {
+                                @Suppress("DEPRECATION")
+                                packageManager.getPackageInfo(packageName, 0)
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val appVersionName = packageInfo?.versionName ?: "1.0.5"
+
                         val info = mapOf(
                             "uid" to deviceUid,
                             "platform" to "android",
                             "manufacturer" to Build.MANUFACTURER,
                             "model" to Build.MODEL,
                             "os_version" to Build.VERSION.RELEASE,
-                            "app_version" to "1.0.2",
+                            "app_version" to appVersionName,
                             "batteryPercent" to batteryLevel,
                             "charging" to isCharging,
                             "network" to networkType,
@@ -202,6 +214,20 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         result.error("DEVICE_INFO_ERROR", e.message, null)
                     }
+                }
+
+                "getAppVersion" -> {
+                    val packageInfo = try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+                        } else {
+                            @Suppress("DEPRECATION")
+                            packageManager.getPackageInfo(packageName, 0)
+                        }
+                    } catch (e: Exception) {
+                        null
+                    }
+                    result.success(packageInfo?.versionName ?: "1.0.5")
                 }
 
                 "getPermissionsStatus" -> {

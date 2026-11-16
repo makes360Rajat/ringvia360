@@ -3,6 +3,7 @@ package com.CallVia360.app
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Collections
 import java.util.Date
@@ -92,6 +93,13 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         // e.g. "5 new messages", "1 new message", "24 messages", "3 unread messages", "(5 messages)"
         if (lower.matches(Regex("""^\(?\d+\s+(new\s+|unread\s+)?messages?[\s\.\,\!\?]*\)?$"""))) return true
 
+        // Filter out system background notifications from Google Messages
+        if (lower.contains("messages is doing work in the background") ||
+            lower.contains("doing work in the background") ||
+            lower.contains("syncing messages") ||
+            lower.contains("chat features") ||
+            lower.contains("rcs chats")) return true
+
         // e.g. "2 messages from 2 chats", "28 messages from 6 chats", "5 new messages from 3 chats"
         if (lower.matches(Regex("""^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$"""))) return true
 
@@ -115,12 +123,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     private fun parseWhatsAppNotification(sbn: StatusBarNotification): Map<String, Any>? {
         val packageName = sbn.packageName ?: return null
-        if (packageName == "com.google.android.apps.messaging") {
-            NativeSyncManager.checkAndSyncLatestSms(this)
-            return null
-        }
-        if (packageName != "com.whatsapp" && packageName != "com.whatsapp.w4b") return null
-
         val notification = sbn.notification ?: return null
         val extras = notification.extras ?: return null
 
@@ -133,6 +135,14 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val channelId = notification.channelId ?: ""
 
         if (title.isEmpty() && text.isEmpty()) return null
+
+        // 0. Detect RCS / SMS Messages from Google Messages or Samsung Messages
+        if (packageName == "com.google.android.apps.messaging" || packageName == "com.samsung.android.messaging") {
+            NativeSyncManager.checkAndSyncLatestSms(this)
+            return parseSmsOrRcsNotification(sbn, notification, extras, title, text)
+        }
+
+        if (packageName != "com.whatsapp" && packageName != "com.whatsapp.w4b") return null
 
         // Skip message count summary text (e.g. "5 new messages", "3 messages from 2 chats")
         if (isMessageCountSummary(text) || isMessageCountSummary(title) || isMessageCountSummary(subText) || isMessageCountSummary(summaryText)) {
@@ -362,6 +372,85 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 "source" to "auto"
             )
         }
+    }
+
+    private fun parseSmsOrRcsNotification(
+        sbn: StatusBarNotification,
+        notification: Notification,
+        extras: android.os.Bundle,
+        rawTitle: String,
+        rawText: String
+    ): Map<String, Any>? {
+        // Skip ongoing background sync/service notifications
+        if (sbn.isOngoing) return null
+        if ((notification.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) return null
+        if ((notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) return null
+        if ((notification.flags and Notification.FLAG_NO_CLEAR) != 0) return null
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) return null
+
+        if (rawTitle.isEmpty() && rawText.isEmpty()) return null
+        if (isMessageCountSummary(rawText) || isMessageCountSummary(rawTitle)) return null
+
+        var sender = rawTitle
+        var body = rawText
+
+        val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()
+        if (!conversationTitle.isNullOrEmpty()) {
+            sender = conversationTitle
+        }
+
+        if (body.isEmpty()) {
+            val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+            if (!bigText.isNullOrEmpty()) body = bigText
+        }
+
+        if (body.isEmpty() || isMessageCountSummary(body)) return null
+
+        val lowerBody = body.lowercase()
+        val lowerSender = sender.lowercase()
+        if (lowerBody.contains("doing work in the background") ||
+            lowerBody.contains("messages is doing work") ||
+            lowerBody.contains("chat features") ||
+            lowerBody.contains("rcs chats") ||
+            lowerBody.contains("syncing messages") ||
+            lowerSender.contains("messages is doing work") ||
+            lowerSender == "messages" ||
+            lowerSender == "hidden number") {
+            return null
+        }
+
+        val postTime = if (sbn.postTime > 0) sbn.postTime else System.currentTimeMillis()
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        val timestamp = isoFormat.format(Date(postTime))
+
+        val digits = sender.replace(Regex("[^0-9]"), "")
+        val isPhone = sender.startsWith("+") || (digits.length >= 7 && sender.matches(Regex("^[+0-9\\s\\-\\(\\)]{7,}$")))
+        val number = if (isPhone) sender else (ContactLookupHelper.resolvePhoneNumberByName(this, sender) ?: sender)
+        val resolvedName = if (isPhone) (ContactLookupHelper.resolveContactName(this, sender) ?: sender) else sender
+
+        if (number.isEmpty() || number.equals("Hidden Number", ignoreCase = true) || number.equals("Messages", ignoreCase = true)) {
+            return null
+        }
+
+        val uid = "rcs-notif-${sbn.id}-$postTime"
+
+        Log.d("WhatsAppNotificationListener", "📱 [RCS/SMS LISTENER] Intercepted live message: sender=$sender (num=$number, name=$resolvedName) text=\"$body\"")
+        println("📱 [RCS/SMS LISTENER] Intercepted live message: sender=$sender (num=$number, name=$resolvedName) text=\"$body\"")
+
+        return mapOf(
+            "type" to "sms",
+            "kind" to "sms",
+            "uid" to uid,
+            "direction" to "incoming",
+            "number" to number,
+            "name" to resolvedName,
+            "sim" to 1,
+            "text" to body,
+            "body" to body,
+            "time" to postTime,
+            "timestamp" to timestamp,
+            "source" to "auto"
+        )
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {

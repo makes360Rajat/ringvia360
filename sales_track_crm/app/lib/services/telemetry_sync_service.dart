@@ -308,7 +308,18 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> _init() async {
+    Timer? watchdogTimer;
     try {
+      // 4-second safety watchdog: ensures the splash screen NEVER gets stuck under any circumstance
+      watchdogTimer = Timer(const Duration(seconds: 4), () {
+        if (!_isInitialized) {
+          debugPrint('⚠️ Safety watchdog: forced app initialization after 4s');
+          _updateInitProgress(1.0, 'Ready');
+          _isInitialized = true;
+          notifyListeners();
+        }
+      });
+
       _updateInitProgress(0.10, 'Connecting to local storage & credentials...');
 
       await api.init();
@@ -320,6 +331,7 @@ class TelemetrySyncService extends ChangeNotifier {
         notifyListeners();
       };
 
+      await fetchPlatformDeviceInfo();
       checkForAppUpdate();
 
       _updateInitProgress(0.25, 'Loading saved settings & telemetry state...');
@@ -330,8 +342,13 @@ class TelemetrySyncService extends ChangeNotifier {
       await checkPermissions();
 
       _updateInitProgress(0.48, 'Loading local conversation history...');
-      // Load local database history with real-time granular progress
-      await _loadPersistedHistory();
+      // Load local database history with non-blocking timeout
+      await _loadPersistedHistory().timeout(
+        const Duration(seconds: 3),
+        onTimeout: () {
+          debugPrint('⚠️ Local history load timed out; proceeding to open app');
+        },
+      );
 
       _updateInitProgress(0.90, 'Checking pending synchronization queue...');
       await refreshPendingCounts();
@@ -349,11 +366,12 @@ class TelemetrySyncService extends ChangeNotifier {
         });
       }
 
-      await Future.delayed(const Duration(milliseconds: 180));
+      await Future.delayed(const Duration(milliseconds: 120));
       _updateInitProgress(1.0, 'Ready');
     } catch (e, st) {
       debugPrint('Error during TelemetrySyncService init: $e\n$st');
     } finally {
+      watchdogTimer?.cancel();
       _isInitialized = true;
       notifyListeners();
 
@@ -400,6 +418,9 @@ class TelemetrySyncService extends ChangeNotifier {
           }
         });
         _deviceInfo = info;
+        if (info['app_version'] != null && info['app_version'].toString().isNotEmpty) {
+          SalesTrackApiService.updateCurrentAppVersion(info['app_version'].toString());
+        }
         _batteryPercent = (info['batteryPercent'] as num?)?.toInt() ?? 85;
         notifyListeners();
       }
@@ -429,16 +450,8 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> requestAllPermissions() async {
     try {
       await _platform.invokeMethod('requestAllPermissions');
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 300));
       await checkPermissions();
-      if (hasCallLogPermission) {
-        await syncDeviceCallLogs();
-      }
-      if (hasSmsPermission) {
-        await syncDeviceSms();
-      }
-      await syncActiveWhatsAppNotifications();
-      await scanLocalRecordings();
     } catch (e) {
       debugPrint('Error requesting permissions: $e');
     }
@@ -447,19 +460,10 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> requestPermission(String permissionGroup) async {
     try {
       await _platform.invokeMethod('requestPermission', {'permission': permissionGroup});
-      await Future.delayed(const Duration(milliseconds: 400));
+      await Future.delayed(const Duration(milliseconds: 300));
       await checkPermissions();
-      if (hasCallLogPermission) {
-        await syncDeviceCallLogs();
-      }
-      if (hasSmsPermission) {
-        await syncDeviceSms();
-      }
-      await syncActiveWhatsAppNotifications();
-      await scanLocalRecordings();
     } catch (e) {
       debugPrint('Error requesting permission $permissionGroup: $e');
-      await requestAllPermissions();
     }
   }
 
@@ -517,7 +521,7 @@ class TelemetrySyncService extends ChangeNotifier {
         'manufacturer': 'Android',
         'model': 'Device',
         'os_version': '14',
-        'app_version': '1.9.7',
+        'app_version': SalesTrackApiService.currentAppVersion,
       };
     }
 
@@ -684,7 +688,10 @@ class TelemetrySyncService extends ChangeNotifier {
     }
 
     // Unpaired: calls, SMS and WhatsApp events are not kept or queued.
-    if (!_isPaired && type != 'permissions_updated') return;
+    if (!_isPaired && type != 'permissions_updated') {
+      debugPrint('ℹ️ [TELEMETRY] Native event ($type) received while unpaired: sender=${raw['name'] ?? raw['sender']} num=${raw['number']} text="${raw['text']}"');
+      return;
+    }
 
     // Permission state changed callback from native Android
     if (type == 'permissions_updated') {
@@ -698,13 +705,6 @@ class TelemetrySyncService extends ChangeNotifier {
       } else {
         checkPermissions();
       }
-      if (hasCallLogPermission) {
-        syncDeviceCallLogs();
-      }
-      if (hasSmsPermission) {
-        syncDeviceSms();
-      }
-      scanLocalRecordings();
       notifyListeners();
       return;
     }
@@ -820,6 +820,17 @@ class TelemetrySyncService extends ChangeNotifier {
         source: 'auto',
       );
 
+      final lowerText = (event.text ?? '').toLowerCase();
+      if (lowerText.contains('doing work in the background') ||
+          lowerText.contains('messages is doing work') ||
+          lowerText.contains('syncing messages') ||
+          event.number.toLowerCase() == 'hidden number' ||
+          event.number.toLowerCase() == 'messages') {
+        return;
+      }
+
+      debugPrint('📱 [RCS/SMS LIVE STREAM] Received message from "${event.name}" (${event.number}): "${event.text}"');
+
       final existingIndex = _smsList.indexWhere((s) => isSameSms(s, event));
       bool shouldEnqueue = true;
       if (existingIndex >= 0) {
@@ -840,12 +851,18 @@ class TelemetrySyncService extends ChangeNotifier {
 
       LocalDatabaseService.instance.saveEvents([event]);
       _persistSms();
-      if (shouldEnqueue) {
+      final isNotificationPreview = event.uid.startsWith('rcs-notif-');
+      if (shouldEnqueue && !isNotificationPreview) {
         _enqueueEvent(event);
       }
       notifyListeners();
-      if (shouldEnqueue) {
+      if (shouldEnqueue && !isNotificationPreview) {
         syncNow();
+      } else if (isNotificationPreview) {
+        // Debounce fetch canonical SMS/MMS from device database
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (hasSmsPermission) syncDeviceSms();
+        });
       }
     } else if (type == 'whatsapp_call' || type == 'whatsapp_call_completed') {
       final uid = raw['uid']?.toString() ?? 'wacall-${DateTime.now().millisecondsSinceEpoch}';
@@ -1334,19 +1351,21 @@ class TelemetrySyncService extends ChangeNotifier {
 
   static bool isSameSms(SalesTrackEvent a, SalesTrackEvent b) {
     if (a.uid.isNotEmpty && b.uid.isNotEmpty && a.uid == b.uid) return true;
-    final aMatch = RegExp(r'^((?:sms|mms)-\d+)').firstMatch(a.uid);
-    final bMatch = RegExp(r'^((?:sms|mms)-\d+)').firstMatch(b.uid);
-    if (aMatch != null && bMatch != null && aMatch.group(1) == bMatch.group(1)) {
-      return true;
+    final aMatch = RegExp(r'^((?:sms|mms|rcs)-\d+)').firstMatch(a.uid);
+    final bMatch = RegExp(r'^((?:sms|mms|rcs)-\d+)').firstMatch(b.uid);
+    if (aMatch != null && bMatch != null) {
+      if (aMatch.group(1) == bMatch.group(1)) return true;
+      // Distinct system database IDs: separate messages sent at different times
+      return false;
     }
     final textA = a.text?.trim() ?? '';
     final textB = b.text?.trim() ?? '';
     if (textA.isNotEmpty && textB.isNotEmpty && textA != textB) {
       return false;
     }
+    // Only same direction and matching numbers within 15s (same-instant duplicate)
     if (a.direction == b.direction && smsNumbersMatch(a.number, b.number)) {
-      final window = (textA.isNotEmpty && textA == textB) ? 300000 : 60000;
-      if ((a.time - b.time).abs() <= window) {
+      if ((a.time - b.time).abs() <= 15000) {
         return true;
       }
     }
@@ -1362,6 +1381,16 @@ class TelemetrySyncService extends ChangeNotifier {
     final List<SalesTrackEvent> result = [];
 
     for (final sms in list) {
+      final t = (sms.text ?? '').toLowerCase();
+      final n = sms.number.toLowerCase();
+      if (t.contains('doing work in the background') ||
+          t.contains('messages is doing work') ||
+          t.contains('syncing messages') ||
+          n == 'hidden number' ||
+          n == 'messages') {
+        continue;
+      }
+
       int existingIdx = -1;
 
       if (sms.uid.isNotEmpty && uidIndex.containsKey(sms.uid)) {
@@ -1369,7 +1398,7 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       if (existingIdx < 0) {
-        final match = RegExp(r'^((?:sms|mms)-\d+)-').firstMatch(sms.uid);
+        final match = RegExp(r'^((?:sms|mms|rcs)-\d+)-').firstMatch(sms.uid);
         if (match != null && logIdIndex.containsKey(match.group(1)!)) {
           existingIdx = logIdIndex[match.group(1)!]!;
         }
@@ -1380,12 +1409,12 @@ class TelemetrySyncService extends ChangeNotifier {
         numKey = sms.number.replaceAll(RegExp(r'[\s\-+]'), '').toLowerCase();
       }
       if (existingIdx < 0 && numKey.isNotEmpty) {
-        final bucket = sms.time ~/ 60000;
+        final bucket = sms.time ~/ 15000;
         for (final b in [bucket, bucket - 1, bucket + 1]) {
           final k = '${sms.direction}_${numKey}_$b';
           if (timeNumIndex.containsKey(k)) {
             final candIdx = timeNumIndex[k]!;
-            if ((result[candIdx].time - sms.time).abs() <= 60000) {
+            if ((result[candIdx].time - sms.time).abs() <= 15000) {
               if (result[candIdx].text == null || sms.text == null || result[candIdx].text!.isEmpty || sms.text!.isEmpty || result[candIdx].text == sms.text) {
                 existingIdx = candIdx;
                 break;
@@ -1395,9 +1424,9 @@ class TelemetrySyncService extends ChangeNotifier {
         }
       }
 
-      // Check alphanumeric sender variants and 5-min window if text body is identical
+      // Check same-instant duplicate (<= 15 seconds)
       if (existingIdx < 0 && (sms.text?.trim().isNotEmpty ?? false)) {
-        for (int i = result.length - 1; i >= 0 && i >= result.length - 40; i--) {
+        for (int i = result.length - 1; i >= 0 && i >= result.length - 20; i--) {
           if (isSameSms(result[i], sms)) {
             existingIdx = i;
             break;
@@ -1409,10 +1438,10 @@ class TelemetrySyncService extends ChangeNotifier {
         final newIdx = result.length;
         result.add(sms);
         if (sms.uid.isNotEmpty) uidIndex[sms.uid] = newIdx;
-        final match = RegExp(r'^((?:sms|mms)-\d+)-').firstMatch(sms.uid);
+        final match = RegExp(r'^((?:sms|mms|rcs)-\d+)-').firstMatch(sms.uid);
         if (match != null) logIdIndex[match.group(1)!] = newIdx;
         if (numKey.isNotEmpty) {
-          timeNumIndex['${sms.direction}_${numKey}_${sms.time ~/ 60000}'] = newIdx;
+          timeNumIndex['${sms.direction}_${numKey}_${sms.time ~/ 15000}'] = newIdx;
         }
       } else {
         final existing = result[existingIdx];
@@ -1468,6 +1497,7 @@ class TelemetrySyncService extends ChangeNotifier {
     if (RegExp(r'^\d+\s+(new\s+|unread\s+)?messages?\s+from\s+.*$').hasMatch(lower)) return true;
     if (lower.contains('new message') && RegExp(r'.*\b\d+\s+new\s+messages?\b.*').hasMatch(lower) && lower.length < 35) return true;
     if (lower.contains('checking for new messages') || lower.contains('looking for new messages')) return true;
+    if (lower.contains('messages is doing work in the background') || lower.contains('doing work in the background') || lower.contains('syncing messages')) return true;
     if (lower.contains('whatsapp web is currently active') || lower.contains('whatsapp web')) return true;
     if (lower.contains('messages from') && lower.contains('chat')) return true;
     if (RegExp(r'.*\(\d+\s+messages?\)$').hasMatch(lower)) return true;
@@ -1733,6 +1763,7 @@ class TelemetrySyncService extends ChangeNotifier {
         final cleanSms = dedupSmsList(_smsList);
         _smsList.clear();
         _smsList.addAll(cleanSms);
+        debugPrint('💬 [SMS/RCS SYNC] Successfully loaded ${_smsList.length} total messages (latest: ${_smsList.firstOrNull?.name} - "${_smsList.firstOrNull?.text}")');
         await LocalDatabaseService.instance.saveEvents(_smsList);
         await LocalDatabaseService.instance.cleanupDuplicates();
         await _persistSms();
@@ -1814,7 +1845,11 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
+  bool _isScanningRecordings = false;
+
   Future<void> scanLocalRecordings() async {
+    if (_isScanningRecordings) return;
+    _isScanningRecordings = true;
     try {
       final list = await _platform.invokeListMethod<Map<dynamic, dynamic>>('fetchLocalCallRecordings');
       if (list != null) {
@@ -1827,6 +1862,8 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error scanning recordings: $e');
+    } finally {
+      _isScanningRecordings = false;
     }
   }
 
@@ -1959,6 +1996,16 @@ class TelemetrySyncService extends ChangeNotifier {
 
     // Filter out group summary notifications (e.g. "5 new messages")
     if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) return;
+
+    // Never enqueue transient notification events for SMS/RCS - canonical events come from Telephony/Mms provider
+    if (event.uid.startsWith('rcs-notif-')) return;
+
+    final lowerText = (event.text ?? '').toLowerCase();
+    if (lowerText.contains('doing work in the background') ||
+        lowerText.contains('messages is doing work') ||
+        lowerText.contains('syncing messages') ||
+        event.number.toLowerCase() == 'hidden number' ||
+        event.number.toLowerCase() == 'messages') return;
 
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
@@ -2519,29 +2566,32 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       // Check for app update requirements from heartbeat config
-      if (res.data!['update_required'] == true) {
+      final current = SalesTrackApiService.currentAppVersion;
+      final minVer = _config.appMinVersion.isNotEmpty
+          ? _config.appMinVersion
+          : _config.appInfo.minVersion;
+      final latestVer = _config.appInfo.latestVersion;
+      final isBelowMin = minVer.isNotEmpty && compareAppVersions(current, minVer) < 0;
+      final isBelowLatest = latestVer.isNotEmpty && compareAppVersions(current, latestVer) < 0;
+
+      if (res.data!['update_required'] == true && isBelowMin) {
         _isUpdateMandatory = true;
         _availableUpdate = _config.appInfo.isNotEmpty
             ? _config.appInfo
             : AppUpdateInfo(
-                latestVersion: _config.appMinVersion,
-                minVersion: _config.appMinVersion,
+                latestVersion: minVer,
+                minVersion: minVer,
                 notes: 'Essential update required by CRM server.',
               );
-      } else if (_config.appInfo.isNotEmpty) {
-        final current = SalesTrackApiService.currentAppVersion;
-        final isBelowMin = _config.appInfo.minVersion.isNotEmpty &&
-            compareAppVersions(current, _config.appInfo.minVersion) < 0;
-        final isBelowLatest = _config.appInfo.latestVersion.isNotEmpty &&
-            compareAppVersions(current, _config.appInfo.latestVersion) < 0;
-
-        if (isBelowMin) {
-          _availableUpdate = _config.appInfo;
-          _isUpdateMandatory = true;
-        } else if (isBelowLatest && _availableUpdate == null) {
-          _availableUpdate = _config.appInfo;
-          _isUpdateMandatory = false;
-        }
+      } else if (isBelowMin) {
+        _availableUpdate = _config.appInfo;
+        _isUpdateMandatory = true;
+      } else if (isBelowLatest && _availableUpdate == null) {
+        _availableUpdate = _config.appInfo;
+        _isUpdateMandatory = false;
+      } else {
+        _availableUpdate = null;
+        _isUpdateMandatory = false;
       }
 
       // Process CRM commands
@@ -2859,19 +2909,23 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> _loadPersistedHistory() async {
-    // 1. Try loading from SQLite first (Offline-First source of truth)
+    // 1. Try loading from SQLite first (Offline-First source of truth) with non-blocking timeouts
     try {
       _updateInitProgress(0.50, 'Loading local call records...');
-      final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call', limit: 3000);
+      final dbCalls = await LocalDatabaseService.instance.getEvents(kind: 'call', limit: 1000)
+          .timeout(const Duration(milliseconds: 1500), onTimeout: () => []);
 
       _updateInitProgress(0.62, 'Loading WhatsApp conversations...');
-      final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp', limit: 1000);
+      final dbWa = await LocalDatabaseService.instance.getEvents(kind: 'whatsapp', limit: 1000)
+          .timeout(const Duration(milliseconds: 1200), onTimeout: () => []);
 
       _updateInitProgress(0.74, 'Loading SMS messages...');
-      final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms', limit: 1500);
+      final dbSms = await LocalDatabaseService.instance.getEvents(kind: 'sms', limit: 1000)
+          .timeout(const Duration(milliseconds: 1200), onTimeout: () => []);
 
       _updateInitProgress(0.84, 'Loading pending sync items...');
-      final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 5000);
+      final pendingFromDb = await LocalDatabaseService.instance.getPendingEvents(limit: 2000)
+          .timeout(const Duration(milliseconds: 1200), onTimeout: () => []);
       pendingFromDb.removeWhere((e) => isMessageCountSummary(e.text) || isMessageCountSummary(e.name));
 
       if (dbCalls.isNotEmpty || dbWa.isNotEmpty || dbSms.isNotEmpty) {
@@ -2895,48 +2949,57 @@ class TelemetrySyncService extends ChangeNotifier {
     }
 
     // 2. Migration fallback from SharedPreferences if SQLite was freshly initialized or missing items
-    final prefs = await SharedPreferences.getInstance();
+    try {
+      final prefs = await SharedPreferences.getInstance();
 
-    if (_calls.isEmpty) {
-      _updateInitProgress(0.54, 'Reading cached calls...');
-      final cachedCalls = prefs.getStringList('mks_cached_calls') ?? [];
-      final tempCalls = <SalesTrackEvent>[];
-      for (final str in cachedCalls) {
-        try {
-          tempCalls.add(SalesTrackEvent.fromJson(jsonDecode(str)));
-        } catch (_) {}
+      if (_calls.isEmpty) {
+        _updateInitProgress(0.54, 'Reading cached calls...');
+        final cachedCalls = prefs.getStringList('mks_cached_calls') ?? [];
+        final tempCalls = <SalesTrackEvent>[];
+        for (final str in cachedCalls) {
+          try {
+            tempCalls.add(SalesTrackEvent.fromJson(jsonDecode(str)));
+          } catch (_) {}
+        }
+        _calls.clear();
+        _calls.addAll(dedupCallsList(tempCalls));
+        if (_calls.isNotEmpty) {
+          Future.microtask(() => LocalDatabaseService.instance.saveEvents(_calls));
+        }
       }
-      _calls.clear();
-      _calls.addAll(dedupCallsList(tempCalls));
-      if (_calls.isNotEmpty) {
-        await LocalDatabaseService.instance.saveEvents(_calls);
-      }
-    }
 
-    if (_smsList.isEmpty) {
-      _updateInitProgress(0.76, 'Reading cached SMS...');
-      final cachedSms = prefs.getStringList('mks_cached_sms') ?? [];
-      for (final str in cachedSms) {
-        try {
-          _smsList.add(SalesTrackEvent.fromJson(jsonDecode(str)));
-        } catch (_) {}
+      if (_smsList.isEmpty) {
+        _updateInitProgress(0.76, 'Reading cached SMS...');
+        final cachedSms = prefs.getStringList('mks_cached_sms') ?? [];
+        final List<SalesTrackEvent> tempSms = [];
+        for (final str in cachedSms) {
+          try {
+            tempSms.add(SalesTrackEvent.fromJson(jsonDecode(str)));
+          } catch (_) {}
+        }
+        _smsList.addAll(dedupSmsList(tempSms));
+        if (_smsList.isNotEmpty) {
+          Future.microtask(() async {
+            await LocalDatabaseService.instance.saveEvents(_smsList);
+            await _persistSms();
+          });
+        }
       }
-      if (_smsList.isNotEmpty) {
-        await LocalDatabaseService.instance.saveEvents(_smsList);
-      }
-    }
 
-    if (_whatsappEvents.isEmpty) {
-      _updateInitProgress(0.66, 'Reading cached WhatsApp...');
-      final cachedWa = prefs.getStringList('mks_cached_whatsapp') ?? [];
-      for (final str in cachedWa) {
-        try {
-          _whatsappEvents.add(SalesTrackEvent.fromJson(jsonDecode(str)));
-        } catch (_) {}
+      if (_whatsappEvents.isEmpty) {
+        _updateInitProgress(0.66, 'Reading cached WhatsApp...');
+        final cachedWa = prefs.getStringList('mks_cached_whatsapp') ?? [];
+        for (final str in cachedWa) {
+          try {
+            _whatsappEvents.add(SalesTrackEvent.fromJson(jsonDecode(str)));
+          } catch (_) {}
+        }
+        if (_whatsappEvents.isNotEmpty) {
+          Future.microtask(() => LocalDatabaseService.instance.saveEvents(_whatsappEvents));
+        }
       }
-      if (_whatsappEvents.isNotEmpty) {
-        await LocalDatabaseService.instance.saveEvents(_whatsappEvents);
-      }
+    } catch (e) {
+      debugPrint('Prefs fallback read error: $e');
     }
 
     final cachedRecs = prefs.getStringList('mks_cached_recordings') ?? [];

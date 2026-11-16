@@ -30,7 +30,14 @@ class SalesTrackApiService {
   static const String _prefCookies = 'mks_session_cookies';
 
   static const String defaultServerUrl = 'https://crm.make360.in';
-  static const String currentAppVersion = '1.0.2';
+  static String currentAppVersion = '1.0.5';
+
+  static void updateCurrentAppVersion(String version) {
+    final clean = version.trim().replaceFirst(RegExp(r'^v', caseSensitive: false), '').split('+').first;
+    if (clean.isNotEmpty) {
+      currentAppVersion = clean;
+    }
+  }
 
   String _serverUrl = defaultServerUrl;
   String? _token;
