@@ -123,6 +123,67 @@ class TelemetrySyncService extends ChangeNotifier {
     return list;
   }
 
+  // Call Recording & Privacy Preferences
+  bool _recordingMasterEnabled = true;
+  bool _recordIncomingCalls = true;
+  bool _recordOutgoingCalls = true;
+  bool _showInCallIndicator = false; // Default: false (Silent / Private Mode)
+  bool _autoUploadRecordings = true;
+
+  bool get recordingMasterEnabled => _recordingMasterEnabled;
+  bool get recordIncomingCalls => _recordIncomingCalls;
+  bool get recordOutgoingCalls => _recordOutgoingCalls;
+  bool get showInCallIndicator => _showInCallIndicator;
+  bool get autoUploadRecordings => _autoUploadRecordings;
+
+  Future<void> updateRecordingPreferences({
+    bool? masterEnabled,
+    bool? incoming,
+    bool? outgoing,
+    bool? inCallIndicator,
+    bool? autoSync,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (masterEnabled != null) {
+      _recordingMasterEnabled = masterEnabled;
+      await prefs.setBool('mks_rec_master_enabled', masterEnabled);
+    }
+    if (incoming != null) {
+      _recordIncomingCalls = incoming;
+      await prefs.setBool('mks_rec_incoming', incoming);
+    }
+    if (outgoing != null) {
+      _recordOutgoingCalls = outgoing;
+      await prefs.setBool('mks_rec_outgoing', outgoing);
+    }
+    if (inCallIndicator != null) {
+      _showInCallIndicator = inCallIndicator;
+      await prefs.setBool('mks_rec_in_call_indicator', inCallIndicator);
+    }
+    if (autoSync != null) {
+      _autoUploadRecordings = autoSync;
+      await prefs.setBool('mks_rec_auto_sync', autoSync);
+    }
+    notifyListeners();
+    await syncRecordingPreferencesToNative();
+  }
+
+  Future<void> syncRecordingPreferencesToNative() async {
+    if (Platform.isAndroid) {
+      try {
+        await _platform.invokeMethod('setRecordingPreferences', {
+          'master_enabled': _recordingMasterEnabled,
+          'incoming': _recordIncomingCalls,
+          'outgoing': _recordOutgoingCalls,
+          'show_in_call_indicator': _showInCallIndicator,
+          'auto_sync': _autoUploadRecordings,
+        });
+      } catch (e) {
+        debugPrint('Error syncing recording prefs to native: $e');
+      }
+    }
+  }
+
   // Data Stores (Local-First in Memory & SharedPreferences)
   final List<SalesTrackEvent> _calls = [];
   final List<SalesTrackEvent> _whatsappEvents = [];
@@ -716,7 +777,8 @@ class TelemetrySyncService extends ChangeNotifier {
       final photoUri = raw['photoUri']?.toString() ?? '';
       final direction = (raw['direction']?.toString() ?? (type == 'outgoing_call_dialing' ? 'outgoing' : 'incoming'));
 
-      if (phoneNumber.isNotEmpty &&
+      if (_showInCallIndicator &&
+          phoneNumber.isNotEmpty &&
           phoneNumber != 'Incoming Caller' &&
           phoneNumber.toLowerCase() != 'unknown') {
         _startCallerIdLookup(phoneNumber, contactName, direction, photoUri.isNotEmpty ? photoUri : null);
@@ -2005,7 +2067,9 @@ class TelemetrySyncService extends ChangeNotifier {
         lowerText.contains('messages is doing work') ||
         lowerText.contains('syncing messages') ||
         event.number.toLowerCase() == 'hidden number' ||
-        event.number.toLowerCase() == 'messages') return;
+        event.number.toLowerCase() == 'messages') {
+      return;
+    }
 
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
@@ -2145,7 +2209,7 @@ class TelemetrySyncService extends ChangeNotifier {
       }
 
       // Upload audio recordings if enabled
-      if (uploadRecordings && _config.trackingRecordings) {
+      if (uploadRecordings && _config.trackingRecordings && _recordingMasterEnabled && _autoUploadRecordings) {
         while (true) {
           final recsToUpload = await LocalDatabaseService.instance.getPendingRecordings(limit: 10, includeFailed: true);
           if (recsToUpload.isEmpty) break;
@@ -2863,6 +2927,13 @@ class TelemetrySyncService extends ChangeNotifier {
       );
       _staff = CrmStaff(id: 1, name: 'Makes360 Sales');
     }
+
+    _recordingMasterEnabled = prefs.getBool('mks_rec_master_enabled') ?? true;
+    _recordIncomingCalls = prefs.getBool('mks_rec_incoming') ?? true;
+    _recordOutgoingCalls = prefs.getBool('mks_rec_outgoing') ?? true;
+    _showInCallIndicator = prefs.getBool('mks_rec_in_call_indicator') ?? false;
+    _autoUploadRecordings = prefs.getBool('mks_rec_auto_sync') ?? true;
+    await syncRecordingPreferencesToNative();
   }
 
   Future<void> _persistCalls() async {
@@ -2998,27 +3069,27 @@ class TelemetrySyncService extends ChangeNotifier {
           Future.microtask(() => LocalDatabaseService.instance.saveEvents(_whatsappEvents));
         }
       }
+
+      final cachedRecs = prefs.getStringList('mks_cached_recordings') ?? [];
+      _localRecordings.clear();
+      for (final str in cachedRecs) {
+        try {
+          _localRecordings.add(Map<String, dynamic>.from(jsonDecode(str)));
+        } catch (_) {}
+      }
+
+      final queueList = prefs.getStringList('mks_pending_queue') ?? [];
+      _pendingQueue.clear();
+      _pendingUids.clear();
+      for (final str in queueList) {
+        try {
+          final ev = SalesTrackEvent.fromJson(jsonDecode(str));
+          _pendingQueue.add(ev);
+          if (ev.uid.isNotEmpty) _pendingUids.add(ev.uid);
+        } catch (_) {}
+      }
     } catch (e) {
       debugPrint('Prefs fallback read error: $e');
-    }
-
-    final cachedRecs = prefs.getStringList('mks_cached_recordings') ?? [];
-    _localRecordings.clear();
-    for (final str in cachedRecs) {
-      try {
-        _localRecordings.add(Map<String, dynamic>.from(jsonDecode(str)));
-      } catch (_) {}
-    }
-
-    final queueList = prefs.getStringList('mks_pending_queue') ?? [];
-    _pendingQueue.clear();
-    _pendingUids.clear();
-    for (final str in queueList) {
-      try {
-        final ev = SalesTrackEvent.fromJson(jsonDecode(str));
-        _pendingQueue.add(ev);
-        if (ev.uid.isNotEmpty) _pendingUids.add(ev.uid);
-      } catch (_) {}
     }
   }
 

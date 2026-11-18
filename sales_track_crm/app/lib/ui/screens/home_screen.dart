@@ -11,6 +11,7 @@ import 'crm_webview_screen.dart';
 import '../widgets/caller_id_dialog.dart';
 import '../widgets/after_call_dialog.dart';
 import '../widgets/app_update_dialog.dart';
+import '../widgets/recording_settings_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -693,6 +694,8 @@ class _HomeScreenState extends State<HomeScreen>
                     content: Text('Cleared local cache. Rescanning calls & recordings from phone...'),
                   ),
                 );
+              } else if (val == 'recording_settings') {
+                RecordingSettingsDialog.show(context, service);
               } else if (val == 'scan_recordings') {
                 service.scanLocalRecordings();
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -733,6 +736,16 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                     const SizedBox(width: 10),
                     Text('Theme: ${isDark ? "Dark" : "Light"}', style: TextStyle(color: colors.textPrimary)),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'recording_settings',
+                child: Row(
+                  children: [
+                    Icon(Icons.mic_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text('Call Recording & Privacy', style: TextStyle(color: colors.textPrimary, fontWeight: FontWeight.w600)),
                   ],
                 ),
               ),
@@ -3113,6 +3126,20 @@ class _HomeScreenState extends State<HomeScreen>
                   style: OutlinedButton.styleFrom(
                     foregroundColor: colors.textSecondary,
                     side: BorderSide(color: colors.border),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () => RecordingSettingsDialog.show(context, service),
+                  icon: const Icon(Icons.tune_rounded, size: 15),
+                  label: const Text('Settings & Privacy', style: TextStyle(fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colors.primary,
+                    side: BorderSide(color: colors.primary.withOpacity(0.5)),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,

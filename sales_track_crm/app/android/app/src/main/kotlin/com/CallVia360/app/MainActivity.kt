@@ -421,6 +421,44 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "setRecordingPreferences" -> {
+                    try {
+                        val master = call.argument<Boolean>("master_enabled") ?: true
+                        val incoming = call.argument<Boolean>("incoming") ?: true
+                        val outgoing = call.argument<Boolean>("outgoing") ?: true
+                        val inCallIndicator = call.argument<Boolean>("show_in_call_indicator") ?: false
+                        val autoSync = call.argument<Boolean>("auto_sync") ?: true
+
+                        val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                        prefs.edit()
+                            .putBoolean("rec_master_enabled", master)
+                            .putBoolean("rec_incoming", incoming)
+                            .putBoolean("rec_outgoing", outgoing)
+                            .putBoolean("rec_show_in_call_indicator", inCallIndicator)
+                            .putBoolean("rec_auto_sync", autoSync)
+                            .apply()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("PREFS_ERROR", e.message, null)
+                    }
+                }
+
+                "getRecordingPreferences" -> {
+                    try {
+                        val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                        val data = mapOf(
+                            "master_enabled" to prefs.getBoolean("rec_master_enabled", true),
+                            "incoming" to prefs.getBoolean("rec_incoming", true),
+                            "outgoing" to prefs.getBoolean("rec_outgoing", true),
+                            "show_in_call_indicator" to prefs.getBoolean("rec_show_in_call_indicator", false),
+                            "auto_sync" to prefs.getBoolean("rec_auto_sync", true)
+                        )
+                        result.success(data)
+                    } catch (e: Exception) {
+                        result.error("PREFS_ERROR", e.message, null)
+                    }
+                }
+
                 "fetchDeviceCallLogs" -> {
                     Thread {
                         try {
@@ -848,7 +886,20 @@ class MainActivity : FlutterActivity() {
             val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
             val dateIso = isoFormat.format(Date(dateMs))
 
-            val recFile = findNewestRecordingFile(number, contactName)
+            val recPrefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+            val masterEnabled = recPrefs.getBoolean("rec_master_enabled", true)
+            val recordIncoming = recPrefs.getBoolean("rec_incoming", true)
+            val recordOutgoing = recPrefs.getBoolean("rec_outgoing", true)
+
+            val isIncoming = (direction == "incoming")
+            val isOutgoing = (direction == "outgoing")
+            val shouldScanRec = masterEnabled && (
+                (isIncoming && recordIncoming) ||
+                (isOutgoing && recordOutgoing) ||
+                (!isIncoming && !isOutgoing && masterEnabled)
+            )
+
+            val recFile = if (shouldScanRec) findNewestRecordingFile(number, contactName) else null
             val hasRecording = recFile != null && recFile.exists() && recFile.length() > 0
 
             val event = mapOf(

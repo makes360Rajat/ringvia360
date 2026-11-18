@@ -93,8 +93,12 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                     "photoUri" to photoUri,
                     "timestamp" to timestamp
                 )
+                val recPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val showInCallIndicator = recPrefs.getBoolean("rec_show_in_call_indicator", false)
                 TelemetryBridgeChannel.sendTelemetryEvent(event)
-                showCallerIdNotification(context, ringingNumber, contactDisplayName)
+                if (showInCallIndicator) {
+                    showCallerIdNotification(context, ringingNumber, contactDisplayName)
+                }
             }
 
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
@@ -172,8 +176,31 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                         val callDateMs = (latestCallInfo?.get("callDateMs") as? Long) ?: now
                         val uid = if (callLogId.isNotEmpty()) "call-${callLogId}-$callDateMs" else "call-$callDateMs"
 
-                        // Scan for newly recorded audio file
-                        val recordingPath = findNewestRecordingFile(context, finalPhone, finalName) ?: ""
+                        val recPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        val masterEnabled = recPrefs.getBoolean("rec_master_enabled", true)
+                        val recordIncoming = recPrefs.getBoolean("rec_incoming", true)
+                        val recordOutgoing = recPrefs.getBoolean("rec_outgoing", true)
+
+                        val isIncoming = (finalDirection == "incoming")
+                        val isOutgoing = (finalDirection == "outgoing")
+                        val shouldRecordThisCall = masterEnabled && (
+                            (isIncoming && recordIncoming) ||
+                            (isOutgoing && recordOutgoing) ||
+                            (!isIncoming && !isOutgoing && masterEnabled)
+                        )
+
+                        // Scan for newly recorded audio file with retry for background encoders
+                        var recordingPath = if (shouldRecordThisCall) {
+                            findNewestRecordingFile(context, finalPhone, finalName) ?: ""
+                        } else {
+                            ""
+                        }
+                        if (shouldRecordThisCall && recordingPath.isEmpty()) {
+                            try {
+                                Thread.sleep(1500)
+                                recordingPath = findNewestRecordingFile(context, finalPhone, finalName) ?: ""
+                            } catch (_: Exception) {}
+                        }
                         val hasRecording = recordingPath.isNotEmpty()
 
                         val event = mapOf(
@@ -207,6 +234,8 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
     }
 
     private fun showCallerIdNotification(context: Context, number: String, contactName: String) {
+        val recPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (!recPrefs.getBoolean("rec_show_in_call_indicator", false)) return
         if (number.isEmpty() || number == "Incoming Caller") return
         try {
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
@@ -378,7 +407,7 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
     }
 
     private fun findNewestRecordingFile(context: Context, phone: String, name: String): String? {
-        val minTimeSec = (System.currentTimeMillis() - 120000) / 1000L
+        val minTimeSec = (System.currentTimeMillis() - 180000L) / 1000L
         try {
             val projection = arrayOf(
                 MediaStore.Audio.Media.DATA,
@@ -394,19 +423,29 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val path = cursor.getString(0) ?: ""
-                    if (path.isNotEmpty()) return path
+                    if (path.isNotEmpty()) {
+                        val f = File(path)
+                        if (f.exists() && f.length() > 0) return path
+                    }
                 }
             }
         } catch (_: Exception) {}
 
-        val candidateDirs = listOf(
+        val candidateDirs = mutableListOf(
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
             File(Environment.getExternalStorageDirectory(), "CallRecordings"),
+            File(Environment.getExternalStorageDirectory(), "MIUI/sound_recorder/call_rec"),
+            File(Environment.getExternalStorageDirectory(), "PhoneRecord"),
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call")
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call"))
+            candidateDirs.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS))
+        }
+
         var newestPath: String? = null
-        var newestTime: Long = System.currentTimeMillis() - 120000L
+        var newestTime: Long = System.currentTimeMillis() - 180000L
         for (dir in candidateDirs) {
             try {
                 if (dir.exists() && dir.isDirectory) {

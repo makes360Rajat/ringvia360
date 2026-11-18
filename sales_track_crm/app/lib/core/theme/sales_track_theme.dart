@@ -157,6 +157,8 @@ class SalesTrackTheme {
     return isDark ? darkColors : lightColors;
   }
 
+  static SalesTrackColors colors(BuildContext context) => of(context);
+
   /// Dark Theme Data
   static ThemeData get darkTheme {
     const colors = darkColors;

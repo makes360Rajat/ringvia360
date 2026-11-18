@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../services/telemetry_sync_service.dart';
+import '../widgets/recording_settings_dialog.dart';
 
 class SetupWizardScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -436,6 +437,40 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                       icon: Icons.audio_file_rounded,
                       isGranted: widget.syncService.hasRecordingsFolderPermission,
                       onRequest: () => widget.syncService.requestPermission('audio'),
+                    ),
+
+                    // Call Recording Modes & Privacy shortcut
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2, bottom: 8, left: 16, right: 16),
+                      child: InkWell(
+                        onTap: () => RecordingSettingsDialog.show(context, widget.syncService),
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: colors.primary.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.primary.withOpacity(0.25)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.tune_rounded, color: colors.primary, size: 18),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Recording Modes & In-Call Visibility',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: colors.primary,
+                                  ),
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded, color: colors.primary, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
 
                     // Android 7. Battery Unrestricted
