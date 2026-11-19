@@ -130,7 +130,6 @@ class TelemetrySyncService extends ChangeNotifier {
   final List<Map<String, dynamic>> _localRecordings = [];
   final List<CallListModel> _callLists = [];
   final List<OutcomeSubmission> _pendingOutcomes = [];
-  String? _pendingAfterCallNumber;
 
   List<SalesTrackEvent> get calls => List.unmodifiable(_calls);
   List<SalesTrackEvent> get whatsappEvents => List.unmodifiable(_whatsappEvents);
@@ -725,23 +724,6 @@ class TelemetrySyncService extends ChangeNotifier {
     }
 
     if (type == 'open_after_call') {
-      final number = raw['number']?.toString() ?? '';
-      _pendingAfterCallNumber = number.isNotEmpty ? number : null;
-      SalesTrackEvent? target;
-      if (number.isNotEmpty) {
-        final cleanKey = extractNumberKey(number);
-        for (final c in _calls) {
-          if (extractNumberKey(c.number) == cleanKey) {
-            target = c;
-            break;
-          }
-        }
-      }
-      target ??= _calls.isNotEmpty ? _calls.first : null;
-      if (target != null) {
-        _activeAfterCallEvent = target;
-        notifyListeners();
-      }
       return;
     }
 
@@ -798,10 +780,8 @@ class TelemetrySyncService extends ChangeNotifier {
         _enqueueEvent(event);
       }
 
-      // Check if after-call outcome popup should be displayed
-      if (_shouldShowAfterCallPopup(event)) {
-        _activeAfterCallEvent = event;
-      }
+      // Automated after-call popup removed per user request
+      _activeAfterCallEvent = null;
       notifyListeners();
 
       // 3. ATTEMPT SYNC
@@ -1062,14 +1042,6 @@ class TelemetrySyncService extends ChangeNotifier {
     await _startCallerIdLookup(phone, name ?? '', direction ?? 'incoming');
   }
 
-  bool _shouldShowAfterCallPopup(SalesTrackEvent event) {
-    if (_config.outcomesAsk == 'off') return false;
-    if (_config.outcomesAsk == 'connected_only') {
-      return event.duration > 0;
-    }
-    // For sales tracking: prompt after completed calls (connected, outgoing, missed) so outcomes & notes can be logged
-    return true;
-  }
 
   String? _lastEnsuredCallUid;
   DateTime? _lastEnsuredCallTime;
@@ -1691,33 +1663,9 @@ class TelemetrySyncService extends ChangeNotifier {
         await _persistQueue();
         await refreshPendingCounts();
 
-        // Auto-detect if a call finished recently (within last 5 minutes) or requested via launch intent
-        if (cleanCalls.isNotEmpty && _activeAfterCallEvent == null) {
-          SalesTrackEvent? candidate;
-          if (_pendingAfterCallNumber != null && _pendingAfterCallNumber!.isNotEmpty) {
-            final targetKey = extractNumberKey(_pendingAfterCallNumber!);
-            for (final c in cleanCalls) {
-              if (extractNumberKey(c.number) == targetKey) {
-                candidate = c;
-                break;
-              }
-            }
-            _pendingAfterCallNumber = null;
-          }
-          if (candidate == null) {
-            final newest = cleanCalls.first;
-            final callAgeMs = DateTime.now().millisecondsSinceEpoch - newest.time;
-            if (callAgeMs >= 0 && callAgeMs < 300000 && _shouldShowAfterCallPopup(newest)) {
-              candidate = newest;
-            }
-          }
-          if (candidate != null) {
-            final hasOutcome = await LocalDatabaseService.instance.hasOutcomeForUid(candidate.uid);
-            if (!hasOutcome) {
-              _activeAfterCallEvent = candidate;
-            }
-          }
-        }
+        // Auto-detect after call dialog popup removed per user request.
+        // Users can edit leads manually via "Edit Lead / Log Outcome".
+        _activeAfterCallEvent = null;
 
         _statusMessage = 'Fetched ${_calls.length} calls from dialer ($newCount new)';
         notifyListeners();
@@ -2005,7 +1953,9 @@ class TelemetrySyncService extends ChangeNotifier {
         lowerText.contains('messages is doing work') ||
         lowerText.contains('syncing messages') ||
         event.number.toLowerCase() == 'hidden number' ||
-        event.number.toLowerCase() == 'messages') return;
+        event.number.toLowerCase() == 'messages') {
+      return;
+    }
 
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
@@ -2998,27 +2948,27 @@ class TelemetrySyncService extends ChangeNotifier {
           Future.microtask(() => LocalDatabaseService.instance.saveEvents(_whatsappEvents));
         }
       }
+
+      final cachedRecs = prefs.getStringList('mks_cached_recordings') ?? [];
+      _localRecordings.clear();
+      for (final str in cachedRecs) {
+        try {
+          _localRecordings.add(Map<String, dynamic>.from(jsonDecode(str)));
+        } catch (_) {}
+      }
+
+      final queueList = prefs.getStringList('mks_pending_queue') ?? [];
+      _pendingQueue.clear();
+      _pendingUids.clear();
+      for (final str in queueList) {
+        try {
+          final ev = SalesTrackEvent.fromJson(jsonDecode(str));
+          _pendingQueue.add(ev);
+          if (ev.uid.isNotEmpty) _pendingUids.add(ev.uid);
+        } catch (_) {}
+      }
     } catch (e) {
       debugPrint('Prefs fallback read error: $e');
-    }
-
-    final cachedRecs = prefs.getStringList('mks_cached_recordings') ?? [];
-    _localRecordings.clear();
-    for (final str in cachedRecs) {
-      try {
-        _localRecordings.add(Map<String, dynamic>.from(jsonDecode(str)));
-      } catch (_) {}
-    }
-
-    final queueList = prefs.getStringList('mks_pending_queue') ?? [];
-    _pendingQueue.clear();
-    _pendingUids.clear();
-    for (final str in queueList) {
-      try {
-        final ev = SalesTrackEvent.fromJson(jsonDecode(str));
-        _pendingQueue.add(ev);
-        if (ev.uid.isNotEmpty) _pendingUids.add(ev.uid);
-      } catch (_) {}
     }
   }
 

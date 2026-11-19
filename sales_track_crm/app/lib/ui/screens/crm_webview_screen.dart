@@ -41,18 +41,19 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   /// Resolves the URL safely.
+  /// If [input] is null or empty, returns null (no fallback default URL).
   /// If [input] already starts with http:// or https:// (e.g. from CRM settings or API response),
   /// it is returned verbatim and NEVER prefixed with the CRM server URL.
-  String _resolveFullUrl(String? input) {
+  String? _resolveFullUrl(String? input) {
     if (input == null || input.trim().isEmpty) {
-      final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
-      return '$base/admin';
+      return null;
     }
     final trimmed = input.trim();
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       return trimmed;
     }
     final base = widget.syncService.api.serverUrl.replaceAll(RegExp(r'/+$'), '');
+    if (base.isEmpty) return null;
     final cleanPath = trimmed.replaceAll(RegExp(r'^/+'), '');
     return '$base/$cleanPath';
   }
@@ -88,65 +89,29 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
       if (!mounted) return;
 
-      // 1. Extract the authentic URL directly from the CRM API response
+      // 1. Strictly extract the authentic weburl from the CRM API response.
+      // If weburl / web_url is not coming or is empty, we MUST show 'Data Not Available'!
       String? completeUrlFromCrm;
       if (res.data != null) {
-        final rawUrl = res.data!['url']?.toString().trim();
-        if (rawUrl != null && rawUrl.isNotEmpty) {
-          completeUrlFromCrm = _resolveFullUrl(rawUrl);
-        } else {
-          final rawPage = res.data!['page']?.toString().trim();
-          if (rawPage != null && rawPage.isNotEmpty) {
-            completeUrlFromCrm = _resolveFullUrl(rawPage);
-          }
+        final rawWebUrl = (res.data!['weburl'] ?? res.data!['web_url'])?.toString().trim();
+        if (rawWebUrl != null && rawWebUrl.isNotEmpty) {
+          completeUrlFromCrm = _resolveFullUrl(rawWebUrl);
         }
       }
 
       if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
         debugPrint('=====================================================================');
-        debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM URL (FROM CRM API):');
+        debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM WEBURL:');
         debugPrint('>>> URL: $completeUrlFromCrm');
         debugPrint('=====================================================================');
         _setupWebViewController(completeUrlFromCrm);
         return;
       }
 
-      // 2. If the CRM API returned 'webview_admin_blocked' or 'webview_disabled':
-      // Directly open the CRM web portal in this in-app webview so the user is never blocked!
-      if (res.error == 'webview_admin_blocked' || res.error == 'webview_disabled') {
-        final rawTarget = res.data?['page']?.toString() ??
-            targetPage ??
-            widget.initialPage ??
-            widget.syncService.config.crmStartPage;
-
-        final directCrmUrl = _resolveFullUrl(rawTarget);
-
-        debugPrint('=====================================================================');
-        debugPrint('[CRM WebView] >>> ${res.error}: DIRECTLY OPENING CRM IN APP WEBVIEW:');
-        debugPrint('>>> URL: $directCrmUrl');
-        debugPrint('=====================================================================');
-
-        _setupWebViewController(directCrmUrl);
-
-        if (res.error == 'webview_admin_blocked') {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Admin Account: Opened CRM in app. (To enable 1-click token login, turn on "Also for Administrators" in CRM Settings).'),
-                  duration: Duration(seconds: 5),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            }
-          });
-        }
-        return;
-      }
-
-      // 3. For true connection or revoked errors: report error state
+      // 2. If 'weburl' is not coming from the API or is empty:
+      // Show "Data Not Available" screen! Never open default URL or other URLs.
       debugPrint('=====================================================================');
-      debugPrint('[CRM WebView] >>> CRM API DID NOT RETURN A WEBVIEW URL:');
+      debugPrint('[CRM WebView] >>> NO WEBURL PROVIDED BY CRM API (SHOWING DATA NOT AVAILABLE):');
       debugPrint('>>> ERROR   : ${res.error}');
       debugPrint('>>> MESSAGE : ${res.message}');
       debugPrint('>>> STATUS  : ${res.statusCode}');
@@ -154,8 +119,8 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
       setState(() {
         _isLoading = false;
-        _errorType = res.error;
-        _errorMessage = res.message ?? _buildUserFriendlyErrorMessage(res.error);
+        _errorType = 'not_available';
+        _errorMessage = res.message ?? _buildUserFriendlyErrorMessage(res.error ?? 'not_available');
       });
     } finally {
       _isRequestingSession = false;
@@ -164,6 +129,8 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
 
   String _buildUserFriendlyErrorMessage(String? error) {
     switch (error) {
+      case 'not_available':
+        return 'Data not available. No portal web URL was provided by the CRM server.';
       case 'webview_disabled':
         return 'Opening the CRM in the app is switched off in CRM settings.\n\nAsk your CRM Administrator to turn on "Open CRM in the App" under CallVia360 > Settings > Devices And App.';
       case 'webview_admin_blocked':
@@ -176,12 +143,20 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
       case 'update_required':
         return 'An app update is required by the CRM server.';
       default:
-        return 'CRM server did not return a webview URL. Please check server settings and retry.';
+        return 'Data not available. No valid web URL was received from the CRM server.';
     }
   }
 
   void _setupWebViewController(String url) {
     final cleanUrl = url.trim();
+    if (cleanUrl.isEmpty || (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://'))) {
+      setState(() {
+        _isLoading = false;
+        _errorType = 'not_available';
+        _errorMessage = 'No valid web URL available. Page not available.';
+      });
+      return;
+    }
     debugPrint('[CRM WebView] >>> OPENING EXACT CRM URL IN WEBVIEW: $cleanUrl');
 
     if (_controller != null) {
@@ -353,7 +328,7 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               Text(
                 widget.syncService.staff?.name != null
                     ? 'Signed in as ${widget.syncService.staff!.name}'
-                    : 'Perfex CRM Portal',
+                    : 'CRM Portal',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
@@ -542,16 +517,27 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
   }
 
   Widget _buildErrorView(SalesTrackColors colors) {
+    final isNotAvailable = _errorType == 'not_available' ||
+        _errorType == 'webview_failed' ||
+        _errorType == null ||
+        _errorType == '404' ||
+        _errorType == 'not_found';
     final isDisabled = _errorType == 'webview_disabled';
     final isAdminBlocked = _errorType == 'webview_admin_blocked';
 
-    final Color statusColor = (isDisabled || isAdminBlocked) ? colors.warning : colors.danger;
-    final IconData statusIcon = isDisabled
-        ? Icons.lock_outline_rounded
-        : (isAdminBlocked ? Icons.admin_panel_settings_rounded : Icons.cloud_off_rounded);
-    final String statusTitle = isDisabled
-        ? 'CRM In-App Portal Disabled'
-        : (isAdminBlocked ? 'CRM Administrator Account' : 'Connection Error');
+    final Color statusColor = isNotAvailable
+        ? colors.textSecondary
+        : (isDisabled || isAdminBlocked ? colors.warning : colors.danger);
+    final IconData statusIcon = isNotAvailable
+        ? Icons.web_asset_off_rounded
+        : (isDisabled
+            ? Icons.lock_outline_rounded
+            : (isAdminBlocked ? Icons.admin_panel_settings_rounded : Icons.cloud_off_rounded));
+    final String statusTitle = isNotAvailable
+        ? 'Data Not Available'
+        : (isDisabled
+            ? 'CRM In-App Portal Disabled'
+            : (isAdminBlocked ? 'CRM Administrator Account' : 'Connection Error'));
 
     return Center(
       child: SingleChildScrollView(
@@ -598,7 +584,10 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
               ),
               const SizedBox(height: 12),
               Text(
-                _errorMessage ?? 'Unable to connect to CRM. Check your internet connection.',
+                _errorMessage ??
+                    (isNotAvailable
+                        ? 'Data or portal page is not available. Please contact your CRM Administrator.'
+                        : 'Unable to connect to CRM. Check your internet connection.'),
                 style: TextStyle(
                   fontSize: 13.5,
                   height: 1.45,
@@ -622,22 +611,11 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
                     icon: const Icon(Icons.refresh_rounded, size: 18),
                     label: const Text('Try Again'),
                     onPressed: () {
-                      setState(() => _errorMessage = null);
+                      setState(() {
+                        _errorMessage = null;
+                        _errorType = null;
+                      });
                       _initWebviewSession();
-                    },
-                  ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: colors.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    ),
-                    icon: const Icon(Icons.web_rounded, size: 18),
-                    label: const Text('Open In-App Webview'),
-                    onPressed: () {
-                      final rawTarget = widget.syncService.config.crmStartPage;
-                      _setupWebViewController(_resolveFullUrl(rawTarget));
                     },
                   ),
                   TextButton.icon(

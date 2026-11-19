@@ -341,12 +341,20 @@ class MainActivity : FlutterActivity() {
                     try {
                         val number = call.argument<String>("number") ?: ""
                         val cleanDigits = number.replace(Regex("\\D"), "")
-                        val uri = Uri.parse("https://wa.me/$cleanDigits")
-                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                        val waIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = Uri.parse("whatsapp://send?phone=$cleanDigits")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
-                        startActivity(intent)
-                        result.success(true)
+                        try {
+                            startActivity(waIntent)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$cleanDigits")).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(webIntent)
+                            result.success(true)
+                        }
                     } catch (e: Exception) {
                         result.error("WHATSAPP_LAUNCH_ERROR", e.message, null)
                     }
@@ -355,13 +363,45 @@ class MainActivity : FlutterActivity() {
                 "dialPhoneNumber" -> {
                     try {
                         val number = call.argument<String>("number") ?: ""
-                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")).apply {
+                        val cleanNum = number.replace(Regex("[^0-9+#*]"), "")
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanNum")).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         startActivity(intent)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("DIAL_ERROR", e.message, null)
+                    }
+                }
+
+                "sendSms" -> {
+                    try {
+                        val number = call.argument<String>("number") ?: ""
+                        val text = call.argument<String>("text") ?: ""
+                        val cleanDigits = number.replace(Regex("[^0-9+]"), "")
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("smsto:$cleanDigits")
+                            if (text.isNotEmpty()) {
+                                putExtra("sms_body", text)
+                            }
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        try {
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            val altIntent = Intent(Intent.ACTION_VIEW).apply {
+                                data = Uri.parse("sms:$cleanDigits")
+                                if (text.isNotEmpty()) {
+                                    putExtra("sms_body", text)
+                                }
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(altIntent)
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        result.error("SMS_LAUNCH_ERROR", e.message, null)
                     }
                 }
 
