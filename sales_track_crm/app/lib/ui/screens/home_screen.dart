@@ -88,6 +88,9 @@ class _HomeScreenState extends State<HomeScreen>
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
       widget.syncService.setForeground(true);
+      if (widget.syncService.isSetupWizardActive) {
+        return;
+      }
       if (widget.syncService.hasCallLogPermission) {
         widget.syncService.syncDeviceCallLogs();
       }
@@ -531,37 +534,14 @@ class _HomeScreenState extends State<HomeScreen>
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  device?.name ?? 'Sales Phone',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                    color: colors.textPrimary,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                                decoration: BoxDecoration(
-                                  color: colors.primary.withOpacity(0.12),
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: colors.primary.withOpacity(0.3), width: 0.8),
-                                ),
-                                child: Text(
-                                  'v${SalesTrackApiService.currentAppVersion}',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: colors.primary,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          Text(
+                            device?.name ?? 'Sales Phone',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                           Text(
                             staff?.name != null ? 'Rep: ${staff!.name}' : 'CRM Telemetry Active',
@@ -806,15 +786,20 @@ class _HomeScreenState extends State<HomeScreen>
               const PopupMenuDivider(),
               PopupMenuItem(
                 enabled: false,
-                child: Center(
-                  child: Text(
-                    'App Version: v${SalesTrackApiService.currentAppVersion}',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: colors.textSecondary,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: colors.textSecondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      'App Version: v${SalesTrackApiService.currentAppVersion}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: colors.textSecondary,
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ],
@@ -1215,10 +1200,21 @@ class _HomeScreenState extends State<HomeScreen>
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                       ),
+                      ElevatedButton.icon(
+                        onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
+                        icon: const Icon(Icons.mic_rounded, size: 13),
+                        label: const Text('Upload Audio', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: colors.warning,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
                       OutlinedButton.icon(
                         onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
                         icon: const Icon(Icons.refresh_rounded, size: 13),
-                        label: const Text('Resync All', style: TextStyle(fontSize: 11.5)),
+                        label: const Text('Resync All', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: colors.textPrimary,
                           side: BorderSide(color: colors.border),
@@ -1606,103 +1602,6 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Column(
       children: [
-        // Calls Sync Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-          child: Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
-                icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.primary,
-                  foregroundColor: Colors.white,
-                  elevation: 1.5,
-                  shadowColor: colors.primary.withOpacity(0.4),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'call'),
-                icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border.withOpacity(0.8)),
-                  backgroundColor: colors.cardBackground,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-              ),
-              const Spacer(),
-              if (service.pendingCallsCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: colors.warning.withOpacity(0.4), width: 0.8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: colors.warning,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        '${service.pendingCallsCount} Pending',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                          color: colors.warning,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: colors.success.withOpacity(0.35), width: 0.8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 13, color: colors.success),
-                      const SizedBox(width: 5),
-                      Text(
-                        'All Synced',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                          color: colors.success,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
         // Modern Rounded Search Bar
         Container(
           padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
@@ -2679,103 +2578,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-        // WhatsApp Sync Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-          child: Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
-                icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.whatsappGreen,
-                  foregroundColor: Colors.white,
-                  elevation: 1.5,
-                  shadowColor: colors.whatsappGreen.withOpacity(0.4),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'whatsapp'),
-                icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border.withOpacity(0.8)),
-                  backgroundColor: colors.cardBackground,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                ),
-              ),
-              const Spacer(),
-              if (service.pendingWhatsAppCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: colors.warning.withOpacity(0.4), width: 0.8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: colors.warning,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        '${service.pendingWhatsAppCount} Pending',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                          color: colors.warning,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: colors.success.withOpacity(0.35), width: 0.8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 13, color: colors.success),
-                      const SizedBox(width: 5),
-                      Text(
-                        'All Synced',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.2,
-                          color: colors.success,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
         // Filter chips: All, Messages, Calls
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -3074,83 +2876,6 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Column(
       children: [
-        // SMS Sync Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.syncSmsOnly(),
-                icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.secondary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'sms'),
-                icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const Spacer(),
-              if (service.pendingSmsCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.warning.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${service.pendingSmsCount} Pending',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.success.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                      const SizedBox(width: 4),
-                      Text(
-                        'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
         // Active filter indicator when redirected from Call Logs
         if (isFiltered)
           Container(
@@ -3457,87 +3182,6 @@ class _HomeScreenState extends State<HomeScreen>
               ],
             ),
           ),
-
-        // Recordings Upload Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
-                  icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                  label: const Text('Upload Recordings', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: colors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: service.isSyncing ? null : () => service.scanLocalRecordings(),
-                  icon: const Icon(Icons.refresh_rounded, size: 15),
-                  label: const Text('Rescan Files', style: TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: colors.textSecondary,
-                    side: BorderSide(color: colors.border),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (service.pendingRecordingsCount > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: colors.warning.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: colors.warning.withOpacity(0.35)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.cloud_upload_outlined, size: 12, color: colors.warning),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${service.pendingRecordingsCount} Pending Upload',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: colors.success.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: colors.success.withOpacity(0.35)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                        const SizedBox(width: 4),
-                        Text(
-                          'All Uploaded',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
 
         Expanded(
           child: RefreshIndicator(

@@ -633,7 +633,6 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         registerCallLogObserver()
         registerSmsObserver()
-        observerHandler.postDelayed(checkLatestCallRunnable, 400)
         val status = checkAllPermissions()
         TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
             "type" to "permissions_updated",
@@ -1019,28 +1018,7 @@ class MainActivity : FlutterActivity() {
                 return
             }
 
-            val permanentlyDenied = ungranted.any { perm ->
-                !ActivityCompat.shouldShowRequestPermissionRationale(this, perm) &&
-                getSharedPreferences("app_perms", Context.MODE_PRIVATE).getBoolean("req_$perm", false)
-            }
-
-            val editor = getSharedPreferences("app_perms", Context.MODE_PRIVATE).edit()
-            ungranted.forEach { editor.putBoolean("req_$it", true) }
-            editor.apply()
-
-            if (permanentlyDenied) {
-                try {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
-                } catch (_: Exception) {
-                    ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
-                }
-            } else {
-                ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
-            }
+            ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
         } else {
             requestRequiredPermissions()
         }

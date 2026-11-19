@@ -23,15 +23,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.syncService.isSetupWizardActive = true;
     widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
-
-    // Auto-prompt permission dialog immediately on screen entry
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!widget.syncService.hasEssentialPermissions) {
-        widget.syncService.requestAllPermissions();
-      }
-    });
   }
 
   void _onServiceChanged() {
@@ -42,6 +36,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
 
   @override
   void dispose() {
+    widget.syncService.isSetupWizardActive = false;
     WidgetsBinding.instance.removeObserver(this);
     widget.syncService.removeListener(_onServiceChanged);
     super.dispose();
@@ -59,7 +54,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
   Widget _buildPermissionItem({
     required BuildContext context,
     required String title,
-    required String description,
+    String? description,
     required IconData icon,
     required bool isGranted,
     VoidCallback? onRequest,
@@ -67,11 +62,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
     final colors = context.stColors;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: colors.cardBackground,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isGranted ? colors.primary.withOpacity(0.35) : colors.border,
           width: isGranted ? 1.2 : 1.0,
@@ -79,7 +74,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.02),
-            blurRadius: 8,
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
@@ -88,90 +83,69 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(9),
             decoration: BoxDecoration(
               color: isGranted
                   ? colors.primary.withOpacity(0.12)
                   : colors.surfaceColor,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
               icon,
-              size: 22,
+              size: 20,
               color: isGranted ? colors.primary : colors.textMuted,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: colors.textPrimary,
-                        ),
-                      ),
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
                     ),
-                    if (isGranted) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: colors.success.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          'ACTIVE',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
-                            color: colors.success,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.textSecondary,
-                    height: 1.35,
                   ),
                 ),
+                if (isGranted) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: colors.success.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'ACTIVE',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                        color: colors.success,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           const SizedBox(width: 10),
           if (isGranted || onRequest == null)
-            Icon(Icons.check_circle_rounded, color: colors.primary, size: 24)
+            Icon(Icons.check_circle_rounded, color: colors.primary, size: 22)
           else
             ElevatedButton(
-              onPressed: () async {
+              onPressed: () {
                 onRequest();
-                for (final ms in [300, 700, 1500]) {
-                  await Future.delayed(Duration(milliseconds: ms));
-                  if (mounted) {
-                    await widget.syncService.checkPermissions();
-                    if (mounted) setState(() {});
-                  }
-                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: colors.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 shape: RoundedRectangleBorder(
@@ -180,7 +154,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
               ),
               child: const Text(
                 'Grant',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
               ),
             ),
         ],
@@ -478,29 +452,41 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
               ),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => widget.syncService.requestAllPermissions(),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  if (!allGranted) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => widget.syncService.requestAllPermissions(),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        'Request All',
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontWeight: FontWeight.w600,
+                        child: Text(
+                          'Request All',
+                          style: TextStyle(
+                            color: colors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
                     flex: 1,
                     child: ElevatedButton(
-                      onPressed: widget.onCompleted,
+                      onPressed: () {
+                        widget.syncService.isSetupWizardActive = false;
+                        if (widget.syncService.hasCallLogPermission) {
+                          widget.syncService.syncDeviceCallLogs();
+                        }
+                        if (widget.syncService.hasSmsPermission) {
+                          widget.syncService.syncDeviceSms();
+                        }
+                        widget.syncService.scanLocalRecordings();
+                        widget.onCompleted();
+                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colors.primary,
                         foregroundColor: Colors.white,
