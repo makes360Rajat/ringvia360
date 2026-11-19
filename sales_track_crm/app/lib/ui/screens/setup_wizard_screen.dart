@@ -187,6 +187,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
       allGranted = perms.isNotEmpty && perms.values.every((v) => v);
     }
     final progress = totalCount > 0 ? (grantedCount / totalCount).clamp(0.0, 1.0) : 0.0;
+    final bool isFullyConfigured = allGranted || (totalCount > 0 && grantedCount >= totalCount) || progress >= 0.99;
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -247,7 +248,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    allGranted
+                                    isFullyConfigured
                                         ? 'All Permissions Configured!'
                                         : '$grantedCount of $totalCount Permissions Granted',
                                     style: TextStyle(
@@ -257,7 +258,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                                     ),
                                   ),
                                   Text(
-                                    allGranted
+                                    isFullyConfigured
                                         ? 'Phone telemetry tracking is fully operational.'
                                         : 'Grant the required permissions for seamless CRM synchronization.',
                                     style: TextStyle(fontSize: 12, color: colors.textSecondary),
@@ -452,7 +453,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
               ),
               child: Row(
                 children: [
-                  if (!allGranted) ...[
+                  if (!isFullyConfigured) ...[
                     Expanded(
                       child: OutlinedButton(
                         onPressed: () => widget.syncService.requestAllPermissions(),
@@ -496,7 +497,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                         ),
                       ),
                       child: Text(
-                        allGranted ? 'Continue to App' : 'Skip & Continue',
+                        isFullyConfigured ? 'Continue to App' : 'Skip & Continue',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ),

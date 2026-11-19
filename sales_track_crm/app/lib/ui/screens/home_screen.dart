@@ -58,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen>
     });
     widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
+    widget.syncService.checkAppIconHidden();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _onServiceChanged();
       if (widget.syncService.hasSmsPermission) {
@@ -208,6 +209,9 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     }
+    if (!widget.syncService.config.crmBottomNavEnabled && _selectedBottomNavIndex != 0) {
+      _selectedBottomNavIndex = 0;
+    }
     setState(() {});
   }
 
@@ -215,6 +219,11 @@ class _HomeScreenState extends State<HomeScreen>
     if (seconds <= 0) return '0s';
     final m = seconds ~/ 60;
     final s = seconds % 60;
+    if (m >= 60) {
+      final h = m ~/ 60;
+      final remM = m % 60;
+      return '${h}h ${remM}m';
+    }
     if (m > 0) return '${m}m ${s}s';
     return '${s}s';
   }
@@ -481,6 +490,178 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  void _showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService service) {
+    bool isHidden = service.isAppIconHidden;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final colors = context.stColors;
+
+          return AlertDialog(
+            backgroundColor: colors.cardBackground,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: BorderSide(color: colors.border),
+            ),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: (isHidden ? colors.warning : colors.primary).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(
+                    isHidden ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                    color: isHidden ? colors.warning : colors.primary,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'App Icon on Phone',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.bold,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: (isHidden ? colors.warning : colors.success).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: (isHidden ? colors.warning : colors.success).withOpacity(0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isHidden ? Icons.visibility_off : Icons.check_circle_rounded,
+                          size: 18,
+                          color: isHidden ? colors.warning : colors.success,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            isHidden ? 'Status: Icon is HIDDEN on Phone' : 'Status: Icon is VISIBLE on Phone',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: isHidden ? colors.warning : colors.success,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    isHidden
+                        ? 'The CallVia360 app icon is currently hidden from your phone\'s Home Screen and App Drawer.\n\n'
+                          '• Telemetry and background call syncing remain fully active.\n'
+                          '• Tap the ongoing notification in your phone\'s status bar to open the app.\n'
+                          '• Or dial *#*#3600#*#* on your phone dialer pad to open directly.'
+                        : 'You can hide the CallVia360 app icon from your phone\'s Home Screen and App Drawer with one tap.\n\n'
+                          '• Background syncing will continue 24/7.\n'
+                          '• You can open the app anytime from the persistent notification or by dialing *#*#3600#*#*.',
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.45,
+                      color: colors.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final messenger = ScaffoldMessenger.of(context);
+                        final newHiddenState = !isHidden;
+                        final success = await service.setAppIconHidden(newHiddenState);
+                        if (success) {
+                          setDialogState(() {
+                            isHidden = newHiddenState;
+                          });
+                          if (mounted) setState(() {});
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                newHiddenState
+                                    ? 'App icon hidden from phone screen.'
+                                    : 'App icon restored to phone screen.',
+                              ),
+                              backgroundColor: newHiddenState ? colors.warning : colors.success,
+                            ),
+                          );
+                        }
+                      },
+                      icon: Icon(
+                        isHidden ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        isHidden ? 'Show App Icon on Phone' : 'Hide App Icon on Phone Now',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isHidden ? colors.primary : colors.warning,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        await service.openHideAppsSettings();
+                      },
+                      icon: const Icon(Icons.settings_suggest_rounded, size: 16),
+                      label: const Text(
+                        'Open Samsung Launcher Settings',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text('Close', style: TextStyle(color: colors.textSecondary)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.stColors;
@@ -691,6 +872,8 @@ class _HomeScreenState extends State<HomeScreen>
                     content: Text('Scanning phone call history, SMS & syncing...'),
                   ),
                 );
+              } else if (val == 'app_icon_visibility') {
+                _showAppIconVisibilityDialog(context, service);
               } else if (val == 'unpair') {
                 _promptPinForSensitiveAction(() {
                   service.unpair();
@@ -774,6 +957,30 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
               PopupMenuItem(
+                value: 'app_icon_visibility',
+                child: Row(
+                  children: [
+                    Icon(
+                      service.isAppIconHidden
+                          ? Icons.visibility_rounded
+                          : Icons.visibility_off_rounded,
+                      color: service.isAppIconHidden ? colors.success : colors.warning,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      service.isAppIconHidden
+                          ? 'Show App Icon on Phone'
+                          : 'Hide App Icon on Phone',
+                      style: TextStyle(
+                        color: service.isAppIconHidden ? colors.success : colors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
                 value: 'unpair',
                 child: Row(
                   children: [
@@ -834,7 +1041,7 @@ class _HomeScreenState extends State<HomeScreen>
           ],
         ),
       ),
-      body: _selectedBottomNavIndex == 1
+      body: (_selectedBottomNavIndex == 1 && service.config.crmBottomNavEnabled)
           ? CrmWebviewScreen(
               syncService: service,
               isTabMode: true,
@@ -879,53 +1086,55 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ),
             ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: colors.cardBackground,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border.all(color: colors.border.withOpacity(0.6), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(context.isDarkMode ? 0.3 : 0.06),
-              blurRadius: 16,
-              offset: const Offset(0, -4),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          child: SafeArea(
-            top: false,
-            bottom: true,
-            child: NavigationBar(
-              height: 56,
-              elevation: 0,
-              backgroundColor: Colors.transparent,
-              indicatorColor: colors.primary.withOpacity(0.16),
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-              selectedIndex: _selectedBottomNavIndex,
-              onDestinationSelected: (index) {
-                if (widget.syncService.isPlayingAudio) {
-                  widget.syncService.stopRecording();
-                }
-                setState(() => _selectedBottomNavIndex = index);
-              },
-              destinations: [
-                NavigationDestination(
-                  icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
-                  selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
-                  label: '',
+      bottomNavigationBar: service.config.crmBottomNavEnabled
+          ? Container(
+              decoration: BoxDecoration(
+                color: colors.cardBackground,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                border: Border.all(color: colors.border.withOpacity(0.6), width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(context.isDarkMode ? 0.3 : 0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                child: SafeArea(
+                  top: false,
+                  bottom: true,
+                  child: NavigationBar(
+                    height: 56,
+                    elevation: 0,
+                    backgroundColor: Colors.transparent,
+                    indicatorColor: colors.primary.withOpacity(0.16),
+                    labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+                    selectedIndex: _selectedBottomNavIndex,
+                    onDestinationSelected: (index) {
+                      if (widget.syncService.isPlayingAudio) {
+                        widget.syncService.stopRecording();
+                      }
+                      setState(() => _selectedBottomNavIndex = index);
+                    },
+                    destinations: [
+                      NavigationDestination(
+                        icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
+                        selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
+                        label: '',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
+                        selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
+                        label: '',
+                      ),
+                    ],
+                  ),
                 ),
-                NavigationDestination(
-                  icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
-                  selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
-                  label: '',
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+              ),
+            )
+          : null,
     ),
     );
   }
@@ -1162,64 +1371,90 @@ class _HomeScreenState extends State<HomeScreen>
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  const SizedBox(height: 12),
+                  Column(
                     children: [
-                      ElevatedButton.icon(
-                        onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
-                        icon: const Icon(Icons.call_rounded, size: 13),
-                        label: const Text('Sync Calls', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
+                              icon: const Icon(Icons.call_rounded, size: 14),
+                              label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.primary,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
+                              icon: const Icon(Icons.chat_rounded, size: 14),
+                              label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.whatsappGreen,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      ElevatedButton.icon(
-                        onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
-                        icon: const Icon(Icons.chat_rounded, size: 13),
-                        label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.whatsappGreen,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncSmsOnly(),
+                              icon: const Icon(Icons.sms_rounded, size: 14),
+                              label: const Text('Sync SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.secondary,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
+                              icon: const Icon(Icons.mic_rounded, size: 14),
+                              label: const Text('Upload Audio', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.warning,
+                                foregroundColor: Colors.black,
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      ElevatedButton.icon(
-                        onPressed: service.isSyncing ? null : () => service.syncSmsOnly(),
-                        icon: const Icon(Icons.sms_rounded, size: 13),
-                        label: const Text('Sync SMS', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.secondary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
-                        icon: const Icon(Icons.mic_rounded, size: 13),
-                        label: const Text('Upload Audio', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: colors.warning,
-                          foregroundColor: Colors.black,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
-                        icon: const Icon(Icons.refresh_rounded, size: 13),
-                        label: const Text('Resync All', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: colors.textPrimary,
-                          side: BorderSide(color: colors.border),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
+                          icon: const Icon(Icons.refresh_rounded, size: 15),
+                          label: const Text('Resync All Telemetry', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: colors.textPrimary,
+                            side: BorderSide(color: colors.border.withOpacity(0.9)),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
                         ),
                       ),
                     ],
@@ -1360,6 +1595,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       child: Column(
         children: [
+          // Row 1: Primary Metrics (3 span)
           Row(
             children: [
               _buildMiniKpi(
@@ -1369,6 +1605,7 @@ class _HomeScreenState extends State<HomeScreen>
                 colors.primary,
                 onTap: () => _tabController.animateTo(1),
               ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'Connected',
                 '$connectedCalls',
@@ -1376,6 +1613,7 @@ class _HomeScreenState extends State<HomeScreen>
                 colors.success,
                 onTap: () => _tabController.animateTo(1),
               ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'Talk Time',
                 _formatDuration(talkSeconds),
@@ -1383,6 +1621,12 @@ class _HomeScreenState extends State<HomeScreen>
                 colors.secondary,
                 onTap: () => _tabController.animateTo(1),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Row 2: Secondary Metrics (3 span)
+          Row(
+            children: [
               _buildMiniKpi(
                 'WhatsApp',
                 '$waCalls',
@@ -1390,6 +1634,7 @@ class _HomeScreenState extends State<HomeScreen>
                 colors.whatsappGreen,
                 onTap: () => _tabController.animateTo(2),
               ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'SMS',
                 '$smsCount',
@@ -1397,6 +1642,7 @@ class _HomeScreenState extends State<HomeScreen>
                 colors.secondary,
                 onTap: () => _tabController.animateTo(3),
               ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'Queue',
                 '$pendingQueue',
@@ -1408,7 +1654,7 @@ class _HomeScreenState extends State<HomeScreen>
           ),
           const SizedBox(height: 10),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             decoration: BoxDecoration(
               color: colors.surfaceColor.withOpacity(0.6),
               borderRadius: BorderRadius.circular(10),
@@ -1466,8 +1712,7 @@ class _HomeScreenState extends State<HomeScreen>
           onTap: onTap,
           borderRadius: BorderRadius.circular(14),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 3),
-            margin: const EdgeInsets.symmetric(horizontal: 2),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
             decoration: BoxDecoration(
               color: colors.surfaceColor.withOpacity(0.65),
               borderRadius: BorderRadius.circular(14),
@@ -1477,6 +1722,7 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
                   padding: const EdgeInsets.all(6),
@@ -1488,26 +1734,30 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                     borderRadius: BorderRadius.circular(9),
                   ),
-                  child: Icon(icon, size: 15, color: color),
+                  child: Icon(icon, size: 16, color: color),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                    letterSpacing: -0.2,
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                      letterSpacing: -0.2,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
                     color: colors.textMuted,
                   ),
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],

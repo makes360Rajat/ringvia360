@@ -199,6 +199,8 @@ class SalesTrackConfig {
   final String version;
   final AppUpdateInfo appInfo;
   final bool webview;
+  final bool crmBottomNavEnabled;
+  final bool? crmHideAppIcon;
   final String? crmStartPage;
 
   SalesTrackConfig({
@@ -234,6 +236,8 @@ class SalesTrackConfig {
     required this.version,
     this.appInfo = const AppUpdateInfo(),
     this.webview = false,
+    this.crmBottomNavEnabled = true,
+    this.crmHideAppIcon,
     this.crmStartPage,
   });
 
@@ -276,6 +280,8 @@ class SalesTrackConfig {
       version: '1.0.0',
       appInfo: const AppUpdateInfo(),
       webview: false,
+      crmBottomNavEnabled: true,
+      crmHideAppIcon: null,
       crmStartPage: null,
     );
   }
@@ -353,12 +359,29 @@ class SalesTrackConfig {
       version: json['version']?.toString() ?? '',
       appInfo: AppUpdateInfo.fromJson(app),
       webview: json['webview'] == true,
+      crmBottomNavEnabled: json['crm_bottom_nav'] != null
+          ? (json['crm_bottom_nav'] == true || json['crm_bottom_nav'] == 1 || json['crm_bottom_nav'] == '1')
+          : (json['crm_tab_enabled'] != null
+              ? (json['crm_tab_enabled'] == true || json['crm_tab_enabled'] == 1 || json['crm_tab_enabled'] == '1')
+              : (json['bottom_nav'] != null
+                  ? (json['bottom_nav'] == true || json['bottom_nav'] == 1 || json['bottom_nav'] == '1')
+                  : (json['webview'] != null
+                      ? (json['webview'] == true || json['webview'] == 1 || json['webview'] == '1')
+                      : true))),
+      crmHideAppIcon: json['hide_app_icon'] != null
+          ? (json['hide_app_icon'] == true || json['hide_app_icon'] == 1 || json['hide_app_icon'] == '1')
+          : (json['hide_icon'] != null
+              ? (json['hide_icon'] == true || json['hide_icon'] == 1 || json['hide_icon'] == '1')
+              : null),
       crmStartPage: json['start_page']?.toString() ?? json['crm_start_page']?.toString() ?? json['webview_page']?.toString(),
     );
   }
 
   Map<String, dynamic> toJson() => {
     'webview': webview,
+    'crm_bottom_nav': crmBottomNavEnabled,
+    'crm_tab_enabled': crmBottomNavEnabled,
+    'hide_app_icon': crmHideAppIcon,
     'start_page': crmStartPage,
     'tracking': {
       'calls': trackingCalls,

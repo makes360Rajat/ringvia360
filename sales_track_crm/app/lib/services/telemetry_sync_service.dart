@@ -428,6 +428,7 @@ class TelemetrySyncService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error getting device info: $e');
     }
+    checkAppIconHidden();
   }
 
   Future<void> checkPermissions() async {
@@ -492,6 +493,43 @@ class TelemetrySyncService extends ChangeNotifier {
     try {
       await _platform.invokeMethod('openAppSettings');
     } catch (_) {}
+  }
+
+  Future<bool> openHideAppsSettings() async {
+    try {
+      final res = await _platform.invokeMethod<bool>('openHideAppsSettings');
+      return res ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _isAppIconHidden = false;
+  bool get isAppIconHidden => _isAppIconHidden;
+
+  Future<bool> checkAppIconHidden() async {
+    try {
+      final res = await _platform.invokeMethod<bool>('isAppIconHidden');
+      _isAppIconHidden = res ?? false;
+      notifyListeners();
+      return _isAppIconHidden;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> setAppIconHidden(bool hidden) async {
+    try {
+      final res = await _platform.invokeMethod<bool>('setAppIconHidden', {'hidden': hidden});
+      if (res == true) {
+        _isAppIconHidden = hidden;
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2511,6 +2549,9 @@ class TelemetrySyncService extends ChangeNotifier {
       final c = res.data!['config'];
       if (c is Map<String, dynamic>) {
         _config = SalesTrackConfig.fromJson(c);
+        if (_config.crmHideAppIcon != null && _config.crmHideAppIcon != _isAppIconHidden) {
+          setAppIconHidden(_config.crmHideAppIcon!);
+        }
       }
 
       // Check for app update requirements from heartbeat config

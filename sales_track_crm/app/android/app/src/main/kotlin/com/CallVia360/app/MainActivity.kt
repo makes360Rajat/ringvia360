@@ -129,6 +129,63 @@ class MainActivity : FlutterActivity() {
             METHOD_CHANNEL
         ).setMethodCallHandler { call, result ->
             when (call.method) {
+                "openHideAppsSettings" -> {
+                    var success = false
+                    try {
+                        val samsungIntent = Intent().apply {
+                            component = ComponentName("com.sec.android.app.launcher", "com.android.homescreen.settings.HomeScreenSettingsActivity")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(samsungIntent)
+                        success = true
+                    } catch (_: Exception) {}
+
+                    if (!success) {
+                        try {
+                            val genericIntent = Intent(Settings.ACTION_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(genericIntent)
+                            success = true
+                        } catch (_: Exception) {}
+                    }
+                    result.success(success)
+                }
+                "isAppIconHidden" -> {
+                    try {
+                        val aliasComponent = ComponentName(this, "$packageName.LauncherDefault")
+                        val state = packageManager.getComponentEnabledSetting(aliasComponent)
+                        val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                        val prefHidden = prefs.getBoolean("app_icon_hidden", false)
+                        val isHidden = (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) || prefHidden
+                        result.success(isHidden)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "setAppIconHidden" -> {
+                    val hide = call.argument<Boolean>("hidden") ?: false
+                    try {
+                        val aliasComponent = ComponentName(this, "$packageName.LauncherDefault")
+                        val newState = if (hide) {
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                        } else {
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        }
+                        packageManager.setComponentEnabledSetting(
+                            aliasComponent,
+                            newState,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putBoolean("app_icon_hidden", hide).apply()
+                        Log.i("MainActivity", "App icon visibility updated: hidden=$hide (state=$newState)")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Failed to set icon hidden: ${e.message}")
+                        result.error("ERROR", e.message, null)
+                    }
+                }
                 "startBackgroundService" -> {
                     SalesTrackBackgroundService.start(this)
                     NativeSyncManager.scheduleJob(this)
