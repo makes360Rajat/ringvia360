@@ -170,7 +170,9 @@ class SalesTrackConfig {
   final bool trackingCalls;
   final bool trackingRecordings;
   final bool trackingWhatsappCalls;
+  final bool trackingWhatsappMessages;
   final bool trackingSms;
+  final bool trackingContacts;
   final bool paused;
   final String excludedSalt;
   final List<String> excludedHashes;
@@ -203,12 +205,17 @@ class SalesTrackConfig {
   final bool? crmHideAppIcon;
   final String? crmStartPage;
   final bool leadEdit;
+  final String? appName;
+  final String? appIconUrl;
+  final String appIconVersion;
 
   SalesTrackConfig({
     required this.trackingCalls,
     required this.trackingRecordings,
     required this.trackingWhatsappCalls,
+    this.trackingWhatsappMessages = true,
     required this.trackingSms,
+    this.trackingContacts = true,
     required this.paused,
     required this.excludedSalt,
     required this.excludedHashes,
@@ -241,6 +248,9 @@ class SalesTrackConfig {
     this.crmHideAppIcon,
     this.crmStartPage,
     this.leadEdit = true,
+    this.appName,
+    this.appIconUrl,
+    this.appIconVersion = '',
   });
 
   factory SalesTrackConfig.defaultConfig() {
@@ -248,7 +258,9 @@ class SalesTrackConfig {
       trackingCalls: true,
       trackingRecordings: true,
       trackingWhatsappCalls: true,
+      trackingWhatsappMessages: true,
       trackingSms: true,
+      trackingContacts: true,
       paused: false,
       excludedSalt: '',
       excludedHashes: [],
@@ -286,6 +298,9 @@ class SalesTrackConfig {
       crmHideAppIcon: null,
       crmStartPage: null,
       leadEdit: true,
+      appName: null,
+      appIconUrl: null,
+      appIconVersion: '',
     );
   }
 
@@ -333,7 +348,9 @@ class SalesTrackConfig {
       trackingCalls: tracking['calls'] != false,
       trackingRecordings: tracking['recordings'] != false,
       trackingWhatsappCalls: tracking['whatsapp_calls'] != false,
+      trackingWhatsappMessages: tracking['whatsapp_messages'] != false,
       trackingSms: tracking['sms'] != false,
+      trackingContacts: tracking['contacts'] != false,
       paused: json['paused'] == true,
       excludedSalt: excluded['salt']?.toString() ?? '',
       excludedHashes: excludedList,
@@ -388,6 +405,9 @@ class SalesTrackConfig {
       leadEdit: json['lead_edit'] != null
           ? (json['lead_edit'] == true || json['lead_edit'] == 1 || json['lead_edit'] == '1')
           : true,
+      appName: json['app_name']?.toString(),
+      appIconUrl: json['app_icon_url']?.toString(),
+      appIconVersion: json['app_icon_version']?.toString() ?? '',
     );
   }
 
@@ -401,11 +421,16 @@ class SalesTrackConfig {
     'portal_url': crmStartPage,
     'start_page': crmStartPage,
     'lead_edit': leadEdit,
+    'app_name': appName,
+    'app_icon_url': appIconUrl,
+    'app_icon_version': appIconVersion,
     'tracking': {
       'calls': trackingCalls,
       'recordings': trackingRecordings,
       'whatsapp_calls': trackingWhatsappCalls,
+      'whatsapp_messages': trackingWhatsappMessages,
       'sms': trackingSms,
+      'contacts': trackingContacts,
     },
     'paused': paused,
     'excluded': {

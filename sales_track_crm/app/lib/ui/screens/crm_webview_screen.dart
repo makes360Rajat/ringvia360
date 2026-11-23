@@ -99,6 +99,14 @@ class _CrmWebviewScreenState extends State<CrmWebviewScreen> {
         }
       }
 
+      // Fall back to configured portal_url from config/settings if session API did not specify a URL
+      if (completeUrlFromCrm == null || completeUrlFromCrm.isEmpty) {
+        final configPortalUrl = widget.syncService.config.crmStartPage?.trim();
+        if (configPortalUrl != null && configPortalUrl.isNotEmpty) {
+          completeUrlFromCrm = _resolveFullUrl(configPortalUrl);
+        }
+      }
+
       if (completeUrlFromCrm != null && completeUrlFromCrm.isNotEmpty) {
         debugPrint('=====================================================================');
         debugPrint('[CRM WebView] >>> OPENING AUTHENTIC CRM WEBURL:');

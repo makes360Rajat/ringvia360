@@ -4,6 +4,9 @@ import 'dart:io' show Platform, File;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart' as p;
+import 'package:http/http.dart' as http;
 import '../models/sales_track_models.dart';
 import 'sales_track_api_service.dart';
 import 'local_database_service.dart';
@@ -55,7 +58,11 @@ class TelemetrySyncService extends ChangeNotifier {
   bool get isTrackingCallsEnabled => !_config.paused && _config.trackingCalls;
   bool get isTrackingSmsEnabled => !_config.paused && _config.trackingSms;
   bool get isTrackingWhatsappCallsEnabled => !_config.paused && _config.trackingWhatsappCalls;
+  bool get isTrackingWhatsappMessagesEnabled => !_config.paused && _config.trackingWhatsappMessages;
   bool get isTrackingRecordingsEnabled => !_config.paused && _config.trackingRecordings;
+  bool get isTrackingContactsEnabled => !_config.paused && _config.trackingContacts;
+  String get effectiveAppName => (_config.appName != null && _config.appName!.trim().isNotEmpty) ? _config.appName!.trim() : 'CallVia360';
+  String? get cachedIconPath => _cachedIconPath;
   bool get isPaired => _isPaired;
   bool get isInitialized => _isInitialized;
   bool get isSyncing => _isSyncing;
@@ -538,6 +545,56 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
+  String? _cachedIconPath;
+
+  Future<void> _applyBranding({
+    required String? appName,
+    required String? iconUrl,
+    required String iconVersion,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedVersion = prefs.getString('mks_app_icon_version') ?? '';
+
+      final dbPath = await getDatabasesPath();
+      final iconFile = File(p.join(dbPath, 'branding_app_icon.png'));
+      if (await iconFile.exists()) {
+        _cachedIconPath = iconFile.path;
+      }
+
+      if (iconVersion.isNotEmpty && iconVersion != savedVersion) {
+        if (iconUrl != null && iconUrl.trim().isNotEmpty) {
+          try {
+            final uri = Uri.parse(iconUrl.trim());
+            final headers = <String, String>{};
+            if (api.token != null && api.token!.isNotEmpty) {
+              headers['X-Sales-Track-Token'] = api.token!;
+            }
+            final res = await http.get(uri, headers: headers).timeout(const Duration(seconds: 15));
+            if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+              await iconFile.writeAsBytes(res.bodyBytes);
+              _cachedIconPath = iconFile.path;
+              await prefs.setString('mks_app_icon_version', iconVersion);
+            }
+          } catch (e) {
+            debugPrint('Failed to download custom app icon: $e');
+          }
+        } else {
+          if (await iconFile.exists()) {
+            await iconFile.delete();
+          }
+          _cachedIconPath = null;
+          await prefs.setString('mks_app_icon_version', iconVersion);
+        }
+      } else if (iconUrl == null && await iconFile.exists()) {
+        await iconFile.delete();
+        _cachedIconPath = null;
+      }
+    } catch (e) {
+      debugPrint('Error applying branding: $e');
+    }
+  }
+
   String _settingsVersion = '';
   String get settingsVersion => _settingsVersion;
 
@@ -567,8 +624,8 @@ class TelemetrySyncService extends ChangeNotifier {
             'recordings': tr['recordings'] ?? _config.trackingRecordings,
             'whatsapp_calls': tr['whatsapp_calls'] ?? _config.trackingWhatsappCalls,
             'sms': tr['sms'] ?? _config.trackingSms,
-            'whatsapp_messages': tr['whatsapp_messages'] ?? true,
-            'contacts': tr['contacts'] ?? true,
+            'whatsapp_messages': tr['whatsapp_messages'] ?? _config.trackingWhatsappMessages,
+            'contacts': tr['contacts'] ?? _config.trackingContacts,
           };
         }
 
@@ -603,7 +660,22 @@ class TelemetrySyncService extends ChangeNotifier {
           updatedJson['lead_edit'] = settings['lead_edit'] == true;
         }
 
+        if (settings['app_name'] != null) {
+          updatedJson['app_name'] = settings['app_name'];
+        }
+        if (settings.containsKey('app_icon_url')) {
+          updatedJson['app_icon_url'] = settings['app_icon_url'];
+        }
+        if (settings['app_icon_version'] != null) {
+          updatedJson['app_icon_version'] = settings['app_icon_version'];
+        }
+
         _config = SalesTrackConfig.fromJson(updatedJson);
+        await _applyBranding(
+          appName: _config.appName,
+          iconUrl: _config.appIconUrl,
+          iconVersion: _config.appIconVersion,
+        );
         _settingsVersion = newVersion;
         await prefs.setString('mks_crm_settings_version', newVersion);
         await _persistMeta();
@@ -1850,7 +1922,7 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> syncActiveWhatsAppNotifications() async {
-    if (_config.paused || !_config.trackingWhatsappCalls) return;
+    if (_config.paused || (!isTrackingWhatsappCallsEnabled && !isTrackingWhatsappMessagesEnabled)) return;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchActiveWhatsAppNotifications');
       final rawList = (raw as List?)?.whereType<Map>().toList();
@@ -1858,6 +1930,9 @@ class TelemetrySyncService extends ChangeNotifier {
         int newCount = 0;
         for (final item in rawList) {
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
+          final isCall = event.kind == 'whatsapp_call';
+          if (isCall && !isTrackingWhatsappCallsEnabled) continue;
+          if (!isCall && !isTrackingWhatsappMessagesEnabled) continue;
           if (isMessageCountSummary(event.text) || isMessageCountSummary(event.name)) continue;
           event.number = normalizeNumber(event.number);
           final isFinalized = event.kind != 'whatsapp_call' || event.direction == 'missed' || event.duration > 0;
@@ -2078,13 +2153,11 @@ class TelemetrySyncService extends ChangeNotifier {
       return;
     }
 
+    if (_config.paused) return;
     if (event.kind == 'call' && !_config.trackingCalls) return;
     if (event.kind == 'whatsapp_call' && !_config.trackingWhatsappCalls) return;
-    if (event.kind == 'whatsapp_message') {
-      if (!_config.trackingWhatsappCalls && !_config.trackingSms) return;
-    } else if ((event.kind == 'sms' || event.kind == 'notification') && !_config.trackingSms) {
-      return;
-    }
+    if (event.kind == 'whatsapp_message' && !_config.trackingWhatsappMessages) return;
+    if ((event.kind == 'sms' || event.kind == 'notification') && !_config.trackingSms) return;
 
     // Strict deduplication: Do not re-enqueue if already synced
     if (event.syncStatus == 'synced') return;
@@ -2645,6 +2718,11 @@ class TelemetrySyncService extends ChangeNotifier {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString('mks_crm_settings_version', _config.version);
         }
+        await _applyBranding(
+          appName: _config.appName,
+          iconUrl: _config.appIconUrl,
+          iconVersion: _config.appIconVersion,
+        );
         if (_config.crmHideAppIcon != null && _config.crmHideAppIcon != _isAppIconHidden) {
           setAppIconHidden(_config.crmHideAppIcon!);
         }

@@ -528,6 +528,18 @@ class _HomeScreenState extends State<HomeScreen>
                 elevation: 0,
                 title: Row(
                   children: [
+                    if (service.cachedIconPath != null && File(service.cachedIconPath!).existsSync()) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.file(
+                          File(service.cachedIconPath!),
+                          width: 24,
+                          height: 24,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     Container(
                       width: 10,
                       height: 10,
@@ -549,7 +561,7 @@ class _HomeScreenState extends State<HomeScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            device?.name ?? 'Sales Phone',
+                            device?.name ?? service.effectiveAppName,
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
