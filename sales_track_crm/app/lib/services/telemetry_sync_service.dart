@@ -51,6 +51,11 @@ class TelemetrySyncService extends ChangeNotifier {
   CrmDevice? get device => _device;
   CrmStaff? get staff => _staff;
   SalesTrackConfig get config => _config;
+  bool get isLeadEditAllowed => _config.leadEdit;
+  bool get isTrackingCallsEnabled => !_config.paused && _config.trackingCalls;
+  bool get isTrackingSmsEnabled => !_config.paused && _config.trackingSms;
+  bool get isTrackingWhatsappCallsEnabled => !_config.paused && _config.trackingWhatsappCalls;
+  bool get isTrackingRecordingsEnabled => !_config.paused && _config.trackingRecordings;
   bool get isPaired => _isPaired;
   bool get isInitialized => _isInitialized;
   bool get isSyncing => _isSyncing;
@@ -341,6 +346,7 @@ class TelemetrySyncService extends ChangeNotifier {
 
       _updateInitProgress(0.38, 'Verifying telephony & system permissions...');
       await checkPermissions();
+      checkAppIconHidden();
 
       _updateInitProgress(0.48, 'Loading local conversation history...');
       // Load local database history with non-blocking timeout
@@ -530,6 +536,84 @@ class TelemetrySyncService extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  String _settingsVersion = '';
+  String get settingsVersion => _settingsVersion;
+
+  /// Fetches lightweight per-device controls from v2.0.7 `GET settings`.
+  /// Compares settings.version with stored version and updates effective controls.
+  Future<bool> fetchSettingsAndApply({bool force = false}) async {
+    if (!_isPaired) return false;
+    try {
+      final res = await api.fetchSettings();
+      if (res.success && res.data != null && res.data!['settings'] is Map<String, dynamic>) {
+        final settings = res.data!['settings'] as Map<String, dynamic>;
+        final newVersion = settings['version']?.toString() ?? '';
+
+        final prefs = await SharedPreferences.getInstance();
+        final storedVersion = prefs.getString('mks_crm_settings_version') ?? '';
+
+        if (!force && newVersion.isNotEmpty && newVersion == storedVersion) {
+          return false;
+        }
+
+        final updatedJson = Map<String, dynamic>.from(_config.toJson());
+
+        if (settings['tracking'] is Map<String, dynamic>) {
+          final tr = settings['tracking'] as Map<String, dynamic>;
+          updatedJson['tracking'] = {
+            'calls': tr['calls'] ?? _config.trackingCalls,
+            'recordings': tr['recordings'] ?? _config.trackingRecordings,
+            'whatsapp_calls': tr['whatsapp_calls'] ?? _config.trackingWhatsappCalls,
+            'sms': tr['sms'] ?? _config.trackingSms,
+            'whatsapp_messages': tr['whatsapp_messages'] ?? true,
+            'contacts': tr['contacts'] ?? true,
+          };
+        }
+
+        if (settings['paused'] != null) {
+          updatedJson['paused'] = settings['paused'] == true;
+        }
+
+        if (settings['portal'] is Map<String, dynamic>) {
+          final portal = settings['portal'] as Map<String, dynamic>;
+          if (portal['enabled'] != null) {
+            final portalOn = portal['enabled'] == true;
+            updatedJson['portal_enabled'] = portalOn;
+            updatedJson['crm_bottom_nav'] = portalOn;
+            updatedJson['crm_tab_enabled'] = portalOn;
+            updatedJson['webview'] = portalOn;
+          }
+          if (portal['url'] != null) {
+            updatedJson['portal_url'] = portal['url'].toString();
+            updatedJson['start_page'] = portal['url'].toString();
+          }
+        }
+
+        if (settings['app_icon_hidden'] != null) {
+          final shouldHide = settings['app_icon_hidden'] == true;
+          updatedJson['app_icon_hidden'] = shouldHide;
+          if (shouldHide != _isAppIconHidden) {
+            await setAppIconHidden(shouldHide);
+          }
+        }
+
+        if (settings['lead_edit'] != null) {
+          updatedJson['lead_edit'] = settings['lead_edit'] == true;
+        }
+
+        _config = SalesTrackConfig.fromJson(updatedJson);
+        _settingsVersion = newVersion;
+        await prefs.setString('mks_crm_settings_version', newVersion);
+        await _persistMeta();
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('fetchSettingsAndApply failed: $e');
+    }
+    return false;
   }
 
   // ---------------------------------------------------------------------------
@@ -1565,7 +1649,7 @@ class TelemetrySyncService extends ChangeNotifier {
   bool _isFetchingSms = false;
 
   Future<void> syncDeviceCallLogs() async {
-    if (!hasCallLogPermission || _isFetchingCallLogs || isSetupWizardActive) return;
+    if (!hasCallLogPermission || _isFetchingCallLogs || isSetupWizardActive || !isTrackingCallsEnabled) return;
     _isFetchingCallLogs = true;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceCallLogs');
@@ -1717,7 +1801,7 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> syncDeviceSms() async {
-    if (!hasSmsPermission || _isFetchingSms || isSetupWizardActive) return;
+    if (!hasSmsPermission || _isFetchingSms || isSetupWizardActive || !isTrackingSmsEnabled) return;
     _isFetchingSms = true;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceSms');
@@ -1766,6 +1850,7 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   Future<void> syncActiveWhatsAppNotifications() async {
+    if (_config.paused || !_config.trackingWhatsappCalls) return;
     try {
       final dynamic raw = await _platform.invokeMethod('fetchActiveWhatsAppNotifications');
       final rawList = (raw as List?)?.whereType<Map>().toList();
@@ -1832,7 +1917,7 @@ class TelemetrySyncService extends ChangeNotifier {
   bool _isScanningRecordings = false;
 
   Future<void> scanLocalRecordings() async {
-    if (_isScanningRecordings || isSetupWizardActive) return;
+    if (_isScanningRecordings || isSetupWizardActive || !isTrackingRecordingsEnabled) return;
     _isScanningRecordings = true;
     try {
       final list = await _platform.invokeListMethod<Map<dynamic, dynamic>>('fetchLocalCallRecordings');
@@ -2012,6 +2097,10 @@ class TelemetrySyncService extends ChangeNotifier {
 
   Future<void> syncNow({String? targetKind, bool uploadRecordings = true, bool alreadyMarkedSyncing = false}) async {
     if (!_isPaired || isSetupWizardActive) return;
+    if (_config.paused) {
+      debugPrint('[TelemetrySync] Activity tracking is paused in CRM settings');
+      return;
+    }
     final isWhatsAppOnly = targetKind != null && targetKind.startsWith('whatsapp');
     if (isWhatsAppOnly) {
       uploadRecordings = false;
@@ -2447,7 +2536,9 @@ class TelemetrySyncService extends ChangeNotifier {
       }
       if (_isPaired) {
         sendHeartbeat();
+        fetchSettingsAndApply();
       }
+      checkAppIconHidden();
     }
   }
 
@@ -2549,9 +2640,15 @@ class TelemetrySyncService extends ChangeNotifier {
       final c = res.data!['config'];
       if (c is Map<String, dynamic>) {
         _config = SalesTrackConfig.fromJson(c);
+        if (_config.version.isNotEmpty) {
+          _settingsVersion = _config.version;
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('mks_crm_settings_version', _config.version);
+        }
         if (_config.crmHideAppIcon != null && _config.crmHideAppIcon != _isAppIconHidden) {
           setAppIconHidden(_config.crmHideAppIcon!);
         }
+        await _persistMeta();
       }
 
       // Check for app update requirements from heartbeat config
@@ -2634,9 +2731,13 @@ class TelemetrySyncService extends ChangeNotifier {
     int? leadStatus,
     String? createLeadName,
   }) async {
-    // If a custom lead name was specified, update local call records immediately
-    if (createLeadName != null && createLeadName.trim().isNotEmpty) {
-      final cleanName = createLeadName.trim();
+    final bool canEditLeads = isLeadEditAllowed;
+    final effectiveLeadName = canEditLeads ? createLeadName : null;
+    final effectiveLeadStatus = canEditLeads ? leadStatus : null;
+
+    // If lead editing is allowed and a custom lead name was specified, update local call records immediately
+    if (canEditLeads && effectiveLeadName != null && effectiveLeadName.trim().isNotEmpty) {
+      final cleanName = effectiveLeadName.trim();
       final idx = _calls.indexWhere((c) => c.uid == uid);
       if (idx >= 0) {
         _calls[idx].name = cleanName;
@@ -2652,8 +2753,8 @@ class TelemetrySyncService extends ChangeNotifier {
       outcome: outcomeKey,
       note: note,
       followUpAt: followUpDate?.millisecondsSinceEpoch,
-      leadStatus: leadStatus,
-      createLead: (createLeadName != null && createLeadName.isNotEmpty) ? {'name': createLeadName} : null,
+      leadStatus: effectiveLeadStatus,
+      createLead: (effectiveLeadName != null && effectiveLeadName.isNotEmpty) ? {'name': effectiveLeadName} : null,
     );
 
     // Save to local SQLite database so caller lookup and offline history are immediately updated

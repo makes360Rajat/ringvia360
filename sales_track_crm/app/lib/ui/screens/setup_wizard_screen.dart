@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../services/telemetry_sync_service.dart';
+import '../widgets/app_icon_visibility_dialog.dart';
 
 class SetupWizardScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -157,6 +158,195 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAppIconVisibilityCard(BuildContext context) {
+    final colors = context.stColors;
+    final isHidden = widget.syncService.isAppIconHidden;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.cardBackground,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: (isHidden ? colors.warning : colors.success).withOpacity(0.35),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: (isHidden ? colors.warning : colors.success).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  isHidden ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  size: 20,
+                  color: isHidden ? colors.warning : colors.success,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'App Launcher Icon',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: (isHidden ? colors.warning : colors.success).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            isHidden ? 'HIDDEN' : 'VISIBLE',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                              color: isHidden ? colors.warning : colors.success,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isHidden
+                          ? 'Icon is hidden from phone launcher & app drawer'
+                          : 'Icon is visible on phone home screen & app drawer',
+                      style: TextStyle(fontSize: 11.5, color: colors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final target = !isHidden;
+                  final ok = await widget.syncService.setAppIconHidden(target);
+                  await widget.syncService.checkAppIconHidden();
+                  await widget.syncService.openHideAppsSettings();
+                  if (mounted) {
+                    setState(() {});
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          ok
+                              ? (target
+                                  ? '✓ Hidden! In Settings, tap "Hide apps" to select CallVia360'
+                                  : '✓ Restored! In Settings, tap "Hide apps" to uncheck CallVia360')
+                              : 'Failed to update app icon setting',
+                        ),
+                        backgroundColor: ok ? colors.primary : colors.danger,
+                        duration: const Duration(seconds: 4),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isHidden ? colors.success : colors.warning,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: Text(
+                  isHidden ? 'Show Icon' : 'Hide Icon',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: colors.surfaceColor,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: colors.border.withOpacity(0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '• Telemetry and call recording continue running 24/7 in background.\n'
+                  '• Reopen anytime via notification or dialing *#*#3600#*#*.\n'
+                  '• Note for Samsung One UI: To find CallVia360 in Samsung "Hide apps", icon must be set to "Show Icon" first so Samsung detects CallVia360 in its list.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.4,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => widget.syncService.openHideAppsSettings(),
+                        icon: const Icon(Icons.settings_suggest_rounded, size: 15),
+                        label: const Text(
+                          'Open Samsung Settings',
+                          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.primary,
+                          side: BorderSide(color: colors.primary.withOpacity(0.35)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: Icon(Icons.open_in_new_rounded, color: colors.primary, size: 18),
+                      tooltip: 'Full Icon Dialog',
+                      onPressed: () => showAppIconVisibilityDialog(context, widget.syncService),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -432,6 +622,20 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                       isGranted: widget.syncService.hasOverlayPermission,
                       onRequest: () => widget.syncService.openOverlaySettings(),
                     ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'APP VISIBILITY & HIDE ICON',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: colors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // App Launcher Icon Visibility & Hide
+                    _buildAppIconVisibilityCard(context),
                   ],
                 ],
               ),

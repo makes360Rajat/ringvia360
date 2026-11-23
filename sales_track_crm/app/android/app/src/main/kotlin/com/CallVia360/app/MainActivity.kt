@@ -134,11 +134,24 @@ class MainActivity : FlutterActivity() {
                     try {
                         val samsungIntent = Intent().apply {
                             component = ComponentName("com.sec.android.app.launcher", "com.android.homescreen.settings.HomeScreenSettingsActivity")
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            putExtra(":settings:fragment_args_key", "pref_hide_apps")
+                            putExtra(":settings:show_fragment_args", "pref_hide_apps")
+                            putExtra("pref_key", "pref_hide_apps")
                         }
                         startActivity(samsungIntent)
                         success = true
                     } catch (_: Exception) {}
+
+                    if (!success) {
+                        try {
+                            val homeIntent = Intent(Settings.ACTION_HOME_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(homeIntent)
+                            success = true
+                        } catch (_: Exception) {}
+                    }
 
                     if (!success) {
                         try {
@@ -156,8 +169,11 @@ class MainActivity : FlutterActivity() {
                         val aliasComponent = ComponentName(this, "$packageName.LauncherDefault")
                         val state = packageManager.getComponentEnabledSetting(aliasComponent)
                         val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
-                        val prefHidden = prefs.getBoolean("app_icon_hidden", false)
-                        val isHidden = (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) || prefHidden
+                        val isHidden = when (state) {
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> true
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> false
+                            else -> prefs.getBoolean("app_icon_hidden", false)
+                        }
                         result.success(isHidden)
                     } catch (e: Exception) {
                         result.success(false)
@@ -659,6 +675,25 @@ class MainActivity : FlutterActivity() {
 
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
+
+        if (intent.hasExtra("set_icon_hidden")) {
+            val hide = intent.getBooleanExtra("set_icon_hidden", false)
+            try {
+                val aliasComponent = ComponentName(this, "$packageName.LauncherDefault")
+                val newState = if (hide) {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                }
+                packageManager.setComponentEnabledSetting(aliasComponent, newState, PackageManager.DONT_KILL_APP)
+                getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                    .edit().putBoolean("app_icon_hidden", hide).apply()
+                Log.i("MainActivity", "App icon visibility updated via intent: hidden=$hide (state=$newState)")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to set icon hidden via intent: ${e.message}")
+            }
+        }
+
         val action = intent.getStringExtra("action")
         if (action == "after_call_dialog") {
             val number = intent.getStringExtra("number") ?: ""

@@ -11,6 +11,7 @@ import 'crm_webview_screen.dart';
 import '../widgets/caller_id_dialog.dart';
 import '../widgets/after_call_dialog.dart';
 import '../widgets/app_update_dialog.dart';
+import '../widgets/app_icon_visibility_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -491,175 +492,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService service) {
-    bool isHidden = service.isAppIconHidden;
-
-    showDialog(
-      context: context,
-      builder: (dialogCtx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final colors = context.stColors;
-
-          return AlertDialog(
-            backgroundColor: colors.cardBackground,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-              side: BorderSide(color: colors.border),
-            ),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: (isHidden ? colors.warning : colors.primary).withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    isHidden ? Icons.visibility_off_rounded : Icons.visibility_rounded,
-                    color: isHidden ? colors.warning : colors.primary,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'App Icon on Phone',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      color: colors.textPrimary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: (isHidden ? colors.warning : colors.success).withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: (isHidden ? colors.warning : colors.success).withOpacity(0.3),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isHidden ? Icons.visibility_off : Icons.check_circle_rounded,
-                          size: 18,
-                          color: isHidden ? colors.warning : colors.success,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            isHidden ? 'Status: Icon is HIDDEN on Phone' : 'Status: Icon is VISIBLE on Phone',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700,
-                              color: isHidden ? colors.warning : colors.success,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    isHidden
-                        ? 'The CallVia360 app icon is currently hidden from your phone\'s Home Screen and App Drawer.\n\n'
-                          '• Telemetry and background call syncing remain fully active.\n'
-                          '• Tap the ongoing notification in your phone\'s status bar to open the app.\n'
-                          '• Or dial *#*#3600#*#* on your phone dialer pad to open directly.'
-                        : 'You can hide the CallVia360 app icon from your phone\'s Home Screen and App Drawer with one tap.\n\n'
-                          '• Background syncing will continue 24/7.\n'
-                          '• You can open the app anytime from the persistent notification or by dialing *#*#3600#*#*.',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      height: 1.45,
-                      color: colors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        final messenger = ScaffoldMessenger.of(context);
-                        final newHiddenState = !isHidden;
-                        final success = await service.setAppIconHidden(newHiddenState);
-                        if (success) {
-                          setDialogState(() {
-                            isHidden = newHiddenState;
-                          });
-                          if (mounted) setState(() {});
-                          messenger.showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                newHiddenState
-                                    ? 'App icon hidden from phone screen.'
-                                    : 'App icon restored to phone screen.',
-                              ),
-                              backgroundColor: newHiddenState ? colors.warning : colors.success,
-                            ),
-                          );
-                        }
-                      },
-                      icon: Icon(
-                        isHidden ? Icons.visibility_rounded : Icons.visibility_off_rounded,
-                        size: 18,
-                      ),
-                      label: Text(
-                        isHidden ? 'Show App Icon on Phone' : 'Hide App Icon on Phone Now',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: isHidden ? colors.primary : colors.warning,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: () async {
-                        await service.openHideAppsSettings();
-                      },
-                      icon: const Icon(Icons.settings_suggest_rounded, size: 16),
-                      label: const Text(
-                        'Open Samsung Launcher Settings',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogCtx),
-                child: Text('Close', style: TextStyle(color: colors.textSecondary)),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+    showAppIconVisibilityDialog(context, service);
   }
 
   @override
@@ -1059,6 +892,7 @@ class _HomeScreenState extends State<HomeScreen>
                   Expanded(
                     child: TabBarView(
                       controller: _tabController,
+                      physics: const NeverScrollableScrollPhysics(),
                       children: [
                         _buildDashboardTab(
                           service,
@@ -1384,6 +1218,8 @@ class _HomeScreenState extends State<HomeScreen>
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: colors.primary,
                                 foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.primary.withOpacity(0.18),
+                                disabledForegroundColor: colors.primary.withOpacity(0.85),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1399,6 +1235,8 @@ class _HomeScreenState extends State<HomeScreen>
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: colors.whatsappGreen,
                                 foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.whatsappGreen.withOpacity(0.18),
+                                disabledForegroundColor: colors.whatsappGreen.withOpacity(0.85),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1418,6 +1256,8 @@ class _HomeScreenState extends State<HomeScreen>
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: colors.secondary,
                                 foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.secondary.withOpacity(0.18),
+                                disabledForegroundColor: colors.secondary.withOpacity(0.85),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1432,7 +1272,9 @@ class _HomeScreenState extends State<HomeScreen>
                               label: const Text('Upload Audio', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: colors.warning,
-                                foregroundColor: Colors.black,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.warning.withOpacity(0.18),
+                                disabledForegroundColor: colors.warning.withOpacity(0.9),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1449,8 +1291,13 @@ class _HomeScreenState extends State<HomeScreen>
                           icon: const Icon(Icons.refresh_rounded, size: 15),
                           label: const Text('Resync All Telemetry', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: colors.textPrimary,
-                            side: BorderSide(color: colors.border.withOpacity(0.9)),
+                            foregroundColor: colors.primary,
+                            disabledForegroundColor: colors.primary.withOpacity(0.65),
+                            side: BorderSide(
+                              color: service.isSyncing
+                                  ? colors.primary.withOpacity(0.25)
+                                  : colors.border.withOpacity(0.9),
+                            ),
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1514,6 +1361,14 @@ class _HomeScreenState extends State<HomeScreen>
               icon: Icons.list_alt_rounded,
               color: Colors.teal,
               onTap: () => _tabController.animateTo(6),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'Hide App Icon on Phone',
+              subtitle: 'Hide or show launcher icon from Home & Apps screens',
+              icon: Icons.visibility_off_rounded,
+              color: colors.warning,
+              onTap: () => _showAppIconVisibilityDialog(context, service),
             ),
           ],
         ),
@@ -2303,7 +2158,10 @@ class _HomeScreenState extends State<HomeScreen>
                         );
                       },
                       icon: const Icon(Icons.note_alt_outlined, size: 14),
-                      label: const Text('Edit Lead / Log Outcome', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      label: Text(
+                        service.isLeadEditAllowed ? 'Edit Lead / Log Outcome' : 'Log Call Outcome',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colors.primary,
                         foregroundColor: Colors.white,
@@ -3756,6 +3614,8 @@ class _HomeScreenState extends State<HomeScreen>
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.primary,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.primary.withOpacity(0.18),
+            disabledForegroundColor: colors.primary.withOpacity(0.85),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -3794,6 +3654,8 @@ class _HomeScreenState extends State<HomeScreen>
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.whatsappGreen,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.whatsappGreen.withOpacity(0.18),
+            disabledForegroundColor: colors.whatsappGreen.withOpacity(0.85),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -3832,6 +3694,8 @@ class _HomeScreenState extends State<HomeScreen>
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.secondary,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.secondary.withOpacity(0.18),
+            disabledForegroundColor: colors.secondary.withOpacity(0.85),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,

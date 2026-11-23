@@ -502,6 +502,46 @@ class SalesTrackApiService {
     }
   }
 
+  // 3b. FETCH SETTINGS (v2.0.7 lightweight per-device controls endpoint)
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> fetchSettings() async {
+    if (!isPaired) {
+      return SalesTrackApiResponse(success: false, error: 'NOT_PAIRED', statusCode: 401);
+    }
+    try {
+      final endpoint = '$apiBaseUrl/settings';
+      final response = await http.get(
+        Uri.parse(endpoint),
+        headers: _buildHeaders(),
+      ).timeout(const Duration(seconds: 15));
+
+      _watchAuth(response);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        return SalesTrackApiResponse(
+          success: body['success'] == true,
+          data: body,
+          statusCode: response.statusCode,
+        );
+      } else {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        return SalesTrackApiResponse(
+          success: false,
+          error: body['error']?.toString() ?? 'FETCH_SETTINGS_FAILED',
+          message: body['message']?.toString(),
+          statusCode: response.statusCode,
+        );
+      }
+    } catch (e) {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'CONNECTION_ERROR',
+        message: e.toString(),
+        statusCode: 0,
+      );
+    }
+  }
+
   // 4. SYNC EVENTS BATCH
   Future<SalesTrackApiResponse<Map<String, dynamic>>> syncEvents(
     List<SalesTrackEvent> events, {
