@@ -24,6 +24,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
 
+    <!-- Prevent Google Play from restricting device availability due to telephony/audio permissions -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.calling" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.messaging" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.data" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.gsm" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.cdma" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
+
     <application
         android:label="CallVia360"
         android:name="${applicationName}"
