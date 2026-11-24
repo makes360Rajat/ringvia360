@@ -29,6 +29,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import android.content.ContentUris
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.provider.MediaStore
 import android.util.Log
 import java.io.File
@@ -200,6 +204,76 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         Log.e("MainActivity", "Failed to set icon hidden: ${e.message}")
                         result.error("ERROR", e.message, null)
+                    }
+                }
+                "isPinnedShortcutSupported" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val sm = getSystemService(ShortcutManager::class.java)
+                        result.success(sm?.isRequestPinShortcutSupported == true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                "updateHomeScreenLauncher" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            val sm = getSystemService(ShortcutManager::class.java)
+                            if (sm != null && sm.isRequestPinShortcutSupported) {
+                                val appName = call.argument<String>("appName") ?: "CallVia360"
+                                val iconPath = call.argument<String>("iconPath")
+                                val hideDefault = call.argument<Boolean>("hideDefaultIcon") ?: false
+
+                                val icon: Icon = if (iconPath != null && File(iconPath).exists()) {
+                                    val bmp = BitmapFactory.decodeFile(iconPath)
+                                    Icon.createWithBitmap(bmp)
+                                } else {
+                                    Icon.createWithResource(this, R.mipmap.ic_launcher)
+                                }
+
+                                val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: Intent(this, MainActivity::class.java).apply {
+                                    action = Intent.ACTION_MAIN
+                                    addCategory(Intent.CATEGORY_LAUNCHER)
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                                }
+
+                                val shortcut = ShortcutInfo.Builder(this, "crm_dynamic_launcher_shortcut")
+                                    .setShortLabel(appName)
+                                    .setLongLabel(appName)
+                                    .setIcon(icon)
+                                    .setIntent(launchIntent)
+                                    .build()
+
+                                val pinnedList = sm.pinnedShortcuts
+                                val isPinned = pinnedList.any { it.id == "crm_dynamic_launcher_shortcut" }
+                                if (isPinned) {
+                                    val updated = sm.updateShortcuts(listOf(shortcut))
+                                    Log.i("MainActivity", "Pinned shortcut updated: $updated (name=$appName)")
+                                } else {
+                                    val requested = sm.requestPinShortcut(shortcut, null)
+                                    Log.i("MainActivity", "Request pin shortcut: $requested (name=$appName)")
+                                }
+
+                                if (hideDefault) {
+                                    val aliasComponent = ComponentName(this, "$packageName.LauncherDefault")
+                                    packageManager.setComponentEnabledSetting(
+                                        aliasComponent,
+                                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                        PackageManager.DONT_KILL_APP
+                                    )
+                                    val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                                    prefs.edit().putBoolean("app_icon_hidden", true).apply()
+                                }
+                                result.success(true)
+                            } else {
+                                Log.w("MainActivity", "Pinned shortcuts not supported on this launcher")
+                                result.success(false)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error in updateHomeScreenLauncher: ${e.message}")
+                            result.error("ERROR", e.message, null)
+                        }
+                    } else {
+                        result.success(false)
                     }
                 }
                 "startBackgroundService" -> {

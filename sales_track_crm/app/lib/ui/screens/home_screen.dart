@@ -719,6 +719,8 @@ class _HomeScreenState extends State<HomeScreen>
                 );
               } else if (val == 'app_icon_visibility') {
                 _showAppIconVisibilityDialog(context, service);
+              } else if (val == 'crm_branding') {
+                showCrmBrandingDialog(context, service);
               } else if (val == 'unpair') {
                 _promptPinForSensitiveAction(() {
                   service.unpair();
@@ -815,10 +817,37 @@ class _HomeScreenState extends State<HomeScreen>
                     const SizedBox(width: 10),
                     Text(
                       service.isAppIconHidden
-                          ? 'Show App Icon on Phone'
-                          : 'Hide App Icon on Phone',
+                          ? 'Show App Icon inside App List'
+                          : 'Hide App Icon inside App List',
                       style: TextStyle(
                         color: service.isAppIconHidden ? colors.success : colors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'crm_branding',
+                child: Row(
+                  children: [
+                    if (service.cachedIconPath != null && File(service.cachedIconPath!).existsSync())
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.file(
+                          File(service.cachedIconPath!),
+                          width: 20,
+                          height: 20,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    else
+                      Icon(Icons.palette_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'CRM Custom Branding',
+                      style: TextStyle(
+                        color: colors.textPrimary,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1376,11 +1405,19 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 8),
             _buildDashboardModuleCard(
-              title: 'Hide App Icon on Phone',
-              subtitle: 'Hide or show launcher icon from Home & Apps screens',
-              icon: Icons.visibility_off_rounded,
-              color: colors.warning,
+              title: service.isAppIconHidden ? 'Show App Icon inside App List' : 'Hide App Icon inside App List',
+              subtitle: 'Hide or show launcher icon from Home & Apps screen list',
+              icon: service.isAppIconHidden ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+              color: service.isAppIconHidden ? colors.success : colors.warning,
               onTap: () => _showAppIconVisibilityDialog(context, service),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'CRM Custom Branding',
+              subtitle: 'Set custom icon & "${service.effectiveAppName}" on Home screen',
+              icon: Icons.palette_rounded,
+              color: colors.primary,
+              onTap: () => showCrmBrandingDialog(context, service),
             ),
           ],
         ),

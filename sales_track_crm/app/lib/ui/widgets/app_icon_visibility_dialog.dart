@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../services/telemetry_sync_service.dart';
@@ -35,7 +36,7 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'App Icon Settings',
+                  'App Icon Visibility',
                   style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.bold,
@@ -74,9 +75,11 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              isHidden ? 'App Icon is HIDDEN' : 'App Icon is VISIBLE',
+                              isHidden
+                                  ? 'App Icon is HIDDEN inside App List'
+                                  : 'App Icon is VISIBLE inside App List',
                               style: TextStyle(
-                                fontSize: 14,
+                                fontSize: 13.5,
                                 fontWeight: FontWeight.w800,
                                 color: isHidden ? colors.warning : colors.success,
                               ),
@@ -84,8 +87,8 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                             const SizedBox(height: 2),
                             Text(
                               isHidden
-                                  ? 'Hidden from phone screen and app drawer'
-                                  : 'Visible on phone screen and app drawer',
+                                  ? 'Hidden from phone screen and app list'
+                                  : 'Visible on phone screen and app list',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: colors.textSecondary,
@@ -143,8 +146,10 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                     label: Text(
                       isProcessing
                           ? 'Opening settings...'
-                          : (isHidden ? 'Show App Icon on Phone' : 'Hide App Icon on Phone'),
-                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+                          : (isHidden
+                              ? 'Show App Icon inside App List'
+                              : 'Hide App Icon inside App List'),
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: isHidden ? colors.success : colors.warning,
@@ -276,6 +281,268 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
   );
 }
 
+/// Dedicated dialog for CRM Custom Branding (App Name & Launcher Icon)
+void showCrmBrandingDialog(BuildContext context, TelemetrySyncService service) {
+  bool isProcessing = false;
+
+  showDialog(
+    context: context,
+    builder: (dialogCtx) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        final colors = context.stColors;
+        final hasIcon = service.cachedIconPath != null && File(service.cachedIconPath!).existsSync();
+        final appName = service.effectiveAppName;
+
+        return AlertDialog(
+          backgroundColor: colors.cardBackground,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.border),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: colors.primary.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: hasIcon
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.file(
+                          File(service.cachedIconPath!),
+                          width: 24,
+                          height: 24,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    : Icon(Icons.palette_rounded, color: colors.primary, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'CRM Custom Branding',
+                  style: TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: colors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Branding Status Card
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: colors.primary.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      if (hasIcon)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.file(
+                            File(service.cachedIconPath!),
+                            width: 50,
+                            height: 50,
+                            fit: BoxFit.cover,
+                          ),
+                        )
+                      else
+                        Container(
+                          width: 50,
+                          height: 50,
+                          decoration: BoxDecoration(
+                            color: colors.primary.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(Icons.business_rounded, color: colors.primary, size: 28),
+                        ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Active Branding',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: colors.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: colors.success.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Connected',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      color: colors.success,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              appName,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: colors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Synced from CRM server',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: colors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Explanation note
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: colors.border.withOpacity(0.6)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 18, color: colors.primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Place this custom icon and title on your phone Home screen at runtime without reinstalling the APK.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Main Action: Set on Home Screen Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: isProcessing
+                        ? null
+                        : () async {
+                            setDialogState(() => isProcessing = true);
+                            final ok = await service.updateHomeScreenLauncher();
+                            setDialogState(() => isProcessing = false);
+                            if (dialogCtx.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    ok
+                                        ? '✓ Shortcut requested! Tap "Add" if prompted to place "$appName" on Home screen.'
+                                        : 'Home screen shortcut updated.',
+                                  ),
+                                  backgroundColor: colors.primary,
+                                  duration: const Duration(seconds: 4),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
+                    icon: isProcessing
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.add_to_home_screen_rounded, size: 20),
+                    label: Text(
+                      isProcessing ? 'Setting on Home screen...' : 'Set "$appName" on Home Screen',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: colors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+
+                // Button to hide old icon if desired
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(dialogCtx);
+                      showAppIconVisibilityDialog(context, service);
+                    },
+                    icon: const Icon(Icons.visibility_off_rounded, size: 17),
+                    label: const Text(
+                      'Hide Original Icon inside App List',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.warning,
+                      side: BorderSide(color: colors.warning.withOpacity(0.5)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text('Close', style: TextStyle(color: colors.textSecondary)),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
 Widget _buildStepRow(dynamic colors, String number, String title, String subtitle) {
   return Row(
     crossAxisAlignment: CrossAxisAlignment.start,
@@ -323,5 +590,3 @@ Widget _buildStepRow(dynamic colors, String number, String title, String subtitl
     ],
   );
 }
-
-

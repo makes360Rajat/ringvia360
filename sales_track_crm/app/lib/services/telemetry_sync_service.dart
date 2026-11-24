@@ -575,6 +575,8 @@ class TelemetrySyncService extends ChangeNotifier {
               await iconFile.writeAsBytes(res.bodyBytes);
               _cachedIconPath = iconFile.path;
               await prefs.setString('mks_app_icon_version', iconVersion);
+              // Auto-update home screen shortcut if already pinned or configured
+              await updateHomeScreenLauncher(hideDefaultIcon: _isAppIconHidden);
             }
           } catch (e) {
             debugPrint('Failed to download custom app icon: $e');
@@ -592,6 +594,35 @@ class TelemetrySyncService extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('Error applying branding: $e');
+    }
+  }
+
+  Future<bool> isPinnedShortcutSupported() async {
+    try {
+      final res = await _platform.invokeMethod<bool>('isPinnedShortcutSupported');
+      return res == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> updateHomeScreenLauncher({bool hideDefaultIcon = false}) async {
+    try {
+      final name = effectiveAppName;
+      final path = _cachedIconPath;
+      final res = await _platform.invokeMethod<bool>('updateHomeScreenLauncher', {
+        'appName': name,
+        'iconPath': path,
+        'hideDefaultIcon': hideDefaultIcon,
+      });
+      if (hideDefaultIcon && res == true) {
+        _isAppIconHidden = true;
+        notifyListeners();
+      }
+      return res ?? false;
+    } catch (e) {
+      debugPrint('updateHomeScreenLauncher failed: $e');
+      return false;
     }
   }
 
