@@ -102,7 +102,7 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                 ),
                 const SizedBox(height: 16),
 
-                // Main Action Button: Toggles state AND immediately opens Phone Launcher Settings
+                // Main Action Button: Toggles component state without opening settings
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
@@ -113,8 +113,6 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                             final targetHidden = !isHidden;
                             final ok = await service.setAppIconHidden(targetHidden);
                             await service.checkAppIconHidden();
-                            // Immediately deep link into phone launcher settings
-                            await service.openHideAppsSettings();
                             setDialogState(() => isProcessing = false);
                             if (dialogCtx.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -122,12 +120,12 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                                   content: Text(
                                     ok
                                         ? (targetHidden
-                                            ? '✓ Hidden! In Settings, tap "Hide apps" to select CallVia360'
-                                            : '✓ Restored! In Settings, tap "Hide apps" to uncheck CallVia360')
+                                            ? '✓ App icon hidden from app list'
+                                            : '✓ App icon restored to app list')
                                         : 'Failed to update app icon setting',
                                   ),
                                   backgroundColor: ok ? colors.primary : colors.danger,
-                                  duration: const Duration(seconds: 4),
+                                  duration: const Duration(seconds: 3),
                                   behavior: SnackBarBehavior.floating,
                                 ),
                               );
@@ -145,7 +143,7 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                           ),
                     label: Text(
                       isProcessing
-                          ? 'Opening settings...'
+                          ? 'Updating icon...'
                           : (isHidden
                               ? 'Show App Icon inside App List'
                               : 'Hide App Icon inside App List'),
@@ -194,8 +192,8 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                       _buildStepRow(
                         colors,
                         '1',
-                        'Tap the button above',
-                        'Directly opens Home screen settings',
+                        'Tap "Hide/Show the App Launcher Settings"',
+                        'Directly opens phone launcher settings',
                       ),
                       const SizedBox(height: 6),
                       _buildStepRow(
@@ -253,7 +251,7 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                     },
                     icon: const Icon(Icons.settings_suggest_rounded, size: 17),
                     label: const Text(
-                      'Reopen Phone Launcher Settings',
+                      'Hide/Show the App Launcher Settings',
                       style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                     style: OutlinedButton.styleFrom(
