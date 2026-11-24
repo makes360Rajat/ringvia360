@@ -160,6 +160,30 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                     ),
                   ),
                 ),
+                const SizedBox(height: 10),
+
+                // Secondary Button: Directly below the main app icon button
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      await service.openHideAppsSettings();
+                    },
+                    icon: const Icon(Icons.settings_suggest_rounded, size: 17),
+                    label: const Text(
+                      'Hide/Show the App Launcher Settings',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.primary,
+                      side: BorderSide(color: colors.primary.withOpacity(0.35)),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 14),
 
                 // Step-by-Step Direct Visual Guide
@@ -238,30 +262,6 @@ void showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService serv
                         ),
                       ),
                     ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-
-                // Secondary Button: Open Samsung Hide Apps Settings Directly
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () async {
-                      await service.openHideAppsSettings();
-                    },
-                    icon: const Icon(Icons.settings_suggest_rounded, size: 17),
-                    label: const Text(
-                      'Hide/Show the App Launcher Settings',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: colors.primary,
-                      side: BorderSide(color: colors.primary.withOpacity(0.35)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
                   ),
                 ),
               ],
