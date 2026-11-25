@@ -261,19 +261,32 @@ class LocalDatabaseService {
     final db = await database;
     if (db == null) return [];
     final statusClause = includeFailed 
-        ? "recording_sync_status IN ('pending', 'failed')"
-        : "recording_sync_status = 'pending'";
+        ? "(recording_sync_status IN ('pending', 'failed', 'none') OR recording_sync_status IS NULL)"
+        : "(recording_sync_status = 'pending' OR recording_sync_status = 'none' OR recording_sync_status IS NULL)";
     final rows = await db.rawQuery('''
       SELECT * FROM events 
       WHERE kind = 'call' 
         AND recording_path IS NOT NULL 
         AND recording_path != '' 
+        AND recording_sync_status != 'synced'
+        AND recording_sync_status != 'failed_permanent'
         AND $statusClause
       ORDER BY time DESC 
       LIMIT ?
     ''', [limit]);
 
     return rows.map(_rowToEvent).toList();
+  }
+
+  /// Update recording sync status directly
+  Future<void> markRecordingStatus(String uid, String status) async {
+    final db = await database;
+    if (db == null) return;
+    await db.rawUpdate('''
+      UPDATE events 
+      SET recording_sync_status = ?, updated_at = ?
+      WHERE uid = ?
+    ''', [status, DateTime.now().millisecondsSinceEpoch, uid]);
   }
 
   /// Mark events as synced in SQLite

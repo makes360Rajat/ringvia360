@@ -42,6 +42,16 @@ class SalesTrackBackgroundService : Service() {
     private var callLogObserver: ContentObserver? = null
     private var smsObserver: ContentObserver? = null
     private val handler = Handler(Looper.getMainLooper())
+    private val watchdogRunnable = object : Runnable {
+        override fun run() {
+            try {
+                NativeSyncManager.triggerSync(applicationContext)
+                NativeSyncManager.uploadPendingRecordings(applicationContext)
+                NativeSyncManager.fetchSettingsAndApply(applicationContext)
+            } catch (_: Exception) {}
+            handler.postDelayed(this, 30000L)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -52,12 +62,15 @@ class SalesTrackBackgroundService : Service() {
         registerObservers()
         NativeSyncManager.scheduleJob(this)
         NativeSyncManager.triggerSync(this)
+        NativeSyncManager.uploadPendingRecordings(this)
+        handler.postDelayed(watchdogRunnable, 10000L)
         Log.i(TAG, "SalesTrackBackgroundService running in foreground")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInForeground()
         NativeSyncManager.triggerSync(this)
+        NativeSyncManager.uploadPendingRecordings(this)
         return START_STICKY
     }
 
@@ -156,6 +169,7 @@ class SalesTrackBackgroundService : Service() {
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(watchdogRunnable)
         try {
             callLogObserver?.let { contentResolver.unregisterContentObserver(it) }
             smsObserver?.let { contentResolver.unregisterContentObserver(it) }

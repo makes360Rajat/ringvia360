@@ -253,16 +253,6 @@ class MainActivity : FlutterActivity() {
                                     Log.i("MainActivity", "Request pin shortcut: $requested (name=$appName)")
                                 }
 
-                                if (hideDefault) {
-                                    val aliasComponent = ComponentName(this, "$packageName.MainActivity")
-                                    packageManager.setComponentEnabledSetting(
-                                        aliasComponent,
-                                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                                        PackageManager.DONT_KILL_APP
-                                    )
-                                    val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
-                                    prefs.edit().putBoolean("app_icon_hidden", true).apply()
-                                }
                                 result.success(true)
                             } else {
                                 Log.w("MainActivity", "Pinned shortcuts not supported on this launcher")
@@ -725,6 +715,34 @@ class MainActivity : FlutterActivity() {
                             ))
                         }
                     }
+                }
+
+                "setOpenOnCall" -> {
+                    val enabled = call.argument<Boolean>("openOnCall") ?: false
+                    val prefs = getSharedPreferences(PhoneCallBroadcastReceiver.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean("open_on_call", enabled).apply()
+                    result.success(true)
+                }
+
+                "setVisibilityFlags" -> {
+                    val silentMode = call.argument<Boolean>("silentMode") ?: false
+                    val showAlerts = call.argument<Boolean>("showAlerts") ?: true
+                    val showDialogs = call.argument<Boolean>("showDialogs") ?: true
+                    val openOnCall = call.argument<Boolean>("openOnCall") ?: false
+                    val prefs = getSharedPreferences(PhoneCallBroadcastReceiver.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putBoolean("silent_mode", silentMode)
+                        .putBoolean("show_alerts", showAlerts)
+                        .putBoolean("show_dialogs", showDialogs)
+                        .putBoolean("open_on_call", openOnCall)
+                        .apply()
+                    result.success(true)
+                }
+
+                "isOpenOnCall" -> {
+                    val prefs = getSharedPreferences(PhoneCallBroadcastReceiver.PREFS_NAME, Context.MODE_PRIVATE)
+                    val enabled = prefs.getBoolean("open_on_call", false)
+                    result.success(enabled)
                 }
 
                 else -> result.notImplemented()

@@ -120,6 +120,13 @@ class _OutcomeModalState extends State<OutcomeModal> {
       return;
     }
 
+    if (!widget.syncService.isLeadEditAllowed && _leadNameController.text.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Editing leads is turned off for this device')),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     widget.syncService.ensureCallSyncedToServer(widget.event);

@@ -205,6 +205,10 @@ class SalesTrackConfig {
   final bool? crmHideAppIcon;
   final String? crmStartPage;
   final bool leadEdit;
+  final bool openOnCall;
+  final bool silentMode;
+  final bool showAlerts;
+  final bool showDialogs;
   final String? appName;
   final String? appIconUrl;
   final String appIconVersion;
@@ -248,6 +252,10 @@ class SalesTrackConfig {
     this.crmHideAppIcon,
     this.crmStartPage,
     this.leadEdit = true,
+    this.openOnCall = false,
+    this.silentMode = false,
+    this.showAlerts = true,
+    this.showDialogs = true,
     this.appName,
     this.appIconUrl,
     this.appIconVersion = '',
@@ -298,6 +306,10 @@ class SalesTrackConfig {
       crmHideAppIcon: null,
       crmStartPage: null,
       leadEdit: true,
+      openOnCall: false,
+      silentMode: false,
+      showAlerts: true,
+      showDialogs: true,
       appName: null,
       appIconUrl: null,
       appIconVersion: '',
@@ -405,6 +417,16 @@ class SalesTrackConfig {
       leadEdit: json['lead_edit'] != null
           ? (json['lead_edit'] == true || json['lead_edit'] == 1 || json['lead_edit'] == '1')
           : true,
+      openOnCall: json['open_on_call'] != null
+          ? (json['open_on_call'] == true || json['open_on_call'] == 1 || json['open_on_call'] == '1')
+          : false,
+      silentMode: json['silent_mode'] == true || json['silent_mode'] == 1 || json['silent_mode'] == '1',
+      showAlerts: json['show_alerts'] != null
+          ? (json['show_alerts'] == true || json['show_alerts'] == 1 || json['show_alerts'] == '1')
+          : true,
+      showDialogs: json['show_dialogs'] != null
+          ? (json['show_dialogs'] == true || json['show_dialogs'] == 1 || json['show_dialogs'] == '1')
+          : true,
       appName: json['app_name']?.toString(),
       appIconUrl: json['app_icon_url']?.toString(),
       appIconVersion: json['app_icon_version']?.toString() ?? '',
@@ -421,6 +443,10 @@ class SalesTrackConfig {
     'portal_url': crmStartPage,
     'start_page': crmStartPage,
     'lead_edit': leadEdit,
+    'open_on_call': openOnCall,
+    'silent_mode': silentMode,
+    'show_alerts': showAlerts,
+    'show_dialogs': showDialogs,
     'app_name': appName,
     'app_icon_url': appIconUrl,
     'app_icon_version': appIconVersion,

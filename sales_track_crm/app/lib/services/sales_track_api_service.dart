@@ -158,7 +158,9 @@ class SalesTrackApiService {
   }
 
   Map<String, String> _buildHeaders({bool isMultipart = false}) {
-    final headers = <String, String>{};
+    final headers = <String, String>{
+      'User-Agent': 'CallVia360-Flutter/2.6.0',
+    };
     if (!isMultipart) {
       headers['Content-Type'] = 'application/json; charset=UTF-8';
       headers['Accept'] = 'application/json';
@@ -620,9 +622,11 @@ class SalesTrackApiService {
       if (token != null && token!.isNotEmpty) {
         request.fields['token'] = token!;
       }
-      request.files.add(await http.MultipartFile.fromPath('file', audioFilePath));
+      final rawFileName = file.path.split('/').last;
+      final safeFileName = rawFileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      request.files.add(await http.MultipartFile.fromPath('file', audioFilePath, filename: safeFileName));
 
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 45));
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 90));
       final response = await http.Response.fromStream(streamedResponse);
 
       _saveCookiesFromResponse(response);

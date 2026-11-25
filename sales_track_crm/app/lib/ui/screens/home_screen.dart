@@ -133,9 +133,9 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    // 1. Truecaller-like Active Caller ID Popup
+    // 1. Truecaller-like Active Caller ID Popup (Gated by open_on_call and show_dialogs)
     final activeCaller = widget.syncService.activeCallerId;
-    if (activeCaller != null && !_hasPromptedCallerId) {
+    if (widget.syncService.isOpenOnCallEnabled && widget.syncService.isShowDialogsEnabled && activeCaller != null && !_hasPromptedCallerId) {
       _hasPromptedCallerId = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -173,9 +173,9 @@ class _HomeScreenState extends State<HomeScreen>
       widget.syncService.dismissAfterCallPopup();
     }
 
-    // 3. App Version Update Dialog (Required or Optional)
+    // 3. App Version Update Dialog (Required or Optional, gated by show_dialogs)
     final update = widget.syncService.availableUpdate;
-    if (update != null && _updateDialogContext == null) {
+    if (widget.syncService.isShowDialogsEnabled && update != null && _updateDialogContext == null) {
       final isMandatory = widget.syncService.isUpdateMandatory;
       if (isMandatory || !_hasShownOptionalUpdateDialog) {
         if (!isMandatory) _hasShownOptionalUpdateDialog = true;

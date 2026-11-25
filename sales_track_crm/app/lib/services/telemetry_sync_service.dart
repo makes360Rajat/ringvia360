@@ -55,6 +55,10 @@ class TelemetrySyncService extends ChangeNotifier {
   CrmStaff? get staff => _staff;
   SalesTrackConfig get config => _config;
   bool get isLeadEditAllowed => _config.leadEdit;
+  bool get isOpenOnCallEnabled => _config.openOnCall;
+  bool get isSilentMode => _config.silentMode;
+  bool get isShowAlertsEnabled => _config.showAlerts;
+  bool get isShowDialogsEnabled => _config.showDialogs;
   bool get isTrackingCallsEnabled => !_config.paused && _config.trackingCalls;
   bool get isTrackingSmsEnabled => !_config.paused && _config.trackingSms;
   bool get isTrackingWhatsappCallsEnabled => !_config.paused && _config.trackingWhatsappCalls;
@@ -626,6 +630,31 @@ class TelemetrySyncService extends ChangeNotifier {
     }
   }
 
+  Future<void> _syncOpenOnCallToNative(bool enabled) async {
+    try {
+      if (Platform.isAndroid) {
+        await _platform.invokeMethod('setOpenOnCall', {'openOnCall': enabled});
+      }
+    } catch (e) {
+      debugPrint('Error syncing openOnCall to native: $e');
+    }
+  }
+
+  Future<void> _syncVisibilityFlagsToNative() async {
+    try {
+      if (Platform.isAndroid) {
+        await _platform.invokeMethod('setVisibilityFlags', {
+          'silentMode': _config.silentMode,
+          'showAlerts': _config.showAlerts,
+          'showDialogs': _config.showDialogs,
+          'openOnCall': _config.openOnCall,
+        });
+      }
+    } catch (e) {
+      debugPrint('Error syncing visibility flags to native: $e');
+    }
+  }
+
   String _settingsVersion = '';
   String get settingsVersion => _settingsVersion;
 
@@ -691,6 +720,22 @@ class TelemetrySyncService extends ChangeNotifier {
           updatedJson['lead_edit'] = settings['lead_edit'] == true;
         }
 
+        if (settings['open_on_call'] != null) {
+          final openOnCall = settings['open_on_call'] == true;
+          updatedJson['open_on_call'] = openOnCall;
+          await _syncOpenOnCallToNative(openOnCall);
+        }
+
+        if (settings['silent_mode'] != null) {
+          updatedJson['silent_mode'] = settings['silent_mode'] == true;
+        }
+        if (settings['show_alerts'] != null) {
+          updatedJson['show_alerts'] = settings['show_alerts'] == true;
+        }
+        if (settings['show_dialogs'] != null) {
+          updatedJson['show_dialogs'] = settings['show_dialogs'] == true;
+        }
+
         if (settings['app_name'] != null) {
           updatedJson['app_name'] = settings['app_name'];
         }
@@ -709,6 +754,7 @@ class TelemetrySyncService extends ChangeNotifier {
         );
         _settingsVersion = newVersion;
         await prefs.setString('mks_crm_settings_version', newVersion);
+        await _syncVisibilityFlagsToNative();
         await _persistMeta();
         notifyListeners();
         return true;
@@ -2346,6 +2392,13 @@ class TelemetrySyncService extends ChangeNotifier {
                 continue;
               }
 
+              if (await file.length() > 25 * 1024 * 1024) {
+                debugPrint('Audio recording ${rec.recordingPath} exceeds 25MB limit, skipping');
+                await LocalDatabaseService.instance.markRecordingStatus(rec.uid, 'failed_permanent');
+                batchProcessed++;
+                continue;
+              }
+
               _syncProgressMessage = 'Uploading audio recording (${rec.name.isNotEmpty ? rec.name : rec.number})...';
               _syncProgress = 0.85;
               notifyListeners();
@@ -2481,6 +2534,16 @@ class TelemetrySyncService extends ChangeNotifier {
       for (int i = 0; i < recs.length; i++) {
         final rec = recs[i];
         if (rec.recordingPath != null && rec.recordingPath!.isNotEmpty) {
+          final file = File(rec.recordingPath!);
+          if (!await file.exists()) {
+            await LocalDatabaseService.instance.markRecordingSynced(rec.uid);
+            continue;
+          }
+          if (await file.length() > 25 * 1024 * 1024) {
+            await LocalDatabaseService.instance.markRecordingStatus(rec.uid, 'failed_permanent');
+            continue;
+          }
+
           _syncProgressMessage = 'Uploading recording (${i + 1}/${recs.length}): ${rec.number}...';
           _syncProgress = ((i + 1) / recs.length).clamp(0.1, 0.95);
           notifyListeners();
@@ -2757,6 +2820,8 @@ class TelemetrySyncService extends ChangeNotifier {
         if (_config.crmHideAppIcon != null && _config.crmHideAppIcon != _isAppIconHidden) {
           setAppIconHidden(_config.crmHideAppIcon!);
         }
+        await _syncOpenOnCallToNative(_config.openOnCall);
+        await _syncVisibilityFlagsToNative();
         await _persistMeta();
       }
 
@@ -3049,7 +3114,11 @@ class TelemetrySyncService extends ChangeNotifier {
     final cStr = prefs.getString('mks_crm_config');
     if (dStr != null) _device = CrmDevice.fromJson(jsonDecode(dStr));
     if (sStr != null) _staff = CrmStaff.fromJson(jsonDecode(sStr));
-    if (cStr != null) _config = SalesTrackConfig.fromJson(jsonDecode(cStr));
+    if (cStr != null) {
+      _config = SalesTrackConfig.fromJson(jsonDecode(cStr));
+      _syncOpenOnCallToNative(_config.openOnCall);
+      _syncVisibilityFlagsToNative();
+    }
 
     if (_device == null && _isPaired && defaultTargetPlatform == TargetPlatform.iOS) {
       _device = CrmDevice(

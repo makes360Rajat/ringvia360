@@ -117,6 +117,20 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                     "timestamp" to timestamp
                 )
                 TelemetryBridgeChannel.sendTelemetryEvent(event)
+
+                val openOnCall = prefs.getBoolean("open_on_call", false)
+                val showDialogs = prefs.getBoolean("show_dialogs", true)
+                if (openOnCall && showDialogs && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context)) {
+                    try {
+                        val launchIntent = (context.packageManager.getLaunchIntentForPackage(context.packageName) ?: Intent(context, MainActivity::class.java)).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            putExtra("action", "call_active")
+                            putExtra("number", activeNum)
+                            putExtra("contact_name", contactDisplayName)
+                        }
+                        context.startActivity(launchIntent)
+                    } catch (_: Exception) {}
+                }
             }
 
             TelephonyManager.EXTRA_STATE_IDLE -> {
@@ -209,13 +223,20 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
     private fun showCallerIdNotification(context: Context, number: String, contactName: String) {
         if (number.isEmpty() || number == "Incoming Caller") return
         try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val showAlerts = prefs.getBoolean("show_alerts", true)
+            if (!showAlerts) return
+
+            val openOnCall = prefs.getBoolean("open_on_call", false)
+            val showDialogs = prefs.getBoolean("show_dialogs", true)
+
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
             val channelId = "callvia360_caller_id"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = NotificationChannel(
                     channelId,
                     "CallVia360 Caller ID",
-                    NotificationManager.IMPORTANCE_HIGH
+                    if (openOnCall) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
                 ).apply {
                     description = "Truecaller-style caller identification"
                 }
@@ -245,15 +266,22 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 .setSmallIcon(android.R.drawable.sym_call_incoming)
                 .setContentTitle(title)
                 .setContentText("Incoming call • Tap to view CRM history & notes")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setPriority(if (openOnCall) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
-                .setFullScreenIntent(pendingIntent, false)
+
+            if (openOnCall) {
+                builder.setCategory(NotificationCompat.CATEGORY_CALL)
+                if (showDialogs) {
+                    builder.setFullScreenIntent(pendingIntent, false)
+                }
+            } else {
+                builder.setCategory(NotificationCompat.CATEGORY_STATUS)
+            }
 
             notificationManager.notify(1003, builder.build())
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
+            if (openOnCall && showDialogs && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
                 try {
                     context.startActivity(launchIntent)
                 } catch (_: Exception) {}
@@ -264,13 +292,20 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
     private fun showCallEndedNotification(context: Context, number: String, contactName: String) {
         if (number.isEmpty() || number == "Unknown Caller") return
         try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val showAlerts = prefs.getBoolean("show_alerts", true)
+            if (!showAlerts) return
+
+            val openOnCall = prefs.getBoolean("open_on_call", false)
+            val showDialogs = prefs.getBoolean("show_dialogs", true)
+
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
             val channelId = "callvia360_sales_outcomes"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val channel = NotificationChannel(
                     channelId,
                     "CallVia360 Sales Follow-ups",
-                    NotificationManager.IMPORTANCE_HIGH
+                    if (openOnCall) NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_LOW
                 ).apply {
                     description = "Prompts to log lead remarks and follow-ups after calls"
                 }
@@ -300,17 +335,19 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 .setSmallIcon(android.R.drawable.stat_notify_chat)
                 .setContentTitle(title)
                 .setContentText("Tap to log lead outcome, remarks & schedule follow-up")
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setPriority(if (openOnCall) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
-                .setFullScreenIntent(pendingIntent, true)
                 .addAction(android.R.drawable.ic_menu_edit, "Log Lead Outcome", pendingIntent)
+
+            if (openOnCall && showDialogs) {
+                builder.setFullScreenIntent(pendingIntent, false)
+            }
 
             notificationManager.notify(1002, builder.build())
 
-            // If "Display over other apps" (SYSTEM_ALERT_WINDOW) is granted, immediately launch CallVia360 over the dialer
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
+            // ONLY launch CallVia360 over the dialer if open_on_call AND show_dialogs are true!
+            if (openOnCall && showDialogs && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(context) && launchIntent != null) {
                 try {
                     context.startActivity(launchIntent)
                 } catch (_: Exception) {}
