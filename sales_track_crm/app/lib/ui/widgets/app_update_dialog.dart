@@ -238,7 +238,9 @@ class AppUpdateDialog extends StatelessWidget {
                               flex: 2,
                               child: OutlinedButton(
                                 onPressed: () {
-                                  Navigator.of(context).pop();
+                                  if (Navigator.of(context).canPop()) {
+                                    Navigator.of(context).pop();
+                                  }
                                   onDismiss?.call();
                                 },
                                 style: OutlinedButton.styleFrom(

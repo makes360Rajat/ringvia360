@@ -359,6 +359,8 @@ class Mks_sales_track_api extends App_Controller
             $this->mks_fail(500, 'store_failed');
         }
 
+        mks_st_cleanup_duplicate_events();
+
         if (isset($body['health']) && is_array($body['health'])) {
             mks_st_device_health_check($this->mksDevice, mks_st_clean_health($body['health']));
             mks_st_device_report($this->mksDevice['id'], $body);

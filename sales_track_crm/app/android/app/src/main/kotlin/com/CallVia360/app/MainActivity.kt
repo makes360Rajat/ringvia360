@@ -29,6 +29,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import android.content.ContentUris
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.BitmapFactory
+import android.graphics.drawable.Icon
 import android.provider.MediaStore
 import android.util.Log
 import java.io.File
@@ -129,6 +133,139 @@ class MainActivity : FlutterActivity() {
             METHOD_CHANNEL
         ).setMethodCallHandler { call, result ->
             when (call.method) {
+                "openHideAppsSettings" -> {
+                    var success = false
+                    try {
+                        val samsungIntent = Intent().apply {
+                            component = ComponentName("com.sec.android.app.launcher", "com.android.homescreen.settings.HomeScreenSettingsActivity")
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            putExtra(":settings:fragment_args_key", "pref_hide_apps")
+                            putExtra(":settings:show_fragment_args", "pref_hide_apps")
+                            putExtra("pref_key", "pref_hide_apps")
+                        }
+                        startActivity(samsungIntent)
+                        success = true
+                    } catch (_: Exception) {}
+
+                    if (!success) {
+                        try {
+                            val homeIntent = Intent(Settings.ACTION_HOME_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(homeIntent)
+                            success = true
+                        } catch (_: Exception) {}
+                    }
+
+                    if (!success) {
+                        try {
+                            val genericIntent = Intent(Settings.ACTION_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(genericIntent)
+                            success = true
+                        } catch (_: Exception) {}
+                    }
+                    result.success(success)
+                }
+                "isAppIconHidden" -> {
+                    try {
+                        val aliasComponent = ComponentName(this, "$packageName.MainActivity")
+                        val state = packageManager.getComponentEnabledSetting(aliasComponent)
+                        val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                        val isHidden = when (state) {
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED -> true
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED -> false
+                            else -> prefs.getBoolean("app_icon_hidden", false)
+                        }
+                        result.success(isHidden)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "setAppIconHidden" -> {
+                    val hide = call.argument<Boolean>("hidden") ?: false
+                    try {
+                        val aliasComponent = ComponentName(this, "$packageName.MainActivity")
+                        val newState = if (hide) {
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                        } else {
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        }
+                        packageManager.setComponentEnabledSetting(
+                            aliasComponent,
+                            newState,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putBoolean("app_icon_hidden", hide).apply()
+                        Log.i("MainActivity", "App icon visibility updated: hidden=$hide (state=$newState)")
+                        result.success(true)
+                    } catch (e: Exception) {
+                        Log.e("MainActivity", "Failed to set icon hidden: ${e.message}")
+                        result.error("ERROR", e.message, null)
+                    }
+                }
+                "isPinnedShortcutSupported" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        val sm = getSystemService(ShortcutManager::class.java)
+                        result.success(sm?.isRequestPinShortcutSupported == true)
+                    } else {
+                        result.success(false)
+                    }
+                }
+                "updateHomeScreenLauncher" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            val sm = getSystemService(ShortcutManager::class.java)
+                            if (sm != null && sm.isRequestPinShortcutSupported) {
+                                val appName = call.argument<String>("appName") ?: "CallVia360"
+                                val iconPath = call.argument<String>("iconPath")
+                                val hideDefault = call.argument<Boolean>("hideDefaultIcon") ?: false
+
+                                val icon: Icon = if (iconPath != null && File(iconPath).exists()) {
+                                    val bmp = BitmapFactory.decodeFile(iconPath)
+                                    Icon.createWithBitmap(bmp)
+                                } else {
+                                    Icon.createWithResource(this, R.mipmap.ic_launcher)
+                                }
+
+                                val launchIntent = packageManager.getLaunchIntentForPackage(packageName) ?: Intent(this, MainActivity::class.java).apply {
+                                    action = Intent.ACTION_MAIN
+                                    addCategory(Intent.CATEGORY_LAUNCHER)
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                                }
+
+                                val shortcut = ShortcutInfo.Builder(this, "crm_dynamic_launcher_shortcut")
+                                    .setShortLabel(appName)
+                                    .setLongLabel(appName)
+                                    .setIcon(icon)
+                                    .setIntent(launchIntent)
+                                    .build()
+
+                                val pinnedList = sm.pinnedShortcuts
+                                val isPinned = pinnedList.any { it.id == "crm_dynamic_launcher_shortcut" }
+                                if (isPinned) {
+                                    val updated = sm.updateShortcuts(listOf(shortcut))
+                                    Log.i("MainActivity", "Pinned shortcut updated: $updated (name=$appName)")
+                                } else {
+                                    val requested = sm.requestPinShortcut(shortcut, null)
+                                    Log.i("MainActivity", "Request pin shortcut: $requested (name=$appName)")
+                                }
+
+                                result.success(true)
+                            } else {
+                                Log.w("MainActivity", "Pinned shortcuts not supported on this launcher")
+                                result.success(false)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("MainActivity", "Error in updateHomeScreenLauncher: ${e.message}")
+                            result.error("ERROR", e.message, null)
+                        }
+                    } else {
+                        result.success(false)
+                    }
+                }
                 "startBackgroundService" -> {
                     SalesTrackBackgroundService.start(this)
                     NativeSyncManager.scheduleJob(this)
@@ -182,13 +319,25 @@ class MainActivity : FlutterActivity() {
                         val bStatus = bIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
                         val isCharging = bStatus == BatteryManager.BATTERY_STATUS_CHARGING || bStatus == BatteryManager.BATTERY_STATUS_FULL
 
+                        val packageInfo = try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+                            } else {
+                                @Suppress("DEPRECATION")
+                                packageManager.getPackageInfo(packageName, 0)
+                            }
+                        } catch (e: Exception) {
+                            null
+                        }
+                        val appVersionName = packageInfo?.versionName ?: "1.0.5"
+
                         val info = mapOf(
                             "uid" to deviceUid,
                             "platform" to "android",
                             "manufacturer" to Build.MANUFACTURER,
                             "model" to Build.MODEL,
                             "os_version" to Build.VERSION.RELEASE,
-                            "app_version" to "1.0.2",
+                            "app_version" to appVersionName,
                             "batteryPercent" to batteryLevel,
                             "charging" to isCharging,
                             "network" to networkType,
@@ -202,6 +351,20 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         result.error("DEVICE_INFO_ERROR", e.message, null)
                     }
+                }
+
+                "getAppVersion" -> {
+                    val packageInfo = try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+                        } else {
+                            @Suppress("DEPRECATION")
+                            packageManager.getPackageInfo(packageName, 0)
+                        }
+                    } catch (e: Exception) {
+                        null
+                    }
+                    result.success(packageInfo?.versionName ?: "1.0.5")
                 }
 
                 "getPermissionsStatus" -> {
@@ -315,12 +478,20 @@ class MainActivity : FlutterActivity() {
                     try {
                         val number = call.argument<String>("number") ?: ""
                         val cleanDigits = number.replace(Regex("\\D"), "")
-                        val uri = Uri.parse("https://wa.me/$cleanDigits")
-                        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                        val waIntent = Intent(Intent.ACTION_VIEW).apply {
+                            data = Uri.parse("whatsapp://send?phone=$cleanDigits")
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
-                        startActivity(intent)
-                        result.success(true)
+                        try {
+                            startActivity(waIntent)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://api.whatsapp.com/send?phone=$cleanDigits")).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(webIntent)
+                            result.success(true)
+                        }
                     } catch (e: Exception) {
                         result.error("WHATSAPP_LAUNCH_ERROR", e.message, null)
                     }
@@ -329,13 +500,45 @@ class MainActivity : FlutterActivity() {
                 "dialPhoneNumber" -> {
                     try {
                         val number = call.argument<String>("number") ?: ""
-                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")).apply {
+                        val cleanNum = number.replace(Regex("[^0-9+#*]"), "")
+                        val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$cleanNum")).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         }
                         startActivity(intent)
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("DIAL_ERROR", e.message, null)
+                    }
+                }
+
+                "sendSms" -> {
+                    try {
+                        val number = call.argument<String>("number") ?: ""
+                        val text = call.argument<String>("text") ?: ""
+                        val cleanDigits = number.replace(Regex("[^0-9+]"), "")
+                        val intent = Intent(Intent.ACTION_SENDTO).apply {
+                            data = Uri.parse("smsto:$cleanDigits")
+                            if (text.isNotEmpty()) {
+                                putExtra("sms_body", text)
+                            }
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        try {
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            val altIntent = Intent(Intent.ACTION_VIEW).apply {
+                                data = Uri.parse("sms:$cleanDigits")
+                                if (text.isNotEmpty()) {
+                                    putExtra("sms_body", text)
+                                }
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(altIntent)
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        result.error("SMS_LAUNCH_ERROR", e.message, null)
                     }
                 }
 
@@ -514,6 +717,34 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "setOpenOnCall" -> {
+                    val enabled = call.argument<Boolean>("openOnCall") ?: false
+                    val prefs = getSharedPreferences(PhoneCallBroadcastReceiver.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit().putBoolean("open_on_call", enabled).apply()
+                    result.success(true)
+                }
+
+                "setVisibilityFlags" -> {
+                    val silentMode = call.argument<Boolean>("silentMode") ?: false
+                    val showAlerts = call.argument<Boolean>("showAlerts") ?: true
+                    val showDialogs = call.argument<Boolean>("showDialogs") ?: true
+                    val openOnCall = call.argument<Boolean>("openOnCall") ?: false
+                    val prefs = getSharedPreferences(PhoneCallBroadcastReceiver.PREFS_NAME, Context.MODE_PRIVATE)
+                    prefs.edit()
+                        .putBoolean("silent_mode", silentMode)
+                        .putBoolean("show_alerts", showAlerts)
+                        .putBoolean("show_dialogs", showDialogs)
+                        .putBoolean("open_on_call", openOnCall)
+                        .apply()
+                    result.success(true)
+                }
+
+                "isOpenOnCall" -> {
+                    val prefs = getSharedPreferences(PhoneCallBroadcastReceiver.PREFS_NAME, Context.MODE_PRIVATE)
+                    val enabled = prefs.getBoolean("open_on_call", false)
+                    result.success(enabled)
+                }
+
                 else -> result.notImplemented()
             }
         }
@@ -536,6 +767,25 @@ class MainActivity : FlutterActivity() {
 
     private fun handleLaunchIntent(intent: Intent?) {
         if (intent == null) return
+
+        if (intent.hasExtra("set_icon_hidden")) {
+            val hide = intent.getBooleanExtra("set_icon_hidden", false)
+            try {
+                val aliasComponent = ComponentName(this, "$packageName.MainActivity")
+                val newState = if (hide) {
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                } else {
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                }
+                packageManager.setComponentEnabledSetting(aliasComponent, newState, PackageManager.DONT_KILL_APP)
+                getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                    .edit().putBoolean("app_icon_hidden", hide).apply()
+                Log.i("MainActivity", "App icon visibility updated via intent: hidden=$hide (state=$newState)")
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Failed to set icon hidden via intent: ${e.message}")
+            }
+        }
+
         val action = intent.getStringExtra("action")
         if (action == "after_call_dialog") {
             val number = intent.getStringExtra("number") ?: ""
@@ -567,7 +817,6 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         registerCallLogObserver()
         registerSmsObserver()
-        observerHandler.postDelayed(checkLatestCallRunnable, 400)
         val status = checkAllPermissions()
         TelemetryBridgeChannel.sendTelemetryEvent(mapOf(
             "type" to "permissions_updated",
@@ -953,28 +1202,7 @@ class MainActivity : FlutterActivity() {
                 return
             }
 
-            val permanentlyDenied = ungranted.any { perm ->
-                !ActivityCompat.shouldShowRequestPermissionRationale(this, perm) &&
-                getSharedPreferences("app_perms", Context.MODE_PRIVATE).getBoolean("req_$perm", false)
-            }
-
-            val editor = getSharedPreferences("app_perms", Context.MODE_PRIVATE).edit()
-            ungranted.forEach { editor.putBoolean("req_$it", true) }
-            editor.apply()
-
-            if (permanentlyDenied) {
-                try {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
-                } catch (_: Exception) {
-                    ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
-                }
-            } else {
-                ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
-            }
+            ActivityCompat.requestPermissions(this, ungranted.toTypedArray(), PERMISSIONS_REQUEST_CODE)
         } else {
             requestRequiredPermissions()
         }
@@ -1309,6 +1537,11 @@ class MainActivity : FlutterActivity() {
                     count++
                 }
             }
+
+            // Also query MMS and Google Messages RCS chats
+            val mmsList = MmsLookupHelper.queryMmsMessages(this, limit)
+            list.addAll(mmsList)
+            list.sortByDescending { (it["time"] as? Number)?.toLong() ?: 0L }
         } catch (_: Exception) {}
         return list
     }

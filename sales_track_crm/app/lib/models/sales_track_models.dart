@@ -170,7 +170,9 @@ class SalesTrackConfig {
   final bool trackingCalls;
   final bool trackingRecordings;
   final bool trackingWhatsappCalls;
+  final bool trackingWhatsappMessages;
   final bool trackingSms;
+  final bool trackingContacts;
   final bool paused;
   final String excludedSalt;
   final List<String> excludedHashes;
@@ -199,13 +201,25 @@ class SalesTrackConfig {
   final String version;
   final AppUpdateInfo appInfo;
   final bool webview;
+  final bool crmBottomNavEnabled;
+  final bool? crmHideAppIcon;
   final String? crmStartPage;
+  final bool leadEdit;
+  final bool openOnCall;
+  final bool silentMode;
+  final bool showAlerts;
+  final bool showDialogs;
+  final String? appName;
+  final String? appIconUrl;
+  final String appIconVersion;
 
   SalesTrackConfig({
     required this.trackingCalls,
     required this.trackingRecordings,
     required this.trackingWhatsappCalls,
+    this.trackingWhatsappMessages = true,
     required this.trackingSms,
+    this.trackingContacts = true,
     required this.paused,
     required this.excludedSalt,
     required this.excludedHashes,
@@ -234,7 +248,17 @@ class SalesTrackConfig {
     required this.version,
     this.appInfo = const AppUpdateInfo(),
     this.webview = false,
+    this.crmBottomNavEnabled = true,
+    this.crmHideAppIcon,
     this.crmStartPage,
+    this.leadEdit = true,
+    this.openOnCall = false,
+    this.silentMode = false,
+    this.showAlerts = true,
+    this.showDialogs = true,
+    this.appName,
+    this.appIconUrl,
+    this.appIconVersion = '',
   });
 
   factory SalesTrackConfig.defaultConfig() {
@@ -242,7 +266,9 @@ class SalesTrackConfig {
       trackingCalls: true,
       trackingRecordings: true,
       trackingWhatsappCalls: true,
+      trackingWhatsappMessages: true,
       trackingSms: true,
+      trackingContacts: true,
       paused: false,
       excludedSalt: '',
       excludedHashes: [],
@@ -276,7 +302,17 @@ class SalesTrackConfig {
       version: '1.0.0',
       appInfo: const AppUpdateInfo(),
       webview: false,
+      crmBottomNavEnabled: true,
+      crmHideAppIcon: null,
       crmStartPage: null,
+      leadEdit: true,
+      openOnCall: false,
+      silentMode: false,
+      showAlerts: true,
+      showDialogs: true,
+      appName: null,
+      appIconUrl: null,
+      appIconVersion: '',
     );
   }
 
@@ -324,7 +360,9 @@ class SalesTrackConfig {
       trackingCalls: tracking['calls'] != false,
       trackingRecordings: tracking['recordings'] != false,
       trackingWhatsappCalls: tracking['whatsapp_calls'] != false,
+      trackingWhatsappMessages: tracking['whatsapp_messages'] != false,
       trackingSms: tracking['sms'] != false,
+      trackingContacts: tracking['contacts'] != false,
       paused: json['paused'] == true,
       excludedSalt: excluded['salt']?.toString() ?? '',
       excludedHashes: excludedList,
@@ -352,19 +390,73 @@ class SalesTrackConfig {
       leadStatuses: leadStatuses,
       version: json['version']?.toString() ?? '',
       appInfo: AppUpdateInfo.fromJson(app),
-      webview: json['webview'] == true,
-      crmStartPage: json['start_page']?.toString() ?? json['crm_start_page']?.toString() ?? json['webview_page']?.toString(),
+      webview: json['webview'] == true || json['portal_enabled'] == true,
+      crmBottomNavEnabled: json['portal_enabled'] != null
+          ? (json['portal_enabled'] == true || json['portal_enabled'] == 1 || json['portal_enabled'] == '1')
+          : (json['portal'] is Map && (json['portal'] as Map)['enabled'] != null
+              ? ((json['portal'] as Map)['enabled'] == true || (json['portal'] as Map)['enabled'] == 1 || (json['portal'] as Map)['enabled'] == '1')
+              : (json['crm_bottom_nav'] != null
+                  ? (json['crm_bottom_nav'] == true || json['crm_bottom_nav'] == 1 || json['crm_bottom_nav'] == '1')
+                  : (json['crm_tab_enabled'] != null
+                      ? (json['crm_tab_enabled'] == true || json['crm_tab_enabled'] == 1 || json['crm_tab_enabled'] == '1')
+                      : (json['webview'] != null
+                          ? (json['webview'] == true || json['webview'] == 1 || json['webview'] == '1')
+                          : true)))),
+      crmHideAppIcon: json['app_icon_hidden'] != null
+          ? (json['app_icon_hidden'] == true || json['app_icon_hidden'] == 1 || json['app_icon_hidden'] == '1')
+          : (json['hide_app_icon'] != null
+              ? (json['hide_app_icon'] == true || json['hide_app_icon'] == 1 || json['hide_app_icon'] == '1')
+              : (json['hide_icon'] != null
+                  ? (json['hide_icon'] == true || json['hide_icon'] == 1 || json['hide_icon'] == '1')
+                  : null)),
+      crmStartPage: json['portal_url']?.toString() ??
+          (json['portal'] is Map ? (json['portal'] as Map)['url']?.toString() : null) ??
+          json['start_page']?.toString() ??
+          json['crm_start_page']?.toString() ??
+          json['webview_page']?.toString(),
+      leadEdit: json['lead_edit'] != null
+          ? (json['lead_edit'] == true || json['lead_edit'] == 1 || json['lead_edit'] == '1')
+          : true,
+      openOnCall: json['open_on_call'] != null
+          ? (json['open_on_call'] == true || json['open_on_call'] == 1 || json['open_on_call'] == '1')
+          : false,
+      silentMode: json['silent_mode'] == true || json['silent_mode'] == 1 || json['silent_mode'] == '1',
+      showAlerts: json['show_alerts'] != null
+          ? (json['show_alerts'] == true || json['show_alerts'] == 1 || json['show_alerts'] == '1')
+          : true,
+      showDialogs: json['show_dialogs'] != null
+          ? (json['show_dialogs'] == true || json['show_dialogs'] == 1 || json['show_dialogs'] == '1')
+          : true,
+      appName: json['app_name']?.toString(),
+      appIconUrl: json['app_icon_url']?.toString(),
+      appIconVersion: json['app_icon_version']?.toString() ?? '',
     );
   }
 
   Map<String, dynamic> toJson() => {
     'webview': webview,
+    'portal_enabled': crmBottomNavEnabled,
+    'crm_bottom_nav': crmBottomNavEnabled,
+    'crm_tab_enabled': crmBottomNavEnabled,
+    'app_icon_hidden': crmHideAppIcon,
+    'hide_app_icon': crmHideAppIcon,
+    'portal_url': crmStartPage,
     'start_page': crmStartPage,
+    'lead_edit': leadEdit,
+    'open_on_call': openOnCall,
+    'silent_mode': silentMode,
+    'show_alerts': showAlerts,
+    'show_dialogs': showDialogs,
+    'app_name': appName,
+    'app_icon_url': appIconUrl,
+    'app_icon_version': appIconVersion,
     'tracking': {
       'calls': trackingCalls,
       'recordings': trackingRecordings,
       'whatsapp_calls': trackingWhatsappCalls,
+      'whatsapp_messages': trackingWhatsappMessages,
       'sms': trackingSms,
+      'contacts': trackingContacts,
     },
     'paused': paused,
     'excluded': {
