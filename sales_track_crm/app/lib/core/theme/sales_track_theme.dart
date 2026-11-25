@@ -408,7 +408,8 @@ class ThemeProvider extends ChangeNotifier {
 
   bool isDark(BuildContext context) {
     if (_themeMode == ThemeMode.system) {
-      return MediaQuery.platformBrightnessOf(context) == Brightness.dark;
+      final dispatcher = WidgetsBinding.instance.platformDispatcher;
+      return (MediaQuery.maybePlatformBrightnessOf(context) ?? dispatcher.platformBrightness) == Brightness.dark;
     }
     return _themeMode == ThemeMode.dark;
   }

