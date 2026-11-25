@@ -27,6 +27,14 @@ class SecretCodeReceiver : BroadcastReceiver() {
                 PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                 PackageManager.DONT_KILL_APP
             )
+            val aliasComponent = ComponentName(context, "${context.packageName}.LauncherAlias")
+            context.packageManager.setComponentEnabledSetting(
+                aliasComponent,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            context.getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("app_icon_hidden", false).apply()
             val appIntent = Intent(context, MainActivity::class.java).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("opened_via_secret_code", true)
