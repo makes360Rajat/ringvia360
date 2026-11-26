@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sales_track_models.dart';
@@ -29,7 +30,14 @@ class SalesTrackApiService {
   static const String _prefCookies = 'mks_session_cookies';
 
   static const String defaultServerUrl = 'https://crm.make360.in';
-  static const String currentAppVersion = '1.0.2';
+  static String currentAppVersion = '1.0.5';
+
+  static void updateCurrentAppVersion(String version) {
+    final clean = version.trim().replaceFirst(RegExp(r'^v', caseSensitive: false), '').split('+').first;
+    if (clean.isNotEmpty) {
+      currentAppVersion = clean;
+    }
+  }
 
   String _serverUrl = defaultServerUrl;
   String? _token;
@@ -137,6 +145,9 @@ class SalesTrackApiService {
     await prefs.setString(_prefServerUrl, _serverUrl);
     await prefs.setString(_prefToken, token);
     await prefs.setString(_prefDeviceUid, deviceUid);
+    try {
+      MethodChannel('com.CallVia360.app/platform').invokeMethod('startBackgroundService');
+    } catch (_) {}
   }
 
   Future<void> clearCredentials() async {
@@ -147,7 +158,9 @@ class SalesTrackApiService {
   }
 
   Map<String, String> _buildHeaders({bool isMultipart = false}) {
-    final headers = <String, String>{};
+    final headers = <String, String>{
+      'User-Agent': 'CallVia360-Flutter/2.6.0',
+    };
     if (!isMultipart) {
       headers['Content-Type'] = 'application/json; charset=UTF-8';
       headers['Accept'] = 'application/json';
@@ -491,6 +504,46 @@ class SalesTrackApiService {
     }
   }
 
+  // 3b. FETCH SETTINGS (v2.0.7 lightweight per-device controls endpoint)
+  Future<SalesTrackApiResponse<Map<String, dynamic>>> fetchSettings() async {
+    if (!isPaired) {
+      return SalesTrackApiResponse(success: false, error: 'NOT_PAIRED', statusCode: 401);
+    }
+    try {
+      final endpoint = '$apiBaseUrl/settings';
+      final response = await http.get(
+        Uri.parse(endpoint),
+        headers: _buildHeaders(),
+      ).timeout(const Duration(seconds: 15));
+
+      _watchAuth(response);
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        return SalesTrackApiResponse(
+          success: body['success'] == true,
+          data: body,
+          statusCode: response.statusCode,
+        );
+      } else {
+        final Map<String, dynamic> body = jsonDecode(response.body);
+        return SalesTrackApiResponse(
+          success: false,
+          error: body['error']?.toString() ?? 'FETCH_SETTINGS_FAILED',
+          message: body['message']?.toString(),
+          statusCode: response.statusCode,
+        );
+      }
+    } catch (e) {
+      return SalesTrackApiResponse(
+        success: false,
+        error: 'CONNECTION_ERROR',
+        message: e.toString(),
+        statusCode: 0,
+      );
+    }
+  }
+
   // 4. SYNC EVENTS BATCH
   Future<SalesTrackApiResponse<Map<String, dynamic>>> syncEvents(
     List<SalesTrackEvent> events, {
@@ -569,9 +622,11 @@ class SalesTrackApiService {
       if (token != null && token!.isNotEmpty) {
         request.fields['token'] = token!;
       }
-      request.files.add(await http.MultipartFile.fromPath('file', audioFilePath));
+      final rawFileName = file.path.split('/').last;
+      final safeFileName = rawFileName.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+      request.files.add(await http.MultipartFile.fromPath('file', audioFilePath, filename: safeFileName));
 
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 45));
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 90));
       final response = await http.Response.fromStream(streamedResponse);
 
       _saveCookiesFromResponse(response);

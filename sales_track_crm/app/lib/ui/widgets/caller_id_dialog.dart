@@ -630,9 +630,9 @@ class CallerIdDialog extends StatelessWidget {
                           child: ElevatedButton.icon(
                             onPressed: () => _openLeadOutcomeModal(context),
                             icon: const Icon(Icons.post_add_rounded, size: 18),
-                            label: const Text(
-                              'Log Lead',
-                              style: TextStyle(
+                            label: Text(
+                              syncService.isLeadEditAllowed ? 'Log Lead' : 'Log Call Outcome',
+                              style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 0.3,
