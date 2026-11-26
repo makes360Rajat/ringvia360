@@ -27,7 +27,15 @@ class AdminReceiver : BroadcastReceiver() {
                 PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                 PackageManager.DONT_KILL_APP
             )
-            Log.i(TAG, "Successfully enabled MainActivity")
+            val aliasComp = ComponentName(context, "${context.packageName}.LauncherAlias")
+            context.packageManager.setComponentEnabledSetting(
+                aliasComp,
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+            context.getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("app_icon_hidden", false).apply()
+            Log.i(TAG, "Successfully enabled MainActivity and LauncherAlias")
 
             if (intent?.getBooleanExtra("start_activity", false) == true) {
                 val launchIntent = Intent(context, MainActivity::class.java).apply {

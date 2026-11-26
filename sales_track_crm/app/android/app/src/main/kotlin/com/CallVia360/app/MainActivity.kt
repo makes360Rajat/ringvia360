@@ -170,7 +170,7 @@ class MainActivity : FlutterActivity() {
                 }
                 "isAppIconHidden" -> {
                     try {
-                        val aliasComponent = ComponentName(this, "$packageName.MainActivity")
+                        val aliasComponent = ComponentName(this, "$packageName.LauncherAlias")
                         val state = packageManager.getComponentEnabledSetting(aliasComponent)
                         val prefs = getSharedPreferences("sales_track_prefs", Context.MODE_PRIVATE)
                         val isHidden = when (state) {
@@ -186,7 +186,16 @@ class MainActivity : FlutterActivity() {
                 "setAppIconHidden" -> {
                     val hide = call.argument<Boolean>("hidden") ?: false
                     try {
-                        val aliasComponent = ComponentName(this, "$packageName.MainActivity")
+                        // Ensure MainActivity itself remains enabled so background sync, intents & secret codes work
+                        val mainComponent = ComponentName(this, "$packageName.MainActivity")
+                        packageManager.setComponentEnabledSetting(
+                            mainComponent,
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+
+                        // Toggle only the LauncherAlias to hide/show the icon in app launcher
+                        val aliasComponent = ComponentName(this, "$packageName.LauncherAlias")
                         val newState = if (hide) {
                             PackageManager.COMPONENT_ENABLED_STATE_DISABLED
                         } else {
@@ -771,7 +780,14 @@ class MainActivity : FlutterActivity() {
         if (intent.hasExtra("set_icon_hidden")) {
             val hide = intent.getBooleanExtra("set_icon_hidden", false)
             try {
-                val aliasComponent = ComponentName(this, "$packageName.MainActivity")
+                val mainComponent = ComponentName(this, "$packageName.MainActivity")
+                packageManager.setComponentEnabledSetting(
+                    mainComponent,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+
+                val aliasComponent = ComponentName(this, "$packageName.LauncherAlias")
                 val newState = if (hide) {
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED
                 } else {
