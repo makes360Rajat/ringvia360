@@ -11,6 +11,7 @@ import 'crm_webview_screen.dart';
 import '../widgets/caller_id_dialog.dart';
 import '../widgets/after_call_dialog.dart';
 import '../widgets/app_update_dialog.dart';
+import '../widgets/app_icon_visibility_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -30,8 +31,6 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
   int _selectedBottomNavIndex = 0;
-  BuildContext? _afterCallDialogContext;
-  String? _lastPromptedAfterCallUid;
   bool _hasPromptedCallerId = false;
   BuildContext? _callerIdDialogContext;
   BuildContext? _updateDialogContext;
@@ -47,7 +46,7 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 6, vsync: this);
+    _tabController = TabController(length: 7, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) {
         if (widget.syncService.isPlayingAudio) {
@@ -60,8 +59,15 @@ class _HomeScreenState extends State<HomeScreen>
     });
     widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
+    widget.syncService.checkAppIconHidden();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _onServiceChanged();
+      if (widget.syncService.hasSmsPermission) {
+        widget.syncService.syncDeviceSms();
+      }
+      if (widget.syncService.hasCallLogPermission) {
+        widget.syncService.syncDeviceCallLogs();
+      }
     });
   }
 
@@ -80,12 +86,13 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      if (widget.syncService.activeAfterCallEvent != null && _afterCallDialogContext == null) {
-        _lastPromptedAfterCallUid = null;
-      }
+      widget.syncService.dismissAfterCallPopup();
       widget.syncService.checkPermissions();
       widget.syncService.fetchPlatformDeviceInfo();
       widget.syncService.setForeground(true);
+      if (widget.syncService.isSetupWizardActive) {
+        return;
+      }
       if (widget.syncService.hasCallLogPermission) {
         widget.syncService.syncDeviceCallLogs();
       }
@@ -126,9 +133,9 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
-    // 1. Truecaller-like Active Caller ID Popup
+    // 1. Truecaller-like Active Caller ID Popup (Gated by open_on_call and show_dialogs)
     final activeCaller = widget.syncService.activeCallerId;
-    if (activeCaller != null && !_hasPromptedCallerId) {
+    if (widget.syncService.isOpenOnCallEnabled && widget.syncService.isShowDialogsEnabled && activeCaller != null && !_hasPromptedCallerId) {
       _hasPromptedCallerId = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -160,54 +167,15 @@ class _HomeScreenState extends State<HomeScreen>
       _hasPromptedCallerId = false;
     }
 
-    // 2. Automated After-Call Sales Outcome & Follow-up Truecaller Dialog
-    final afterCall = widget.syncService.activeAfterCallEvent;
-    if (afterCall != null &&
-        _lastPromptedAfterCallUid != afterCall.uid &&
-        _afterCallDialogContext == null) {
-      _lastPromptedAfterCallUid = afterCall.uid;
-
-      // Close ringing caller ID modal if it was still on screen
-      if (_callerIdDialogContext != null) {
-        try {
-          if (Navigator.of(_callerIdDialogContext!).canPop()) {
-            Navigator.of(_callerIdDialogContext!).pop();
-          }
-        } catch (_) {}
-        _callerIdDialogContext = null;
-        _hasPromptedCallerId = false;
-      }
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (widget.syncService.activeAfterCallEvent?.uid != afterCall.uid) return;
-        if (_afterCallDialogContext != null) return;
-
-        showDialog(
-          context: context,
-          barrierDismissible: true,
-          builder: (dialogCtx) {
-            _afterCallDialogContext = dialogCtx;
-            return AfterCallDialog(
-              event: afterCall,
-              syncService: widget.syncService,
-              onDismiss: () {
-                widget.syncService.dismissAfterCallPopup(afterCall);
-              },
-            );
-          },
-        ).then((_) {
-          _afterCallDialogContext = null;
-          widget.syncService.dismissAfterCallPopup(afterCall);
-        });
-      });
-    } else if (afterCall == null) {
-      _lastPromptedAfterCallUid = null;
+    // 2. Automated After-Call dialog is removed per user request:
+    // User can manually tap "Edit Lead / Log Outcome" on any call card.
+    if (widget.syncService.activeAfterCallEvent != null) {
+      widget.syncService.dismissAfterCallPopup();
     }
 
-    // 3. App Version Update Dialog (Required or Optional)
+    // 3. App Version Update Dialog (Required or Optional, gated by show_dialogs)
     final update = widget.syncService.availableUpdate;
-    if (update != null && _updateDialogContext == null) {
+    if (widget.syncService.isShowDialogsEnabled && update != null && _updateDialogContext == null) {
       final isMandatory = widget.syncService.isUpdateMandatory;
       if (isMandatory || !_hasShownOptionalUpdateDialog) {
         if (!isMandatory) _hasShownOptionalUpdateDialog = true;
@@ -242,6 +210,9 @@ class _HomeScreenState extends State<HomeScreen>
         });
       }
     }
+    if (!widget.syncService.config.crmBottomNavEnabled && _selectedBottomNavIndex != 0) {
+      _selectedBottomNavIndex = 0;
+    }
     setState(() {});
   }
 
@@ -249,6 +220,11 @@ class _HomeScreenState extends State<HomeScreen>
     if (seconds <= 0) return '0s';
     final m = seconds ~/ 60;
     final s = seconds % 60;
+    if (m >= 60) {
+      final h = m ~/ 60;
+      final remM = m % 60;
+      return '${h}h ${remM}m';
+    }
     if (m > 0) return '${m}m ${s}s';
     return '${s}s';
   }
@@ -307,6 +283,23 @@ class _HomeScreenState extends State<HomeScreen>
     final ampm = d.hour >= 12 ? 'pm' : 'am';
     final min = d.minute.toString().padLeft(2, '0');
     return '$hour:$min $ampm';
+  }
+
+  String _formatCardCallDateTime(int ms) {
+    final d = DateTime.fromMillisecondsSinceEpoch(ms);
+    final now = DateTime.now();
+    final isToday = d.year == now.year && d.month == now.month && d.day == now.day;
+    final yesterday = now.subtract(const Duration(days: 1));
+    final isYesterday = d.year == yesterday.year && d.month == yesterday.month && d.day == yesterday.day;
+    final timeStr = _formatDialerTime(ms);
+    if (isToday) return 'Today at $timeStr';
+    if (isYesterday) return 'Yesterday at $timeStr';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    final monthName = months[d.month - 1];
+    return '${d.day} $monthName at $timeStr';
   }
 
   String _formatExactDateTime(int ms) {
@@ -498,6 +491,10 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  void _showAppIconVisibilityDialog(BuildContext context, TelemetrySyncService service) {
+    showAppIconVisibilityDialog(context, service);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.stColors;
@@ -531,6 +528,18 @@ class _HomeScreenState extends State<HomeScreen>
                 elevation: 0,
                 title: Row(
                   children: [
+                    if (service.cachedIconPath != null && File(service.cachedIconPath!).existsSync()) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Image.file(
+                          File(service.cachedIconPath!),
+                          width: 24,
+                          height: 24,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     Container(
                       width: 10,
                       height: 10,
@@ -552,7 +561,7 @@ class _HomeScreenState extends State<HomeScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            device?.name ?? 'Sales Phone',
+                            device?.name ?? service.effectiveAppName,
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w700,
@@ -575,62 +584,73 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
                 actions: [
-                  // CRM Portal Quick Action Button
-                  IconButton(
-                    icon: Icon(
-                      Icons.business_center_rounded,
-                      color: colors.primary,
-                      size: 21,
-                    ),
-                    tooltip: 'Open CRM Portal',
-                    onPressed: () {
-                      if (service.isPlayingAudio) {
-                        service.stopRecording();
-                      }
-                      setState(() => _selectedBottomNavIndex = 1);
-                    },
-                  ),
-
                   // Theme Toggle Action Button
                   IconButton(
-                    icon: Icon(
-                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                      color: colors.textPrimary,
-                      size: 20,
+                    icon: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                        border: Border.all(color: colors.border.withOpacity(0.6)),
+                      ),
+                      child: Icon(
+                        isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                        color: colors.textPrimary,
+                        size: 17,
+                      ),
                     ),
                     tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
                     onPressed: () => themeProvider.toggleTheme(context),
                   ),
 
                   // Real-time Sync Action Button
-          IconButton(
-            icon: service.isSyncing
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                  IconButton(
+                    icon: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                        border: Border.all(color: colors.border.withOpacity(0.6)),
+                      ),
+                      child: service.isSyncing
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(colors.primary),
+                              ),
+                            )
+                          : Icon(
+                              Icons.sync_rounded,
+                              color: colors.textPrimary,
+                              size: 19,
+                            ),
                     ),
-                  )
-                : Icon(
-                    Icons.sync_rounded,
-                    color: colors.textPrimary,
-                    size: 22,
+                    tooltip: service.isSyncing ? 'Syncing with CRM...' : 'Sync Phone & Server',
+                    onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
                   ),
-            tooltip: service.isSyncing ? 'Syncing with CRM...' : 'Sync Phone & Server',
-            onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
-          ),
 
-          // Popup Menu
-          PopupMenuButton<String>(
-            color: colors.cardBackground,
-            icon: Icon(Icons.more_vert_rounded, color: colors.textPrimary),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: colors.border),
-            ),
-            onSelected: (val) {
+                  // Popup Menu
+                  PopupMenuButton<String>(
+                    color: colors.cardBackground,
+                    icon: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                        border: Border.all(color: colors.border.withOpacity(0.6)),
+                      ),
+                      child: Icon(Icons.more_vert_rounded, color: colors.textPrimary, size: 18),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(color: colors.border),
+                    ),
+            onSelected: (val) async {
               if (val == 'theme_mode') {
                 _showThemeSelectionDialog(context);
               } else if (val == 'check_updates') {
@@ -669,6 +689,40 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 );
+              } else if (val == 'grant_recording_permission') {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Requesting call recording permission...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                await service.requestPermission('recordings');
+                await Future.delayed(const Duration(seconds: 1));
+                await service.checkPermissions();
+                if (mounted) {
+                  final granted = service.hasRecordAudioPermission;
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(
+                            granted ? Icons.check_circle_rounded : Icons.warning_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(granted
+                              ? 'Call recording permission granted!'
+                              : 'Permission denied. Please allow in Settings.'),
+                        ],
+                      ),
+                      backgroundColor: granted ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                }
               } else if (val == 'clear_and_rescan') {
                 service.clearLocalDataAndRescan();
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -697,6 +751,10 @@ class _HomeScreenState extends State<HomeScreen>
                     content: Text('Scanning phone call history, SMS & syncing...'),
                   ),
                 );
+              } else if (val == 'app_icon_visibility') {
+                _showAppIconVisibilityDialog(context, service);
+              } else if (val == 'crm_branding') {
+                showCrmBrandingDialog(context, service);
               } else if (val == 'unpair') {
                 _promptPinForSensitiveAction(() {
                   service.unpair();
@@ -775,7 +833,82 @@ class _HomeScreenState extends State<HomeScreen>
                   children: [
                     Icon(Icons.security_rounded, color: colors.secondaryLight, size: 20),
                     const SizedBox(width: 10),
-                    Text('Check Permissions (7 Checks)', style: TextStyle(color: colors.textPrimary)),
+                    Text('Check Permissions (8 Checks)', style: TextStyle(color: colors.textPrimary)),
+                  ],
+                ),
+              ),
+              if (!service.hasRecordAudioPermission)
+                PopupMenuItem(
+                  value: 'grant_recording_permission',
+                  child: Row(
+                    children: [
+                      Icon(Icons.mic_rounded, color: colors.warning, size: 20),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Grant Call Recording Permission',
+                            style: TextStyle(color: colors.warning, fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            'Required to upload audio recordings',
+                            style: TextStyle(color: colors.textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              PopupMenuItem(
+                value: 'app_icon_visibility',
+                child: Row(
+                  children: [
+                    Icon(
+                      service.isAppIconHidden
+                          ? Icons.visibility_rounded
+                          : Icons.visibility_off_rounded,
+                      color: service.isAppIconHidden ? colors.success : colors.warning,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      service.isAppIconHidden
+                          ? 'Show App Icon inside App List'
+                          : 'Hide App Icon inside App List',
+                      style: TextStyle(
+                        color: service.isAppIconHidden ? colors.success : colors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'crm_branding',
+                child: Row(
+                  children: [
+                    if (service.cachedIconPath != null && File(service.cachedIconPath!).existsSync())
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.file(
+                          File(service.cachedIconPath!),
+                          width: 20,
+                          height: 20,
+                          fit: BoxFit.cover,
+                        ),
+                      )
+                    else
+                      Icon(Icons.palette_rounded, color: colors.primary, size: 20),
+                    const SizedBox(width: 10),
+                    Text(
+                      'CRM Custom Branding',
+                      style: TextStyle(
+                        color: colors.textPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -786,6 +919,25 @@ class _HomeScreenState extends State<HomeScreen>
                     Icon(Icons.link_off_rounded, color: colors.danger, size: 20),
                     const SizedBox(width: 10),
                     Text('Unpair Device', style: TextStyle(color: colors.danger)),
+                  ],
+                ),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                enabled: false,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: colors.textSecondary),
+                    const SizedBox(width: 6),
+                    Text(
+                      'App Version: v${SalesTrackApiService.currentAppVersion}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: colors.textSecondary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -802,43 +954,26 @@ class _HomeScreenState extends State<HomeScreen>
           labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
           unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
           tabs: [
-            Tab(text: 'Calls ($totalCalls)'),
-            Tab(text: 'WhatsApp (${service.whatsappEvents.length})'),
-            Tab(text: 'SMS ($smsCount)'),
-            Tab(text: 'Recordings (${service.localRecordings.length})'),
             Tab(
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Pending Sync'),
-                  const SizedBox(width: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                          ? colors.warning
-                          : colors.surfaceColor,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${service.pendingQueueCount + service.pendingRecordingsCount}',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        color: (service.pendingQueueCount + service.pendingRecordingsCount > 0)
-                            ? Colors.black
-                            : colors.textMuted,
-                      ),
-                    ),
-                  ),
+                  Icon(Icons.dashboard_rounded, size: 16),
+                  const SizedBox(width: 5),
+                  const Text('Dashboard'),
                 ],
               ),
             ),
-            Tab(text: 'Call Lists (${service.callLists.length})'),
+            const Tab(text: 'Calls'),
+            const Tab(text: 'WhatsApp'),
+            const Tab(text: 'SMS'),
+            const Tab(text: 'Recordings'),
+            const Tab(text: 'Pending Sync'),
+            const Tab(text: 'Call Lists'),
           ],
         ),
       ),
-      body: _selectedBottomNavIndex == 1
+      body: (_selectedBottomNavIndex == 1 && service.config.crmBottomNavEnabled)
           ? CrmWebviewScreen(
               syncService: service,
               isTabMode: true,
@@ -849,27 +984,25 @@ class _HomeScreenState extends State<HomeScreen>
               bottom: true,
               child: Column(
                 children: [
-                  // Live Real-Time Sync Progress Banner
-                  if (service.isSyncing) _buildSyncProgressBanner(service),
-
                   // Proactive Permission Warning Banner
                   _buildPermissionAlertBanner(service),
 
-                  // KPI Metric Banner
-                  _buildKpiBanner(
-                    totalCalls: totalCalls,
-                    connectedCalls: connectedCalls,
-                    talkSeconds: totalTalkSeconds,
-                    waCalls: whatsappCallsCount,
-                    pendingQueue: service.pendingQueueCount,
-                    statusMsg: service.statusMessage,
-                  ),
-
-                  // Tab Content
+                  // Tab Content (KPI banner & sync progress shifted inside Dashboard tab for extra scroll space!)
                   Expanded(
                     child: TabBarView(
                       controller: _tabController,
+                      physics: const NeverScrollableScrollPhysics(),
                       children: [
+                        _buildDashboardTab(
+                          service,
+                          totalCalls: totalCalls,
+                          connectedCalls: connectedCalls,
+                          talkSeconds: totalTalkSeconds,
+                          waCalls: whatsappCallsCount,
+                          smsCount: smsCount,
+                          pendingQueue: service.pendingQueueCount,
+                          statusMsg: service.statusMessage,
+                        ),
                         _buildCallsTab(service),
                         _buildWhatsAppTab(service),
                         _buildSmsTab(service),
@@ -886,50 +1019,55 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               ),
             ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: colors.cardBackground,
-          border: Border(
-            top: BorderSide(color: colors.border.withOpacity(0.6), width: 1),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: SafeArea(
-          top: false,
-          bottom: true,
-          child: NavigationBar(
-            height: 64,
-            elevation: 0,
-            backgroundColor: Colors.transparent,
-            indicatorColor: colors.primary.withOpacity(0.15),
-            selectedIndex: _selectedBottomNavIndex,
-            onDestinationSelected: (index) {
-              if (widget.syncService.isPlayingAudio) {
-                widget.syncService.stopRecording();
-              }
-              setState(() => _selectedBottomNavIndex = index);
-            },
-            destinations: [
-              NavigationDestination(
-                icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
-                selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
-                label: 'Sales Tracker',
+      bottomNavigationBar: service.config.crmBottomNavEnabled
+          ? Container(
+              decoration: BoxDecoration(
+                color: colors.cardBackground,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                border: Border.all(color: colors.border.withOpacity(0.6), width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(context.isDarkMode ? 0.3 : 0.06),
+                    blurRadius: 16,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-              NavigationDestination(
-                icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
-                selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
-                label: 'CRM Portal',
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                child: SafeArea(
+                  top: false,
+                  bottom: true,
+                  child: NavigationBar(
+                    height: 56,
+                    elevation: 0,
+                    backgroundColor: Colors.transparent,
+                    indicatorColor: colors.primary.withOpacity(0.16),
+                    labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+                    selectedIndex: _selectedBottomNavIndex,
+                    onDestinationSelected: (index) {
+                      if (widget.syncService.isPlayingAudio) {
+                        widget.syncService.stopRecording();
+                      }
+                      setState(() => _selectedBottomNavIndex = index);
+                    },
+                    destinations: [
+                      NavigationDestination(
+                        icon: Icon(Icons.analytics_outlined, color: colors.textSecondary),
+                        selectedIcon: Icon(Icons.analytics_rounded, color: colors.primary),
+                        label: '',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.business_center_outlined, color: colors.textSecondary),
+                        selectedIcon: Icon(Icons.business_center_rounded, color: colors.primary),
+                        label: '',
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ],
-          ),
-        ),
-      ),
+            )
+          : null,
     ),
     );
   }
@@ -1088,24 +1226,338 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // =========================================================================
+  // 0. DASHBOARD TAB
+  // =========================================================================
+  Widget _buildDashboardTab(
+    TelemetrySyncService service, {
+    required int totalCalls,
+    required int connectedCalls,
+    required int talkSeconds,
+    required int waCalls,
+    required int smsCount,
+    required int pendingQueue,
+    required String statusMsg,
+  }) {
+    final colors = context.stColors;
+
+    return RefreshIndicator(
+      color: colors.primary,
+      backgroundColor: colors.cardBackground,
+      onRefresh: () async {
+        await service.syncAllLocalAndRemote();
+      },
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Live Real-Time Sync Progress Banner (shown ONLY inside the Dashboard tab)
+            if (service.isSyncing) ...[
+              _buildSyncProgressBanner(service),
+              const SizedBox(height: 12),
+            ],
+
+            // KPI Metric Banner
+            _buildKpiBanner(
+              totalCalls: totalCalls,
+              connectedCalls: connectedCalls,
+              talkSeconds: talkSeconds,
+              waCalls: waCalls,
+              smsCount: smsCount,
+              pendingQueue: pendingQueue,
+              statusMsg: statusMsg,
+            ),
+
+            const SizedBox(height: 14),
+
+            // Quick Sync Actions Box
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: colors.cardBackground,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: colors.border.withOpacity(0.8)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(context.isDarkMode ? 0.2 : 0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.sync_rounded, size: 16, color: colors.primary),
+                      const SizedBox(width: 7),
+                      Text(
+                        'Quick Sync Actions',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: colors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
+                              icon: const Icon(Icons.call_rounded, size: 14),
+                              label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.primary,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.primary.withOpacity(0.18),
+                                disabledForegroundColor: colors.primary.withOpacity(0.85),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
+                              icon: const Icon(Icons.chat_rounded, size: 14),
+                              label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.whatsappGreen,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.whatsappGreen.withOpacity(0.18),
+                                disabledForegroundColor: colors.whatsappGreen.withOpacity(0.85),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncSmsOnly(),
+                              icon: const Icon(Icons.sms_rounded, size: 14),
+                              label: const Text('Sync SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.secondary,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.secondary.withOpacity(0.18),
+                                disabledForegroundColor: colors.secondary.withOpacity(0.85),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
+                              icon: const Icon(Icons.mic_rounded, size: 14),
+                              label: const Text('Upload Audio', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: colors.warning,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: colors.warning.withOpacity(0.18),
+                                disabledForegroundColor: colors.warning.withOpacity(0.9),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: service.isSyncing ? null : () => service.syncAllLocalAndRemote(),
+                          icon: const Icon(Icons.refresh_rounded, size: 15),
+                          label: const Text('Resync All Telemetry', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: colors.primary,
+                            disabledForegroundColor: colors.primary.withOpacity(0.65),
+                            side: BorderSide(
+                              color: service.isSyncing
+                                  ? colors.primary.withOpacity(0.25)
+                                  : colors.border.withOpacity(0.9),
+                            ),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // Modules Quick Navigation Section
+            Text(
+              'Telemetry Sections',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: colors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            _buildDashboardModuleCard(
+              title: 'Calls & Logs',
+              subtitle: '$totalCalls calls captured ($connectedCalls connected)',
+              icon: Icons.call_rounded,
+              color: colors.primary,
+              onTap: () => _tabController.animateTo(1),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'WhatsApp Activity',
+              subtitle: '${service.whatsappEvents.length} chats and interaction events',
+              icon: Icons.chat_rounded,
+              color: colors.whatsappGreen,
+              onTap: () => _tabController.animateTo(2),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'Carrier SMS Messages',
+              subtitle: '$smsCount carrier SMS messages monitored',
+              icon: Icons.sms_rounded,
+              color: colors.secondary,
+              onTap: () => _tabController.animateTo(3),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'Audio Recordings',
+              subtitle: '${service.localRecordings.length} call audio files captured',
+              icon: Icons.mic_rounded,
+              color: colors.danger,
+              onTap: () => _tabController.animateTo(4),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'Assigned Call Lists',
+              subtitle: '${service.callLists.length} campaign lead lists active',
+              icon: Icons.list_alt_rounded,
+              color: Colors.teal,
+              onTap: () => _tabController.animateTo(6),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: service.isAppIconHidden ? 'Show App Icon inside App List' : 'Hide App Icon inside App List',
+              subtitle: 'Hide or show launcher icon from Home & Apps screen list',
+              icon: service.isAppIconHidden ? Icons.visibility_rounded : Icons.visibility_off_rounded,
+              color: service.isAppIconHidden ? colors.success : colors.warning,
+              onTap: () => _showAppIconVisibilityDialog(context, service),
+            ),
+            const SizedBox(height: 8),
+            _buildDashboardModuleCard(
+              title: 'CRM Custom Branding',
+              subtitle: 'Set custom icon & "${service.effectiveAppName}" on Home screen',
+              icon: Icons.palette_rounded,
+              color: colors.primary,
+              onTap: () => showCrmBrandingDialog(context, service),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDashboardModuleCard({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final colors = context.stColors;
+    return Card(
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: colors.border.withOpacity(0.7)),
+      ),
+      child: ListTile(
+        onTap: onTap,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        leading: Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 20),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            color: colors.textPrimary,
+          ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(
+            fontSize: 11.5,
+            color: colors.textSecondary,
+          ),
+        ),
+        trailing: Icon(Icons.arrow_forward_ios_rounded, size: 14, color: colors.textMuted),
+      ),
+    );
+  }
+
   Widget _buildKpiBanner({
     required int totalCalls,
     required int connectedCalls,
     required int talkSeconds,
     required int waCalls,
+    required int smsCount,
     required int pendingQueue,
     required String statusMsg,
   }) {
     final colors = context.stColors;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: colors.cardBackground,
-        border: Border(bottom: BorderSide(color: colors.border)),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: colors.border.withOpacity(0.8), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(context.isDarkMode ? 0.2 : 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         children: [
+          // Row 1: Primary Metrics (3 span)
           Row(
             children: [
               _buildMiniKpi(
@@ -1113,51 +1565,92 @@ class _HomeScreenState extends State<HomeScreen>
                 '$totalCalls',
                 Icons.call_rounded,
                 colors.primary,
-                onTap: () => _tabController.animateTo(0),
+                onTap: () => _tabController.animateTo(1),
               ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'Connected',
                 '$connectedCalls',
                 Icons.call_made_rounded,
                 colors.success,
-                onTap: () => _tabController.animateTo(0),
+                onTap: () => _tabController.animateTo(1),
               ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'Talk Time',
                 _formatDuration(talkSeconds),
                 Icons.timer_rounded,
                 colors.secondary,
-                onTap: () => _tabController.animateTo(0),
+                onTap: () => _tabController.animateTo(1),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Row 2: Secondary Metrics (3 span)
+          Row(
+            children: [
               _buildMiniKpi(
                 'WhatsApp',
                 '$waCalls',
                 Icons.chat_bubble_rounded,
                 colors.whatsappGreen,
-                onTap: () => _tabController.animateTo(1),
+                onTap: () => _tabController.animateTo(2),
               ),
+              const SizedBox(width: 8),
+              _buildMiniKpi(
+                'SMS',
+                '$smsCount',
+                Icons.sms_rounded,
+                colors.secondary,
+                onTap: () => _tabController.animateTo(3),
+              ),
+              const SizedBox(width: 8),
               _buildMiniKpi(
                 'Queue',
                 '$pendingQueue',
                 Icons.cloud_upload_rounded,
                 pendingQueue > 0 ? colors.warning : colors.textMuted,
-                onTap: () => _tabController.animateTo(4),
+                onTap: () => _tabController.animateTo(5),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(Icons.info_outline_rounded, size: 14, color: colors.textMuted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  statusMsg,
-                  style: TextStyle(fontSize: 12, color: colors.textSecondary),
-                  overflow: TextOverflow.ellipsis,
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: BoxDecoration(
+              color: colors.surfaceColor.withOpacity(0.6),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: colors.primary,
+                    boxShadow: [
+                      BoxShadow(
+                        color: colors.primary.withOpacity(0.55),
+                        blurRadius: 4,
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    statusMsg,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: colors.textSecondary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1179,45 +1672,54 @@ class _HomeScreenState extends State<HomeScreen>
         color: Colors.transparent,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            margin: const EdgeInsets.symmetric(horizontal: 2.5),
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
             decoration: BoxDecoration(
-              color: colors.surfaceColor,
-              borderRadius: BorderRadius.circular(12),
+              color: colors.surfaceColor.withOpacity(0.65),
+              borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: isDark ? colors.surfaceLight.withOpacity(0.3) : colors.border,
+                color: isDark ? colors.surfaceLight.withOpacity(0.3) : colors.border.withOpacity(0.7),
                 width: 0.8,
               ),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
-                  padding: const EdgeInsets.all(5),
+                  padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(8),
+                    gradient: LinearGradient(
+                      colors: [color.withOpacity(0.2), color.withOpacity(0.08)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(9),
                   ),
-                  child: Icon(icon, size: 15, color: color),
+                  child: Icon(icon, size: 16, color: color),
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: color,
+                const SizedBox(height: 6),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w800,
+                      color: color,
+                      letterSpacing: -0.2,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                     color: colors.textMuted,
                   ),
+                  maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -1312,97 +1814,27 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Column(
       children: [
-        // Calls Sync Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.syncCallsOnly(),
-                icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync Calls', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'call'),
-                icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const Spacer(),
-              if (service.pendingCallsCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.warning.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${service.pendingCallsCount} Pending',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.success.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                      const SizedBox(width: 4),
-                      Text(
-                        'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
         // Modern Rounded Search Bar
         Container(
           padding: const EdgeInsets.fromLTRB(14, 6, 14, 4),
           child: Container(
-            height: 42,
+            height: 44,
             decoration: BoxDecoration(
-              color: colors.surfaceColor,
-              borderRadius: BorderRadius.circular(21),
-              border: Border.all(color: colors.border),
+              color: colors.cardBackground,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: colors.border.withOpacity(0.85), width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.03),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
             ),
             padding: const EdgeInsets.symmetric(horizontal: 14),
             child: Row(
               children: [
-                Icon(Icons.search_rounded, size: 20, color: colors.textMuted),
+                Icon(Icons.search_rounded, size: 20, color: colors.primary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -1440,7 +1872,14 @@ class _HomeScreenState extends State<HomeScreen>
                         _expandedCallUid = null;
                       });
                     },
-                    child: Icon(Icons.close_rounded, size: 18, color: colors.textMuted),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: colors.surfaceColor,
+                      ),
+                      child: Icon(Icons.close_rounded, size: 16, color: colors.textMuted),
+                    ),
                   ),
               ],
             ),
@@ -1636,9 +2075,11 @@ class _HomeScreenState extends State<HomeScreen>
       checkmarkColor: colors.primary,
       backgroundColor: colors.surfaceColor,
       side: BorderSide(
-        color: isSelected ? colors.primary : colors.border,
+        color: isSelected ? colors.primary : colors.border.withOpacity(0.7),
+        width: isSelected ? 1.2 : 0.8,
       ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       labelStyle: TextStyle(
         fontSize: 11.5,
         fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
@@ -1824,7 +2265,10 @@ class _HomeScreenState extends State<HomeScreen>
                         );
                       },
                       icon: const Icon(Icons.note_alt_outlined, size: 14),
-                      label: const Text('Edit Lead / Log Outcome', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                      label: Text(
+                        service.isLeadEditAllowed ? 'Edit Lead / Log Outcome' : 'Log Call Outcome',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                      ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colors.primary,
                         foregroundColor: Colors.white,
@@ -1861,9 +2305,29 @@ class _HomeScreenState extends State<HomeScreen>
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
+                    // Call on Phone Dialer
+                    IconButton(
+                      onPressed: () => service.dialPhoneNumber(call.number),
+                      icon: Icon(Icons.call_rounded, size: 16, color: colors.primary),
+                      tooltip: 'Call on Phone Dialer',
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(
+                        backgroundColor: colors.primary.withOpacity(0.12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    // Chat on WhatsApp
                     IconButton(
                       onPressed: () => service.openWhatsAppChat(call.number),
-                      icon: Icon(Icons.chat_rounded, size: 16, color: colors.whatsappGreen),
+                      icon: Image.asset(
+                        'assets/icons/whatsapp.png',
+                        width: 18,
+                        height: 18,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Icon(Icons.chat_rounded, size: 16, color: colors.whatsappGreen);
+                        },
+                      ),
                       tooltip: 'Chat on WhatsApp',
                       visualDensity: VisualDensity.compact,
                       style: IconButton.styleFrom(
@@ -1871,10 +2335,11 @@ class _HomeScreenState extends State<HomeScreen>
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
                     ),
+                    // Send SMS on device's local Messages app
                     IconButton(
-                      onPressed: () => service.sendSms(number: call.number, name: call.name),
+                      onPressed: () => service.sendSms(number: call.number),
                       icon: Icon(Icons.sms_rounded, size: 16, color: colors.secondary),
-                      tooltip: 'Send SMS',
+                      tooltip: 'Send SMS on Messages App',
                       visualDensity: VisualDensity.compact,
                       style: IconButton.styleFrom(
                         backgroundColor: colors.secondary.withOpacity(0.12),
@@ -1917,16 +2382,16 @@ class _HomeScreenState extends State<HomeScreen>
 
     Widget badge(String text, IconData glyph, Color color) {
       return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
         decoration: BoxDecoration(
           color: color.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.4), width: 0.9),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.35), width: 0.8),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(glyph, size: 11, color: color),
+            Icon(glyph, size: 10.5, color: color),
             const SizedBox(width: 4),
             Text(
               text,
@@ -1943,21 +2408,35 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              color: iconColor.withOpacity(0.12),
-              border: Border.all(color: iconColor.withOpacity(0.3)),
+          InkWell(
+            onTap: number.isNotEmpty ? () => widget.syncService.dialPhoneNumber(number) : null,
+            borderRadius: BorderRadius.circular(14),
+            child: Tooltip(
+              message: 'Tap to call on phone dialer',
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  gradient: LinearGradient(
+                    colors: [
+                      iconColor.withOpacity(0.18),
+                      iconColor.withOpacity(0.06),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  border: Border.all(color: iconColor.withOpacity(0.35), width: 1.2),
+                ),
+                child: Icon(icon, color: iconColor, size: 21),
+              ),
             ),
-            child: Icon(icon, color: iconColor, size: 22),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1972,23 +2451,24 @@ class _HomeScreenState extends State<HomeScreen>
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
                           color: colors.textPrimary,
                         ),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: colors.surfaceColor,
-                        borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: colors.border),
+                        borderRadius: BorderRadius.circular(7),
+                        border: Border.all(color: colors.border.withOpacity(0.8), width: 0.8),
                       ),
                       child: Text(
                         'SIM $sim',
                         style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
                           color: colors.textSecondary,
                         ),
                       ),
@@ -1996,26 +2476,26 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
                 if (number.isNotEmpty) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2.5),
                   Text(
                     number,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13.5, color: colors.textSecondary),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: colors.textSecondary),
                   ),
                 ],
-                const SizedBox(height: 6),
+                const SizedBox(height: 5),
                 Row(
                   children: [
-                    Icon(Icons.access_time_rounded, size: 13, color: colors.textSecondary),
-                    const SizedBox(width: 5),
+                    Icon(Icons.access_time_rounded, size: 12.5, color: colors.textMuted),
+                    const SizedBox(width: 4.5),
                     Flexible(
                       child: Text(
-                        'Call at ${_formatDialerTime(call.time as int)}',
+                        _formatCardCallDateTime(call.time as int),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w500,
                           color: colors.textSecondary,
                         ),
@@ -2023,22 +2503,22 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 2.5),
                 Text.rich(
                   TextSpan(
                     children: [
                       TextSpan(
                         text: direction,
                         style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
                           color: iconColor,
                         ),
                       ),
                       TextSpan(
                         text:
                             ' \u2022 ${seconds > 0 ? _talkTime(seconds) : (call.direction == 'outgoing' ? 'Not connected' : '0 secs')}',
-                        style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: colors.textSecondary),
                       ),
                     ],
                   ),
@@ -2053,6 +2533,15 @@ class _HomeScreenState extends State<HomeScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              Text(
+                _formatTime(call.time as int),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: colors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
               badge(
                 synced ? 'SYNCED' : 'PENDING',
                 synced ? Icons.check_circle_rounded : Icons.schedule_rounded,
@@ -2060,17 +2549,22 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               if (hasRec) ...[
                 const SizedBox(height: 6),
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: colors.primary.withOpacity(0.3), width: 0.8),
+                  ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.mic_rounded, size: 13, color: colors.primary),
+                      Icon(Icons.mic_rounded, size: 11, color: colors.primary),
                       const SizedBox(width: 3),
                       Text(
                         'REC',
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.5,
                           color: colors.primary,
@@ -2299,83 +2793,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-        // WhatsApp Sync Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.syncWhatsAppOnly(),
-                icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.whatsappGreen,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'whatsapp'),
-                icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const Spacer(),
-              if (service.pendingWhatsAppCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.warning.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${service.pendingWhatsAppCount} Pending',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.success.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                      const SizedBox(width: 4),
-                      Text(
-                        'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-        ),
-
         // Filter chips: All, Messages, Calls
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -2386,14 +2803,18 @@ class _HomeScreenState extends State<HomeScreen>
                 label: Text('All (${service.whatsappEvents.length})'),
                 selected: _waFilter == 'all',
                 onSelected: (_) => setState(() => _waFilter = 'all'),
-                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                selectedColor: colors.whatsappGreen.withOpacity(0.18),
                 checkmarkColor: colors.whatsappGreen,
                 backgroundColor: colors.surfaceColor,
-                side: BorderSide(color: _waFilter == 'all' ? colors.whatsappGreen : colors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _waFilter == 'all' ? colors.whatsappGreen : colors.border.withOpacity(0.7),
+                  width: _waFilter == 'all' ? 1.2 : 0.8,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 labelStyle: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: _waFilter == 'all' ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: _waFilter == 'all' ? FontWeight.w700 : FontWeight.w500,
                   color: _waFilter == 'all' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
@@ -2402,14 +2823,18 @@ class _HomeScreenState extends State<HomeScreen>
                 label: Text('Messages ($messageCount)'),
                 selected: _waFilter == 'messages',
                 onSelected: (_) => setState(() => _waFilter = 'messages'),
-                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                selectedColor: colors.whatsappGreen.withOpacity(0.18),
                 checkmarkColor: colors.whatsappGreen,
                 backgroundColor: colors.surfaceColor,
-                side: BorderSide(color: _waFilter == 'messages' ? colors.whatsappGreen : colors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _waFilter == 'messages' ? colors.whatsappGreen : colors.border.withOpacity(0.7),
+                  width: _waFilter == 'messages' ? 1.2 : 0.8,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 labelStyle: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: _waFilter == 'messages' ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: _waFilter == 'messages' ? FontWeight.w700 : FontWeight.w500,
                   color: _waFilter == 'messages' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
@@ -2418,14 +2843,18 @@ class _HomeScreenState extends State<HomeScreen>
                 label: Text('Calls ($callCount)'),
                 selected: _waFilter == 'calls',
                 onSelected: (_) => setState(() => _waFilter = 'calls'),
-                selectedColor: colors.whatsappGreen.withOpacity(0.2),
+                selectedColor: colors.whatsappGreen.withOpacity(0.18),
                 checkmarkColor: colors.whatsappGreen,
                 backgroundColor: colors.surfaceColor,
-                side: BorderSide(color: _waFilter == 'calls' ? colors.whatsappGreen : colors.border),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                side: BorderSide(
+                  color: _waFilter == 'calls' ? colors.whatsappGreen : colors.border.withOpacity(0.7),
+                  width: _waFilter == 'calls' ? 1.2 : 0.8,
+                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                 labelStyle: TextStyle(
                   fontSize: 11.5,
-                  fontWeight: _waFilter == 'calls' ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: _waFilter == 'calls' ? FontWeight.w700 : FontWeight.w500,
                   color: _waFilter == 'calls' ? colors.whatsappGreen : colors.textSecondary,
                 ),
               ),
@@ -2478,6 +2907,7 @@ class _HomeScreenState extends State<HomeScreen>
                       return Card(
                         margin: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
+                          onTap: ev.number.isNotEmpty ? () => service.openWhatsAppChat(ev.number) : null,
                           leading: CircleAvatar(
                             backgroundColor: (isBusiness
                                     ? colors.whatsappBusiness
@@ -2638,93 +3068,115 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final sortedSms = service.smsList
+    final isFiltered = _searchQuery.trim().isNotEmpty;
+    var filteredSms = service.smsList
         .where((e) =>
             !TelemetrySyncService.isMessageCountSummary(e.text) &&
             !TelemetrySyncService.isMessageCountSummary(e.name))
-        .toList()
-      ..sort((a, b) => b.time.compareTo(a.time));
+        .toList();
+
+    if (isFiltered) {
+      final q = _searchQuery.trim().toLowerCase();
+      final qDigits = q.replaceAll(RegExp(r'[^0-9]'), '');
+      filteredSms = filteredSms.where((s) {
+        final nameMatch = s.name.toLowerCase().contains(q);
+        final textMatch = (s.text ?? '').toLowerCase().contains(q);
+        final numClean = s.number.replaceAll(RegExp(r'[^0-9]'), '');
+        final numberMatch = qDigits.isNotEmpty && numClean.contains(qDigits);
+        return nameMatch || textMatch || numberMatch;
+      }).toList();
+    }
+
+    final sortedSms = filteredSms..sort((a, b) => b.time.compareTo(a.time));
 
     return Column(
       children: [
-        // SMS Sync Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: Row(
-            children: [
-              ElevatedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.syncSmsOnly(),
-                icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                label: const Text('Sync SMS', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: colors.secondary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: service.isSyncing ? null : () => service.forceResyncAll(kind: 'sms'),
-                icon: const Icon(Icons.refresh_rounded, size: 15),
-                label: const Text('Resync All', style: TextStyle(fontSize: 12)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: colors.textSecondary,
-                  side: BorderSide(color: colors.border),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-              const Spacer(),
-              if (service.pendingSmsCount > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.warning.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.warning.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: colors.warning),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${service.pendingSmsCount} Pending',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: colors.success.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: colors.success.withOpacity(0.35)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                      const SizedBox(width: 4),
-                      Text(
-                        'All Synced',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
-                      ),
-                    ],
+        // Active filter indicator when redirected from Call Logs
+        if (isFiltered)
+          Container(
+            margin: const EdgeInsets.fromLTRB(14, 4, 14, 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: colors.secondary.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: colors.secondary.withOpacity(0.35)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.filter_list_rounded, size: 16, color: colors.secondary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'SMS for: $_searchQuery (${sortedSms.length} messages)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-            ],
+                InkWell(
+                  onTap: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: colors.cardBackground,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: colors.border),
+                    ),
+                    child: Text(
+                      'Clear',
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.textSecondary),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
 
-        Expanded(
+        if (sortedSms.isEmpty && isFiltered)
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.sms_outlined, size: 48, color: colors.textMuted),
+                    const SizedBox(height: 12),
+                    Text(
+                      'No SMS found for $_searchQuery',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: colors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'No carrier SMS logs match this number on the device.',
+                      style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () => service.sendSms(number: _searchQuery),
+                      icon: const Icon(Icons.send_rounded, size: 16),
+                      label: Text('Send SMS to $_searchQuery'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: colors.secondary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        else
+          Expanded(
           child: RefreshIndicator(
             color: colors.secondary,
             backgroundColor: colors.cardBackground,
@@ -2742,6 +3194,7 @@ class _HomeScreenState extends State<HomeScreen>
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: ListTile(
+                    onTap: sms.number.isNotEmpty ? () => service.sendSms(number: sms.number, name: sms.name) : null,
                     leading: CircleAvatar(
                       backgroundColor: colors.secondary.withOpacity(0.15),
                       child: Icon(Icons.sms_rounded, color: colors.secondary, size: 20),
@@ -2944,87 +3397,6 @@ class _HomeScreenState extends State<HomeScreen>
               ],
             ),
           ),
-
-        // Recordings Upload Actions Bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            child: Row(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: service.isSyncing ? null : () => service.syncRecordingsOnly(),
-                  icon: const Icon(Icons.cloud_upload_rounded, size: 15),
-                  label: const Text('Upload Recordings', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: colors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: service.isSyncing ? null : () => service.scanLocalRecordings(),
-                  icon: const Icon(Icons.refresh_rounded, size: 15),
-                  label: const Text('Rescan Files', style: TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: colors.textSecondary,
-                    side: BorderSide(color: colors.border),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                if (service.pendingRecordingsCount > 0)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: colors.warning.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: colors.warning.withOpacity(0.35)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.cloud_upload_outlined, size: 12, color: colors.warning),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${service.pendingRecordingsCount} Pending Upload',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.warning),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: colors.success.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: colors.success.withOpacity(0.35)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.check_circle_rounded, size: 12, color: colors.success),
-                        const SizedBox(width: 4),
-                        Text(
-                          'All Uploaded',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: colors.success),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
 
         Expanded(
           child: RefreshIndicator(
@@ -3349,6 +3721,8 @@ class _HomeScreenState extends State<HomeScreen>
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.primary,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.primary.withOpacity(0.18),
+            disabledForegroundColor: colors.primary.withOpacity(0.85),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -3387,6 +3761,8 @@ class _HomeScreenState extends State<HomeScreen>
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.whatsappGreen,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.whatsappGreen.withOpacity(0.18),
+            disabledForegroundColor: colors.whatsappGreen.withOpacity(0.85),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -3425,6 +3801,8 @@ class _HomeScreenState extends State<HomeScreen>
           style: ElevatedButton.styleFrom(
             backgroundColor: colors.secondary,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: colors.secondary.withOpacity(0.18),
+            disabledForegroundColor: colors.secondary.withOpacity(0.85),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,

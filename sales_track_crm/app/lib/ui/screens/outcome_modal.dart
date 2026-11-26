@@ -120,6 +120,13 @@ class _OutcomeModalState extends State<OutcomeModal> {
       return;
     }
 
+    if (!widget.syncService.isLeadEditAllowed && _leadNameController.text.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Editing leads is turned off for this device')),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     widget.syncService.ensureCallSyncedToServer(widget.event);
@@ -512,26 +519,50 @@ class _OutcomeModalState extends State<OutcomeModal> {
                 },
               ),
 
-              // Create Lead Input
-              Text(
-                'LEAD OR CONTACT NAME (OPTIONAL)',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.6,
-                  color: colors.textMuted,
+              // Create Lead Input (Gated by lead_edit permission)
+              if (widget.syncService.isLeadEditAllowed) ...[
+                Text(
+                  'LEAD OR CONTACT NAME (OPTIONAL)',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: colors.textMuted,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _leadNameController,
-                style: TextStyle(color: colors.textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Enter lead person or company name...',
-                  prefixIcon: Icon(Icons.person_add_rounded, color: colors.textMuted),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _leadNameController,
+                  style: TextStyle(color: colors.textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    hintText: 'Enter lead person or company name...',
+                    prefixIcon: Icon(Icons.person_add_rounded, color: colors.textMuted),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
+              ] else if (_leadNameController.text.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceColor,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: colors.border.withOpacity(0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.person_outline_rounded, size: 16, color: colors.textMuted),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Lead: ${_leadNameController.text} (Read-only)',
+                          style: TextStyle(fontSize: 12, color: colors.textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
 
               // Submit Button
               SizedBox(

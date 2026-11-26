@@ -35,19 +35,13 @@ class _PairingScreenState extends State<PairingScreen> {
   @override
   void initState() {
     super.initState();
-    final currentUrl = widget.syncService.api.serverUrl;
-    final initialUrl = currentUrl.isNotEmpty
-        ? SalesTrackApiService.normalizeServerUrl(currentUrl)
-        : SalesTrackApiService.defaultServerUrl;
-
-    _urlController = TextEditingController(text: initialUrl.isNotEmpty ? initialUrl : SalesTrackApiService.defaultServerUrl);
+    widget.syncService.fetchPlatformDeviceInfo();
+    _urlController = TextEditingController(text: 'https://');
     _urlController.selection = TextSelection.fromPosition(
-      TextPosition(offset: _urlController.text.length),
+      const TextPosition(offset: 8),
     );
 
-    if (_codeController.text.isEmpty) {
-      _codeController.text = '289018';
-    }
+    _codeController.text = '';
 
     // Automatically test connection to CRM server
     if (_urlController.text.isNotEmpty && _urlController.text != 'https://' && _urlController.text != 'http://') {
@@ -116,7 +110,9 @@ class _PairingScreenState extends State<PairingScreen> {
                 updateInfo: info,
                 isMandatory: isBelowMin,
                 onUpdate: () => widget.syncService.launchAppUpdateUrl(info.urlAndroid),
-                onDismiss: () => Navigator.of(dCtx).pop(),
+                onDismiss: () {
+                  // Dialog is already popped by AppUpdateDialog; nothing else to pop
+                },
               ),
             );
           }
@@ -157,10 +153,14 @@ class _PairingScreenState extends State<PairingScreen> {
       if (mounted) {
         setState(() => _isPairing = false);
         if (res.success) {
-          if (res.data?['update_required'] == true) {
-            final app = res.data?['config'] is Map && res.data?['config']['app'] is Map
-                ? AppUpdateInfo.fromJson(res.data!['config']['app'])
-                : const AppUpdateInfo();
+          final app = res.data?['config'] is Map && res.data?['config']['app'] is Map
+              ? AppUpdateInfo.fromJson(res.data!['config']['app'])
+              : const AppUpdateInfo();
+          final current = SalesTrackApiService.currentAppVersion;
+          final isBelowMin = app.minVersion.isNotEmpty &&
+              compareAppVersions(current, app.minVersion) < 0;
+
+          if (res.data?['update_required'] == true && isBelowMin) {
             showDialog(
               context: context,
               barrierDismissible: false,
@@ -227,35 +227,6 @@ class _PairingScreenState extends State<PairingScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            // Theme toggle top action
-            Positioned(
-              top: 12,
-              right: 16,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: colors.cardBackground,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: colors.border),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  icon: Icon(
-                    isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                    color: colors.textPrimary,
-                    size: 20,
-                  ),
-                  tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-                  onPressed: () => themeProvider.toggleTheme(context),
-                ),
-              ),
-            ),
-
             Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
@@ -297,7 +268,7 @@ class _PairingScreenState extends State<PairingScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 16),
 
                       Center(
                         child: Text(
@@ -310,20 +281,28 @@ class _PairingScreenState extends State<PairingScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
 
+                      // Local App Version Badge
                       Center(
-                        child: Text(
-                          'Pair your device with CRM to automatically track calls, audio recordings, SMS, and WhatsApp activity in real time.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            color: colors.textSecondary,
-                            height: 1.45,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: colors.border.withOpacity(0.8)),
+                          ),
+                          child: Text(
+                            'v${SalesTrackApiService.currentAppVersion}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: colors.textSecondary,
+                            ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
 
                       // Status Badge Banner
                       Container(
@@ -352,28 +331,13 @@ class _PairingScreenState extends State<PairingScreen> {
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Device Status: Unpaired',
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w700,
-                                      color: colors.warning,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    (widget.syncService.pairingLostMessage ?? '').isNotEmpty
-                                        ? widget.syncService.pairingLostMessage!
-                                        : 'Connect this phone to begin tracking sales telemetry.',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: colors.textSecondary,
-                                    ),
-                                  ),
-                                ],
+                              child: Text(
+                                'Device Status: Unpaired',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: colors.warning,
+                                ),
                               ),
                             ),
                           ],
@@ -547,7 +511,7 @@ class _PairingScreenState extends State<PairingScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'In your Perfex CRM, go to Sales Track > Devices > Add Device to generate this code.',
+                              'In your CRM, go to Sales Track > Devices > Add Device to generate this code.',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: colors.textMuted,
@@ -656,7 +620,7 @@ class _PairingScreenState extends State<PairingScreen> {
                             _buildInstructionStep(
                               colors: colors,
                               stepNumber: '1',
-                              text: 'Open Perfex CRM on your computer and navigate to Sales Track.',
+                              text: 'Open CRM on your computer and navigate to Sales Track.',
                             ),
                             const SizedBox(height: 6),
                             _buildInstructionStep(
@@ -675,6 +639,35 @@ class _PairingScreenState extends State<PairingScreen> {
                       ),
                     ],
                   ),
+                ),
+              ),
+            ),
+
+            // Theme toggle top action (rendered above scrollview so it directly receives touches)
+            Positioned(
+              top: 12,
+              right: 16,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: colors.cardBackground,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: colors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: IconButton(
+                  icon: Icon(
+                    isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                    color: colors.textPrimary,
+                    size: 20,
+                  ),
+                  tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                  onPressed: () => themeProvider.toggleTheme(context),
                 ),
               ),
             ),

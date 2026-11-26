@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/sales_track_theme.dart';
 import '../../services/telemetry_sync_service.dart';
+import '../widgets/app_icon_visibility_dialog.dart';
 
 class SetupWizardScreen extends StatefulWidget {
   final TelemetrySyncService syncService;
@@ -23,15 +24,9 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.syncService.isSetupWizardActive = true;
     widget.syncService.addListener(_onServiceChanged);
     widget.syncService.checkPermissions();
-
-    // Auto-prompt permission dialog immediately on screen entry
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!widget.syncService.hasEssentialPermissions) {
-        widget.syncService.requestAllPermissions();
-      }
-    });
   }
 
   void _onServiceChanged() {
@@ -42,6 +37,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
 
   @override
   void dispose() {
+    widget.syncService.isSetupWizardActive = false;
     WidgetsBinding.instance.removeObserver(this);
     widget.syncService.removeListener(_onServiceChanged);
     super.dispose();
@@ -59,7 +55,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
   Widget _buildPermissionItem({
     required BuildContext context,
     required String title,
-    required String description,
+    String? description,
     required IconData icon,
     required bool isGranted,
     VoidCallback? onRequest,
@@ -67,11 +63,11 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
     final colors = context.stColors;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
         color: colors.cardBackground,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isGranted ? colors.primary.withOpacity(0.35) : colors.border,
           width: isGranted ? 1.2 : 1.0,
@@ -79,7 +75,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.02),
-            blurRadius: 8,
+            blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
@@ -88,90 +84,69 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(11),
+            padding: const EdgeInsets.all(9),
             decoration: BoxDecoration(
               color: isGranted
                   ? colors.primary.withOpacity(0.12)
                   : colors.surfaceColor,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Icon(
               icon,
-              size: 22,
+              size: 20,
               color: isGranted ? colors.primary : colors.textMuted,
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: colors.textPrimary,
-                        ),
-                      ),
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
+                      color: colors.textPrimary,
                     ),
-                    if (isGranted) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: colors.success.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          'ACTIVE',
-                          style: TextStyle(
-                            fontSize: 9.5,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.5,
-                            color: colors.success,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  description,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: colors.textSecondary,
-                    height: 1.35,
                   ),
                 ),
+                if (isGranted) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                    decoration: BoxDecoration(
+                      color: colors.success.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'ACTIVE',
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                        color: colors.success,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           const SizedBox(width: 10),
           if (isGranted || onRequest == null)
-            Icon(Icons.check_circle_rounded, color: colors.primary, size: 24)
+            Icon(Icons.check_circle_rounded, color: colors.primary, size: 22)
           else
             ElevatedButton(
-              onPressed: () async {
+              onPressed: () {
                 onRequest();
-                for (final ms in [300, 700, 1500]) {
-                  await Future.delayed(Duration(milliseconds: ms));
-                  if (mounted) {
-                    await widget.syncService.checkPermissions();
-                    if (mounted) setState(() {});
-                  }
-                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: colors.primary,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 shape: RoundedRectangleBorder(
@@ -180,9 +155,198 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
               ),
               child: const Text(
                 'Grant',
-                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAppIconVisibilityCard(BuildContext context) {
+    final colors = context.stColors;
+    final isHidden = widget.syncService.isAppIconHidden;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 9),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: colors.cardBackground,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: (isHidden ? colors.warning : colors.success).withOpacity(0.35),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(context.isDarkMode ? 0.15 : 0.02),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: (isHidden ? colors.warning : colors.success).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(
+                  isHidden ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                  size: 20,
+                  color: isHidden ? colors.warning : colors.success,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'App Launcher Icon',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: colors.textPrimary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: (isHidden ? colors.warning : colors.success).withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            isHidden ? 'HIDDEN' : 'VISIBLE',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 0.5,
+                              color: isHidden ? colors.warning : colors.success,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isHidden
+                          ? 'Icon is hidden from phone launcher & app drawer'
+                          : 'Icon is visible on phone home screen & app drawer',
+                      style: TextStyle(fontSize: 11.5, color: colors.textSecondary),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: () async {
+                  final messenger = ScaffoldMessenger.of(context);
+                  final target = !isHidden;
+                  final ok = await widget.syncService.setAppIconHidden(target);
+                  await widget.syncService.checkAppIconHidden();
+                  await widget.syncService.openHideAppsSettings();
+                  if (mounted) {
+                    setState(() {});
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          ok
+                              ? (target
+                                  ? '✓ Hidden! In Settings, tap "Hide apps" to select CallVia360'
+                                  : '✓ Restored! In Settings, tap "Hide apps" to uncheck CallVia360')
+                              : 'Failed to update app icon setting',
+                        ),
+                        backgroundColor: ok ? colors.primary : colors.danger,
+                        duration: const Duration(seconds: 4),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isHidden ? colors.success : colors.warning,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: Text(
+                  isHidden ? 'Show Icon' : 'Hide Icon',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: colors.surfaceColor,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: colors.border.withOpacity(0.5)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '• Telemetry and call recording continue running 24/7 in background.\n'
+                  '• Reopen anytime via notification or dialing *#*#3600#*#*.\n'
+                  '• Note for Samsung One UI: To find CallVia360 in Samsung "Hide apps", icon must be set to "Show Icon" first so Samsung detects CallVia360 in its list.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.4,
+                    color: colors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => widget.syncService.openHideAppsSettings(),
+                        icon: const Icon(Icons.settings_suggest_rounded, size: 15),
+                        label: const Text(
+                          'Open Samsung Settings',
+                          style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colors.primary,
+                          side: BorderSide(color: colors.primary.withOpacity(0.35)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton(
+                      icon: Icon(Icons.open_in_new_rounded, color: colors.primary, size: 18),
+                      tooltip: 'Full Icon Dialog',
+                      onPressed: () => showAppIconVisibilityDialog(context, widget.syncService),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -213,6 +377,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
       allGranted = perms.isNotEmpty && perms.values.every((v) => v);
     }
     final progress = totalCount > 0 ? (grantedCount / totalCount).clamp(0.0, 1.0) : 0.0;
+    final bool isFullyConfigured = allGranted || (totalCount > 0 && grantedCount >= totalCount) || progress >= 0.99;
 
     return Scaffold(
       backgroundColor: colors.background,
@@ -273,7 +438,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    allGranted
+                                    isFullyConfigured
                                         ? 'All Permissions Configured!'
                                         : '$grantedCount of $totalCount Permissions Granted',
                                     style: TextStyle(
@@ -283,7 +448,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                                     ),
                                   ),
                                   Text(
-                                    allGranted
+                                    isFullyConfigured
                                         ? 'Phone telemetry tracking is fully operational.'
                                         : 'Grant the required permissions for seamless CRM synchronization.',
                                     style: TextStyle(fontSize: 12, color: colors.textSecondary),
@@ -457,6 +622,20 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                       isGranted: widget.syncService.hasOverlayPermission,
                       onRequest: () => widget.syncService.openOverlaySettings(),
                     ),
+                    const SizedBox(height: 18),
+                    Text(
+                      'APP VISIBILITY & HIDE ICON',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.8,
+                        color: colors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // App Launcher Icon Visibility & Hide
+                    _buildAppIconVisibilityCard(context),
                   ],
                 ],
               ),
@@ -478,29 +657,41 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
               ),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => widget.syncService.requestAllPermissions(),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  if (!isFullyConfigured) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => widget.syncService.requestAllPermissions(),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                      ),
-                      child: Text(
-                        'Request All',
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontWeight: FontWeight.w600,
+                        child: Text(
+                          'Request All',
+                          style: TextStyle(
+                            color: colors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
                     flex: 1,
                     child: ElevatedButton(
-                      onPressed: widget.onCompleted,
+                      onPressed: () {
+                        widget.syncService.isSetupWizardActive = false;
+                        if (widget.syncService.hasCallLogPermission) {
+                          widget.syncService.syncDeviceCallLogs();
+                        }
+                        if (widget.syncService.hasSmsPermission) {
+                          widget.syncService.syncDeviceSms();
+                        }
+                        widget.syncService.scanLocalRecordings();
+                        widget.onCompleted();
+                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: colors.primary,
                         foregroundColor: Colors.white,
@@ -510,7 +701,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                         ),
                       ),
                       child: Text(
-                        allGranted ? 'Continue to App' : 'Skip & Continue',
+                        isFullyConfigured ? 'Continue to App' : 'Skip & Continue',
                         style: const TextStyle(fontWeight: FontWeight.w700),
                       ),
                     ),

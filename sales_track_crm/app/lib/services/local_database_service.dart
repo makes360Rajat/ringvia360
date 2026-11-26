@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 import '../models/sales_track_models.dart';
@@ -8,13 +10,34 @@ class LocalDatabaseService {
   LocalDatabaseService._internal();
 
   Database? _db;
+  Completer<Database>? _dbInitCompleter;
+  DateTime? _lastCleanupTime;
 
   Future<Database?> get database async {
     try {
       if (_db != null && _db!.isOpen) return _db!;
-      _db = await _initDb();
-      return _db;
-    } catch (_) {
+      if (_dbInitCompleter != null) {
+        return await _dbInitCompleter!.future.timeout(
+          const Duration(seconds: 4),
+          onTimeout: () => throw TimeoutException('Database init timed out'),
+        );
+      }
+      _dbInitCompleter = Completer<Database>();
+      try {
+        _db = await _initDb().timeout(
+          const Duration(seconds: 4),
+          onTimeout: () => throw TimeoutException('Database init timed out'),
+        );
+        _dbInitCompleter!.complete(_db);
+        return _db;
+      } catch (e) {
+        _dbInitCompleter!.completeError(e);
+        rethrow;
+      } finally {
+        _dbInitCompleter = null;
+      }
+    } catch (e) {
+      debugPrint('LocalDatabaseService database getter error: $e');
       return null;
     }
   }
@@ -26,6 +49,12 @@ class LocalDatabaseService {
     return await openDatabase(
       path,
       version: 1,
+      onConfigure: (db) async {
+        try {
+          await db.execute('PRAGMA journal_mode=WAL;');
+          await db.execute('PRAGMA synchronous=NORMAL;');
+        } catch (_) {}
+      },
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE events (
@@ -69,23 +98,27 @@ class LocalDatabaseService {
         ''');
       },
       onOpen: (db) async {
-        // Automatically purge any group count summary notifications
         try {
           await db.execute('CREATE INDEX IF NOT EXISTS idx_events_number ON events (number)');
           await db.execute('CREATE INDEX IF NOT EXISTS idx_events_kind_time ON events (kind, time DESC)');
-          await db.rawDelete('''
-            DELETE FROM events 
-            WHERE kind IN ('whatsapp_message', 'notification', 'sms')
-              AND (
-                text LIKE '%new message%'
-                OR text LIKE '%messages from%'
-                OR text LIKE '%unread message%'
-                OR text GLOB '[0-9]* message*'
-                OR text GLOB '[0-9]* new message*'
-                OR text GLOB '(* message*)'
-              )
-          ''');
         } catch (_) {}
+        // Run group summary cleanup asynchronously in background so openDatabase returns immediately
+        Future.microtask(() async {
+          try {
+            await db.rawDelete('''
+              DELETE FROM events 
+              WHERE kind IN ('whatsapp_message', 'notification', 'sms')
+                AND (
+                  text LIKE '%new message%'
+                  OR text LIKE '%messages from%'
+                  OR text LIKE '%unread message%'
+                  OR text GLOB '[0-9]* message*'
+                  OR text GLOB '[0-9]* new message*'
+                  OR text GLOB '(* message*)'
+                )
+            ''');
+          } catch (_) {}
+        });
       },
     );
   }
@@ -228,19 +261,32 @@ class LocalDatabaseService {
     final db = await database;
     if (db == null) return [];
     final statusClause = includeFailed 
-        ? "recording_sync_status IN ('pending', 'failed')"
-        : "recording_sync_status = 'pending'";
+        ? "(recording_sync_status IN ('pending', 'failed', 'none') OR recording_sync_status IS NULL)"
+        : "(recording_sync_status = 'pending' OR recording_sync_status = 'none' OR recording_sync_status IS NULL)";
     final rows = await db.rawQuery('''
       SELECT * FROM events 
       WHERE kind = 'call' 
         AND recording_path IS NOT NULL 
         AND recording_path != '' 
+        AND recording_sync_status != 'synced'
+        AND recording_sync_status != 'failed_permanent'
         AND $statusClause
       ORDER BY time DESC 
       LIMIT ?
     ''', [limit]);
 
     return rows.map(_rowToEvent).toList();
+  }
+
+  /// Update recording sync status directly
+  Future<void> markRecordingStatus(String uid, String status) async {
+    final db = await database;
+    if (db == null) return;
+    await db.rawUpdate('''
+      UPDATE events 
+      SET recording_sync_status = ?, updated_at = ?
+      WHERE uid = ?
+    ''', [status, DateTime.now().millisecondsSinceEpoch, uid]);
   }
 
   /// Mark events as synced in SQLite
@@ -378,7 +424,12 @@ class LocalDatabaseService {
   }
 
   /// Clean up duplicate records stored in SQLite so local counts strictly match in-memory lists
-  Future<int> cleanupDuplicates() async {
+  Future<int> cleanupDuplicates({bool force = false}) async {
+    final now = DateTime.now();
+    if (!force && _lastCleanupTime != null && now.difference(_lastCleanupTime!) < const Duration(minutes: 3)) {
+      return 0;
+    }
+    _lastCleanupTime = now;
     final db = await database;
     if (db == null) return 0;
     int removed = 0;
@@ -440,7 +491,7 @@ class LocalDatabaseService {
         }
       }
 
-      // 2. Remove duplicate SMS & messages where another record exists with same kind, direction, number, and time within 60s
+      // 2. Remove duplicate SMS & messages where another record exists with same kind, direction, number, and time within window (60s, or 300s if texts match)
       final duplicateSms = await db.rawQuery('''
         SELECT e2.uid as remove_uid, e1.uid as keep_uid, e2.sync_status as sync2, e2.text as text2, e1.text as text1
         FROM events e1
@@ -453,11 +504,20 @@ class LocalDatabaseService {
               AND SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e1.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10) =
                   SUBSTR(REPLACE(REPLACE(REPLACE(REPLACE(e2.number, '+', ''), '-', ''), ' ', ''), '(', ''), -10)
             )
+            OR (
+              e1.text IS NOT NULL AND e1.text != '' AND e1.text = e2.text
+              AND (
+                e1.number LIKE '%' || e2.number || '%'
+                OR e2.number LIKE '%' || e1.number || '%'
+              )
+            )
           )
           AND (e1.text IS NULL OR e2.text IS NULL OR e1.text = '' OR e2.text = '' OR e1.text = e2.text)
           AND e1.uid != e2.uid
           AND e1.rowid < e2.rowid
-          AND ABS(e1.time - e2.time) <= 60000
+          AND (
+            ABS(e1.time - e2.time) <= 15000
+          )
         WHERE e1.kind IN ('sms', 'whatsapp_message', 'notification') AND e1.number != ''
       ''');
 
@@ -465,6 +525,17 @@ class LocalDatabaseService {
         var removeUid = d['remove_uid'] as String?;
         var keepUid = d['keep_uid'] as String?;
         if (removeUid != null && keepUid != null) {
+          // If both are distinct system records (e.g. sms-14 vs sms-15), they are separate messages
+          final m1 = RegExp(r'^(?:sms|mms)-(\d+)-').firstMatch(keepUid);
+          final m2 = RegExp(r'^(?:sms|mms)-(\d+)-').firstMatch(removeUid);
+          if (m1 != null && m2 != null && m1.group(1) != m2.group(1)) {
+            continue;
+          }
+          if (keepUid.startsWith('rcs-notif-') && (removeUid.startsWith('sms-') || removeUid.startsWith('mms-'))) {
+            final tmp = keepUid;
+            keepUid = removeUid;
+            removeUid = tmp;
+          }
           final sync2 = d['sync2'] as String?;
           final text2 = d['text2'] as String?;
           final text1 = d['text1'] as String?;
@@ -487,13 +558,17 @@ class LocalDatabaseService {
       // 3. Purge any phantom/summary messages (e.g. "5 new messages", "4 new messages", "Checking for new messages")
       final purged = await db.rawDelete('''
         DELETE FROM events 
-        WHERE kind IN ('whatsapp_message', 'notification')
+        WHERE kind IN ('sms', 'whatsapp_message', 'notification')
           AND (
             text LIKE '%new message%' 
             OR text LIKE '%unread message%'
             OR text LIKE '%messages from%chat%'
             OR text LIKE 'Checking for new messages%'
             OR text LIKE 'Looking for new messages%'
+            OR text LIKE '%doing work in the background%'
+            OR text LIKE '%Messages is doing work%'
+            OR number = 'Hidden Number'
+            OR number = 'Messages'
             OR (text LIKE '%(%' AND text LIKE '%messages)%')
           )
       ''');

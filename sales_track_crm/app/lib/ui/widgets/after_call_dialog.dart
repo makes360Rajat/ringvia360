@@ -619,7 +619,19 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
                                   )
                                 else
                                   InkWell(
-                                    onTap: () => setState(() => _isEditingName = true),
+                                    onTap: () {
+                                      if (!widget.syncService.isLeadEditAllowed) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('Editing leads is turned off for this device'),
+                                            behavior: SnackBarBehavior.floating,
+                                            duration: Duration(seconds: 2),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      setState(() => _isEditingName = true);
+                                    },
                                     borderRadius: BorderRadius.circular(6),
                                     child: Row(
                                       children: [
@@ -635,12 +647,14 @@ class _AfterCallDialogState extends State<AfterCallDialog> with SingleTickerProv
                                             overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
-                                        const SizedBox(width: 6),
-                                        Icon(
-                                          Icons.edit_outlined,
-                                          size: 14,
-                                          color: const Color(0xFF0066FF).withOpacity(0.8),
-                                        ),
+                                        if (widget.syncService.isLeadEditAllowed) ...[
+                                          const SizedBox(width: 6),
+                                          Icon(
+                                            Icons.edit_outlined,
+                                            size: 14,
+                                            color: const Color(0xFF0066FF).withOpacity(0.8),
+                                          ),
+                                        ],
                                       ],
                                     ),
                                   ),
