@@ -650,7 +650,7 @@ class _HomeScreenState extends State<HomeScreen>
                       borderRadius: BorderRadius.circular(16),
                       side: BorderSide(color: colors.border),
                     ),
-            onSelected: (val) {
+            onSelected: (val) async {
               if (val == 'theme_mode') {
                 _showThemeSelectionDialog(context);
               } else if (val == 'check_updates') {
@@ -689,6 +689,40 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                 );
+              } else if (val == 'grant_recording_permission') {
+                final messenger = ScaffoldMessenger.of(context);
+                messenger.showSnackBar(
+                  const SnackBar(
+                    content: Text('Requesting call recording permission...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                await service.requestPermission('recordings');
+                await Future.delayed(const Duration(seconds: 1));
+                await service.checkPermissions();
+                if (mounted) {
+                  final granted = service.hasRecordAudioPermission;
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Row(
+                        children: [
+                          Icon(
+                            granted ? Icons.check_circle_rounded : Icons.warning_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(granted
+                              ? 'Call recording permission granted!'
+                              : 'Permission denied. Please allow in Settings.'),
+                        ],
+                      ),
+                      backgroundColor: granted ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                }
               } else if (val == 'clear_and_rescan') {
                 service.clearLocalDataAndRescan();
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -799,10 +833,34 @@ class _HomeScreenState extends State<HomeScreen>
                   children: [
                     Icon(Icons.security_rounded, color: colors.secondaryLight, size: 20),
                     const SizedBox(width: 10),
-                    Text('Check Permissions (7 Checks)', style: TextStyle(color: colors.textPrimary)),
+                    Text('Check Permissions (8 Checks)', style: TextStyle(color: colors.textPrimary)),
                   ],
                 ),
               ),
+              if (!service.hasRecordAudioPermission)
+                PopupMenuItem(
+                  value: 'grant_recording_permission',
+                  child: Row(
+                    children: [
+                      Icon(Icons.mic_rounded, color: colors.warning, size: 20),
+                      const SizedBox(width: 10),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Grant Call Recording Permission',
+                            style: TextStyle(color: colors.warning, fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            'Required to upload audio recordings',
+                            style: TextStyle(color: colors.textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               PopupMenuItem(
                 value: 'app_icon_visibility',
                 child: Row(
