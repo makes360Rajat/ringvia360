@@ -593,17 +593,55 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                       onRequest: () => widget.syncService.openNotificationListenerSettings(),
                     ),
 
-                    // Android 6. Recordings Audio & Storage
+                    // Android 6. Storage access for locating existing recordings
                     _buildPermissionItem(
                       context: context,
-                      title: 'Audio & Storage Access',
-                      description: 'Storage permission to detect, link, and upload call audio recordings (.m4a, .mp3, .wav).',
+                      title: 'Call Recording Storage Access',
+                      description: 'Allows the app to find and upload call recording files stored on this phone.',
                       icon: Icons.audio_file_rounded,
                       isGranted: widget.syncService.hasRecordingsFolderPermission,
                       onRequest: () => widget.syncService.requestPermission('audio'),
                     ),
 
-                    // Android 7. Battery Unrestricted
+                    // Android 7. Microphone permission used for call audio recording
+                    _buildPermissionItem(
+                      context: context,
+                      title: 'Call Recording (Microphone)',
+                      description: 'Requests microphone access for call audio recording on supported devices.',
+                      icon: Icons.mic_rounded,
+                      isGranted: widget.syncService.hasRecordAudioPermission,
+                      onRequest: () => widget.syncService.requestPermission('microphone'),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () async {
+                            try {
+                              final count = await widget.syncService.importCallRecordingsFromPhonePicker();
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(count > 0
+                                      ? 'Imported $count recording(s). Matching and sync started.'
+                                      : 'No recordings imported. Select audio files from the picker.'),
+                                ),
+                              );
+                            } catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Could not import recordings: $e')),
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.file_open_rounded),
+                          label: const Text('Import Recordings from Phone App'),
+                        ),
+                      ),
+                    ),
+
+                    // Android 8. Battery Unrestricted
                     _buildPermissionItem(
                       context: context,
                       title: 'Battery Background Exemption',
@@ -613,7 +651,7 @@ class _SetupWizardScreenState extends State<SetupWizardScreen> with WidgetsBindi
                       onRequest: () => widget.syncService.openBatterySettings(),
                     ),
 
-                    // Android 8. Truecaller Overlay (Display Over Other Apps)
+                    // Android 9. Truecaller Overlay (Display Over Other Apps)
                     _buildPermissionItem(
                       context: context,
                       title: 'Display Over Other Apps',

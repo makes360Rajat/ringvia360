@@ -55,18 +55,17 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
         </activity>
 
         <!-- Launcher Alias: toggled enabled/disabled to show/hide the app icon without disabling MainActivity -->
         <activity-alias
             android:name=".LauncherAlias"
             android:targetActivity=".MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity-alias>
+            android:exported="true" />
 
         <!-- Admin Receiver for remote/local app unhide & restoration -->
         <receiver

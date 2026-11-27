@@ -83,6 +83,7 @@ class TelemetrySyncService extends ChangeNotifier {
     'storage': false,
     'notifications': false,
     'recordings': false,
+    'record_audio': false,
     'battery_unrestricted': false,
   };
   int _batteryPercent = 85;
@@ -99,8 +100,8 @@ class TelemetrySyncService extends ChangeNotifier {
   bool get hasNotificationPermission => Platform.isIOS ? (_permissions['notifications'] == true) : hasWhatsAppAccessPermission;
   bool get hasRecordingsFolderPermission => Platform.isIOS ? true : (_permissions['recordings_folder'] == true || _permissions['manage_storage'] == true);
   bool get hasStoragePermission => Platform.isIOS ? true : (_permissions['storage'] == true || hasRecordingsFolderPermission || _permissions['recordings'] == true);
-  /// Whether RECORD_AUDIO runtime permission is granted (required for audio recording on Android)
-  bool get hasRecordAudioPermission => Platform.isIOS ? true : (_permissions['recordings'] == true);
+  /// Whether Android RECORD_AUDIO permission is granted; this alone cannot capture call audio.
+  bool get hasRecordAudioPermission => Platform.isIOS ? true : (_permissions['record_audio'] == true);
   bool get hasBatteryOptimizationExemption => Platform.isIOS ? true : (_permissions['battery_unrestricted'] == true);
   bool get hasOverlayPermission => Platform.isIOS ? true : (_permissions['overlay'] == true);
   bool get hasEssentialPermissions {
@@ -2071,6 +2072,25 @@ class TelemetrySyncService extends ChangeNotifier {
   }
 
   bool _isScanningRecordings = false;
+
+  Future<int> importCallRecordingsFromPhonePicker() async {
+    final wasSetupWizardActive = isSetupWizardActive;
+    try {
+      final imported = await _platform.invokeMethod<int>('pickCallRecordingFiles') ?? 0;
+      if (imported > 0) {
+        isSetupWizardActive = false;
+        await syncDeviceCallLogs();
+        await scanLocalRecordings();
+        if (_isPaired) await syncNow(targetKind: 'call', uploadRecordings: true);
+      }
+      return imported;
+    } catch (e) {
+      debugPrint('Error importing call recordings: $e');
+      rethrow;
+    } finally {
+      isSetupWizardActive = wasSetupWizardActive;
+    }
+  }
 
   Future<void> scanLocalRecordings() async {
     if (_isScanningRecordings || isSetupWizardActive || !isTrackingRecordingsEnabled) return;

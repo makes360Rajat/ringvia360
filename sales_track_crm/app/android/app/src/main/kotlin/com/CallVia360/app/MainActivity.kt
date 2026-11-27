@@ -19,6 +19,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.provider.CallLog
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.provider.Telephony
 import androidx.core.app.ActivityCompat
@@ -46,14 +48,17 @@ data class LocalRecordingItem(
     val name: String,
     val size: Long,
     val lastModified: Long,
-    val durationMs: Int
+    val durationMs: Int,
+    val manuallyImported: Boolean = false
 )
 
 class MainActivity : FlutterActivity() {
+    private var pendingRecordingImportResult: MethodChannel.Result? = null
 
     companion object {
         const val METHOD_CHANNEL = "com.CallVia360.app/platform"
         private const val PERMISSIONS_REQUEST_CODE = 1001
+        private const val IMPORT_RECORDINGS_REQUEST_CODE = 1002
 
         private var mediaPlayer: MediaPlayer? = null
         private var activeAudioPath: String? = null
@@ -651,6 +656,25 @@ class MainActivity : FlutterActivity() {
                     }.start()
                 }
 
+                "pickCallRecordingFiles" -> {
+                    if (pendingRecordingImportResult != null) {
+                        result.error("IMPORT_IN_PROGRESS", "A recording import is already open", null)
+                    } else {
+                        pendingRecordingImportResult = result
+                        try {
+                            val picker = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                addCategory(Intent.CATEGORY_OPENABLE)
+                                type = "audio/*"
+                                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            }
+                            startActivityForResult(picker, IMPORT_RECORDINGS_REQUEST_CODE)
+                        } catch (e: Exception) {
+                            pendingRecordingImportResult = null
+                            result.error("IMPORT_PICKER_ERROR", e.message, null)
+                        }
+                    }
+                }
+
                 "fetchActiveWhatsAppNotifications" -> {
                     Thread {
                         try {
@@ -850,6 +874,62 @@ class MainActivity : FlutterActivity() {
                 "type" to "permissions_updated",
                 "permissions" to status
             ))
+        }
+    }
+
+    @Deprecated("Deprecated in Android, retained for FlutterActivity compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != IMPORT_RECORDINGS_REQUEST_CODE) return
+
+        val result = pendingRecordingImportResult
+        pendingRecordingImportResult = null
+        if (result == null) return
+        if (resultCode != RESULT_OK || data == null) {
+            result.success(0)
+            return
+        }
+
+        try {
+            val selectedUris = mutableListOf<Uri>()
+            data.clipData?.let { clip ->
+                for (index in 0 until clip.itemCount) selectedUris.add(clip.getItemAt(index).uri)
+            }
+            if (selectedUris.isEmpty()) data.data?.let(selectedUris::add)
+
+            val importDir = File(cacheDir, "imported_call_recordings").apply { mkdirs() }
+            var importedCount = 0
+            selectedUris.distinct().forEach { uri ->
+                val displayName = contentResolver.query(
+                    uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (nameColumn >= 0) cursor.getString(nameColumn) else null
+                    } else null
+                } ?: "call_recording.audio"
+                val modifiedTime = try {
+                    contentResolver.query(
+                        uri, arrayOf(DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L
+                    } ?: 0L
+                } catch (_: Exception) { 0L }
+
+                val safeName = displayName.replace(Regex("[^A-Za-z0-9._-]"), "_").take(100)
+                val destination = File(importDir, "${System.currentTimeMillis()}_$safeName")
+                contentResolver.openInputStream(uri)?.use { input ->
+                    destination.outputStream().use { output -> input.copyTo(output) }
+                    if (destination.length() > 0) {
+                        if (modifiedTime > 0) destination.setLastModified(modifiedTime)
+                        importedCount++
+                    } else destination.delete()
+                }
+            }
+            result.success(importedCount)
+        } catch (e: Exception) {
+            Log.e("MksSalesTrack", "Could not import selected call recordings", e)
+            result.error("IMPORT_FAILED", e.message, null)
         }
     }
 
@@ -1164,6 +1244,7 @@ class MainActivity : FlutterActivity() {
             "manage_storage" to mediaAudio,
             "storage" to mediaAudio,
             "recordings" to (mediaAudio || recordAudio),
+            "record_audio" to recordAudio,
             "battery_unrestricted" to isIgnoringBattery,
             "overlay" to overlay
         )
@@ -1197,7 +1278,15 @@ class MainActivity : FlutterActivity() {
             "phone_state" -> arrayOf(Manifest.permission.READ_PHONE_STATE)
             "contacts" -> arrayOf(Manifest.permission.READ_CONTACTS)
             "sms" -> arrayOf(Manifest.permission.READ_SMS, Manifest.permission.RECEIVE_SMS)
-            "audio", "storage", "recordings" -> {
+            "microphone" -> arrayOf(Manifest.permission.RECORD_AUDIO)
+            "audio", "storage" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
+                } else {
+                    arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                }
+            }
+            "recordings" -> {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.RECORD_AUDIO)
                 } else {
@@ -1286,7 +1375,7 @@ class MainActivity : FlutterActivity() {
                 MediaStore.Audio.Media.DATE_MODIFIED,
                 MediaStore.Audio.Media.DURATION
             )
-            val selection = "${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%Call%' OR ${MediaStore.Audio.Media.DATA} LIKE '%Voice%'"
+            val selection = "(${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%Call%' OR ${MediaStore.Audio.Media.DATA} LIKE '%Voice%') AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Standard Recordings%' AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Voice Recorder%' AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Interview Recordings%' AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Meeting Recordings%'"
             contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
@@ -1323,13 +1412,23 @@ class MainActivity : FlutterActivity() {
             Log.e("MksSalesTrack", "Error querying MediaStore recordings: ${e.message}")
         }
 
-        // 2. Direct directory scan fallback
-        val candidateDirs = listOf(
+        // 2. Direct directory scan fallback (Samsung, OnePlus/ODialer, Xiaomi, Oppo, Vivo)
+        val candidateDirs = mutableListOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call Recordings"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings"),
+            File(Environment.getExternalStorageDirectory(), "Recordings/Call Recordings"),
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
+            File(Environment.getExternalStorageDirectory(), "Sounds/CallRecord"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
             File(Environment.getExternalStorageDirectory(), "CallRecordings"),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call")
+            File(cacheDir, "imported_call_recordings")
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call Recordings"))
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call"))
+            candidateDirs.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS))
+        }
         for (dir in candidateDirs) {
             try {
                 if (dir.exists() && dir.isDirectory) {
@@ -1341,7 +1440,8 @@ class MainActivity : FlutterActivity() {
                                 name = file.name,
                                 size = file.length(),
                                 lastModified = file.lastModified(),
-                                durationMs = 0
+                                durationMs = 0,
+                                manuallyImported = dir.name == "imported_call_recordings"
                             ))
                         }
                     }
@@ -1427,7 +1527,7 @@ class MainActivity : FlutterActivity() {
                         val diffEnd = Math.abs(rec.lastModified - callEndMs)
                         val minDiff = Math.min(diffStart, diffEnd)
 
-                        if (nameMatches && minDiff < 90000) {
+                        if (nameMatches && (minDiff < 90000 || rec.manuallyImported)) {
                             minDiff
                         } else if (!nameMatches && minDiff < 25000) {
                             minDiff
@@ -1443,7 +1543,7 @@ class MainActivity : FlutterActivity() {
                         val diffStart = Math.abs(rec.lastModified - dateMs)
                         val diffEnd = Math.abs(rec.lastModified - callEndMs)
                         val minDiff = Math.min(diffStart, diffEnd)
-                        (nameMatches && minDiff < 90000) || (!nameMatches && minDiff < 25000)
+                        (nameMatches && (minDiff < 90000 || rec.manuallyImported)) || (!nameMatches && minDiff < 25000)
                     }
 
                     if (recItem != null) {
@@ -1591,14 +1691,19 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {}
 
         val candidateDirs = mutableListOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call Recordings"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings"),
+            File(Environment.getExternalStorageDirectory(), "Recordings/Call Recordings"),
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
+            File(Environment.getExternalStorageDirectory(), "Sounds/CallRecord"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
             File(Environment.getExternalStorageDirectory(), "CallRecordings"),
             File(Environment.getExternalStorageDirectory(), "MIUI/sound_recorder/call_rec"),
-            File(Environment.getExternalStorageDirectory(), "PhoneRecord"),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call")
+            File(Environment.getExternalStorageDirectory(), "PhoneRecord")
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call Recordings"))
             candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call"))
             candidateDirs.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS))
         }

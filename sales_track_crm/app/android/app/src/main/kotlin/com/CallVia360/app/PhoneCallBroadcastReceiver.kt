@@ -421,7 +421,7 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
                 MediaStore.Audio.Media.DATA,
                 MediaStore.Audio.Media.DATE_MODIFIED
             )
-            val selection = "${MediaStore.Audio.Media.DATE_MODIFIED} > ? AND (${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%Call%')"
+            val selection = "${MediaStore.Audio.Media.DATE_MODIFIED} > ? AND (${MediaStore.Audio.Media.DATA} LIKE '%Record%' OR ${MediaStore.Audio.Media.DISPLAY_NAME} LIKE '%Call%' OR ${MediaStore.Audio.Media.DATA} LIKE '%Call%') AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Standard Recordings%' AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Voice Recorder%' AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Interview Recordings%' AND ${MediaStore.Audio.Media.DATA} NOT LIKE '%Meeting Recordings%'"
             context.contentResolver.query(
                 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                 projection,
@@ -436,12 +436,21 @@ class PhoneCallBroadcastReceiver : BroadcastReceiver() {
             }
         } catch (_: Exception) {}
 
-        val candidateDirs = listOf(
+        val candidateDirs = mutableListOf(
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call Recordings"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call"),
+            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings"),
+            File(Environment.getExternalStorageDirectory(), "Recordings/Call Recordings"),
             File(Environment.getExternalStorageDirectory(), "Recordings/Call"),
+            File(Environment.getExternalStorageDirectory(), "Sounds/CallRecord"),
             File(Environment.getExternalStorageDirectory(), "Sounds/Call"),
-            File(Environment.getExternalStorageDirectory(), "CallRecordings"),
-            File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "Recordings/Call")
+            File(Environment.getExternalStorageDirectory(), "CallRecordings")
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call Recordings"))
+            candidateDirs.add(File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS), "Call"))
+            candidateDirs.add(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_RECORDINGS))
+        }
         var newestPath: String? = null
         var newestTime: Long = System.currentTimeMillis() - 120000L
         for (dir in candidateDirs) {
