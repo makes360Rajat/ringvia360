@@ -42,6 +42,18 @@ class _HomeScreenState extends State<HomeScreen>
   String _waFilter = 'all';
   String _callTypeFilter = 'all'; // 'all', 'incoming', 'outgoing', 'missed', 'recordings'
 
+  // Memoized list caches to keep scrolling and sync rebuilds 60fps
+  String _cachedCallsKey = '';
+  List<_CallListRow> _cachedCallRows = const [];
+  bool _cachedIsSingleContact = false;
+  String _cachedContactName = '';
+  String _cachedContactNumber = '';
+
+  int _cachedRecsVersion = -1;
+  List<Map<String, dynamic>> _cachedSortedRecs = const [];
+  Set<String> _cachedSyncedRecPaths = const {};
+  Set<String> _cachedSyncedRecNames = const {};
+
   @override
   void initState() {
     super.initState();
@@ -1759,58 +1771,89 @@ class _HomeScreenState extends State<HomeScreen>
         ? _selectedContactFilter!
         : _searchQuery;
 
-    final filtered = service.calls.where((c) {
-      if (_callTypeFilter == 'incoming' && c.direction != 'incoming') return false;
-      if (_callTypeFilter == 'outgoing' && c.direction != 'outgoing') return false;
-      if (_callTypeFilter == 'missed' && c.direction != 'missed' && c.direction != 'rejected') {
-        return false;
-      }
-      if (_callTypeFilter == 'recordings' &&
-          !c.recording &&
-          (c.recordingPath == null || c.recordingPath!.isEmpty)) {
-        return false;
-      }
-
-      if (activeFilter.isEmpty) return true;
+    final String callsCacheKey =
+        '${service.dataVersion}|${service.calls.length}|$_callTypeFilter|$_searchQuery|${_selectedContactFilter ?? ""}';
+    if (_cachedCallsKey != callsCacheKey) {
       final q = activeFilter.toLowerCase();
-      final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
       final qNorm = q.replaceAll(RegExp(r'\D'), '');
-      final bool isSaved = _isSavedContact(c.name, c.number);
-      final String displayName = isSaved ? c.name : (c.number.isNotEmpty ? c.number : 'Unsaved Number');
-      if (displayName.toLowerCase().contains(q)) return true;
-      if (c.number.toLowerCase().contains(q)) return true;
-      if (qNorm.isNotEmpty &&
-          numNorm.endsWith(
-              qNorm.length >= 10 ? qNorm.substring(qNorm.length - 10) : qNorm)) {
-        return true;
+      final filtered = service.calls.where((c) {
+        if (_callTypeFilter == 'incoming' && c.direction != 'incoming') return false;
+        if (_callTypeFilter == 'outgoing' && c.direction != 'outgoing') return false;
+        if (_callTypeFilter == 'missed' && c.direction != 'missed' && c.direction != 'rejected') {
+          return false;
+        }
+        if (_callTypeFilter == 'recordings' &&
+            !c.recording &&
+            (c.recordingPath == null || c.recordingPath!.isEmpty)) {
+          return false;
+        }
+
+        if (activeFilter.isEmpty) return true;
+        final numNorm = c.number.replaceAll(RegExp(r'\D'), '');
+        final bool isSaved = _isSavedContact(c.name, c.number);
+        final String displayName = isSaved ? c.name : (c.number.isNotEmpty ? c.number : 'Unsaved Number');
+        if (displayName.toLowerCase().contains(q)) return true;
+        if (c.number.toLowerCase().contains(q)) return true;
+        if (qNorm.isNotEmpty &&
+            numNorm.endsWith(
+                qNorm.length >= 10 ? qNorm.substring(qNorm.length - 10) : qNorm)) {
+          return true;
+        }
+        return false;
+      }).toList()
+        ..sort((a, b) => b.time.compareTo(a.time));
+
+      final firstDigits = filtered.isNotEmpty
+          ? filtered.first.number.replaceAll(RegExp(r'\D'), '')
+          : '';
+      final firstTail = firstDigits.length >= 10
+          ? firstDigits.substring(firstDigits.length - 10)
+          : (filtered.isNotEmpty ? filtered.first.number : '');
+      final firstLowerName = filtered.isNotEmpty ? filtered.first.name.toLowerCase() : '';
+
+      final bool isSingleContact = activeFilter.isNotEmpty &&
+          filtered.isNotEmpty &&
+          filtered.every((c) =>
+              (c.name.isNotEmpty && c.name.toLowerCase() == firstLowerName) ||
+              (firstTail.isNotEmpty && c.number.replaceAll(RegExp(r'\D'), '').endsWith(firstTail)));
+
+      final contactName = filtered.isNotEmpty
+          ? (_isSavedContact(filtered.first.name, filtered.first.number)
+              ? filtered.first.name
+              : (filtered.first.number.isNotEmpty ? filtered.first.number : 'Unsaved Number'))
+          : '';
+      final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
+
+      final Map<String, List<dynamic>> grouped = {};
+      for (final call in filtered) {
+        final header = _formatDialerDateHeader(DateTime.fromMillisecondsSinceEpoch(call.time));
+        grouped.putIfAbsent(header, () => []).add(call);
       }
-      return false;
-    }).toList()
-      ..sort((a, b) => b.time.compareTo(a.time));
 
-    final bool isSingleContact = activeFilter.isNotEmpty &&
-        filtered.isNotEmpty &&
-        filtered.every((c) =>
-            (c.name.isNotEmpty && c.name.toLowerCase() == filtered.first.name.toLowerCase()) ||
-            (c.number.replaceAll(RegExp(r'\D'), '').endsWith(
-                filtered.first.number.replaceAll(RegExp(r'\D'), '').length >= 10
-                    ? filtered.first.number
-                        .replaceAll(RegExp(r'\D'), '')
-                        .substring(filtered.first.number.replaceAll(RegExp(r'\D'), '').length - 10)
-                    : filtered.first.number)));
+      final List<_CallListRow> rows = [];
+      for (final entry in grouped.entries) {
+        rows.add(_CallListRow.header(entry.key));
+        final list = entry.value;
+        for (int i = 0; i < list.length; i++) {
+          rows.add(_CallListRow.call(
+            list[i],
+            isFirstInGroup: i == 0,
+            isLastInGroup: i == list.length - 1,
+          ));
+        }
+      }
 
-    final contactName = filtered.isNotEmpty
-        ? (_isSavedContact(filtered.first.name, filtered.first.number)
-            ? filtered.first.name
-            : (filtered.first.number.isNotEmpty ? filtered.first.number : 'Unsaved Number'))
-        : '';
-    final contactNumber = filtered.isNotEmpty ? filtered.first.number : '';
-
-    final Map<String, List<dynamic>> grouped = {};
-    for (final call in filtered) {
-      final header = _formatDialerDateHeader(DateTime.fromMillisecondsSinceEpoch(call.time));
-      grouped.putIfAbsent(header, () => []).add(call);
+      _cachedCallsKey = callsCacheKey;
+      _cachedCallRows = rows;
+      _cachedIsSingleContact = isSingleContact;
+      _cachedContactName = contactName;
+      _cachedContactNumber = contactNumber;
     }
+
+    final callRows = _cachedCallRows;
+    final isSingleContact = _cachedIsSingleContact;
+    final contactName = _cachedContactName;
+    final contactNumber = _cachedContactNumber;
 
     return Column(
       children: [
@@ -1968,9 +2011,9 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-        // Grouped Call List
+        // Grouped Call List (virtualized per row for smooth 60fps scrolling)
         Expanded(
-          child: filtered.isEmpty
+          child: callRows.isEmpty
               ? Center(
                   child: Text(
                     'No calls found matching filter',
@@ -1990,70 +2033,66 @@ class _HomeScreenState extends State<HomeScreen>
                   child: ListView.builder(
                     padding: _getTabContentPadding(context, service, horizontal: 14, top: 4),
                     keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                    itemCount: grouped.keys.length,
-                    itemBuilder: (ctx, groupIdx) {
-                      final dateHeader = grouped.keys.elementAt(groupIdx);
-                      final callsInGroup = grouped[dateHeader]!;
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(left: 4, top: 12, bottom: 6),
-                            child: Row(
-                              children: [
-                                Icon(Icons.calendar_today_rounded, size: 12, color: colors.textMuted),
-                                const SizedBox(width: 6),
-                                Text(
-                                  dateHeader,
-                                  style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: colors.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Container(
-                            decoration: BoxDecoration(
-                              color: colors.cardBackground,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: colors.border),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(context.isDarkMode ? 0.2 : 0.03),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(18),
-                              child: Material(
-                                color: Colors.transparent,
-                                child: Column(
-                                  children: [
-                                    for (int callIdx = 0;
-                                        callIdx < callsInGroup.length;
-                                        callIdx++) ...[
-                                      if (callIdx > 0)
-                                        Divider(
-                                          height: 1,
-                                          thickness: 0.8,
-                                          indent: 72,
-                                          endIndent: 14,
-                                          color: colors.border,
-                                        ),
-                                      _buildCallItem(
-                                          service, callsInGroup[callIdx], isSingleContact),
-                                    ],
-                                  ],
+                    cacheExtent: 600,
+                    itemCount: callRows.length,
+                    itemBuilder: (ctx, idx) {
+                      final row = callRows[idx];
+                      if (row.header != null) {
+                        return Padding(
+                          padding: const EdgeInsets.only(left: 4, top: 12, bottom: 6),
+                          child: Row(
+                            children: [
+                              Icon(Icons.calendar_today_rounded, size: 12, color: colors.textMuted),
+                              const SizedBox(width: 6),
+                              Text(
+                                row.header!,
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: colors.textSecondary,
                                 ),
                               ),
+                            ],
+                          ),
+                        );
+                      }
+
+                      final radius = BorderRadius.vertical(
+                        top: row.isFirstInGroup ? const Radius.circular(18) : Radius.zero,
+                        bottom: row.isLastInGroup ? const Radius.circular(18) : Radius.zero,
+                      );
+
+                      return Container(
+                        decoration: BoxDecoration(
+                          color: colors.cardBackground,
+                          borderRadius: radius,
+                          border: Border(
+                            left: BorderSide(color: colors.border),
+                            right: BorderSide(color: colors.border),
+                            top: row.isFirstInGroup ? BorderSide(color: colors.border) : BorderSide.none,
+                            bottom: row.isLastInGroup ? BorderSide(color: colors.border) : BorderSide.none,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: radius,
+                          child: Material(
+                            color: Colors.transparent,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildCallItem(service, row.call!, isSingleContact),
+                                if (!row.isLastInGroup)
+                                  Divider(
+                                    height: 1,
+                                    thickness: 0.8,
+                                    indent: 72,
+                                    endIndent: 14,
+                                    color: colors.border,
+                                  ),
+                              ],
                             ),
                           ),
-                        ],
+                        ),
                       );
                     },
                   ),
@@ -3341,12 +3380,28 @@ class _HomeScreenState extends State<HomeScreen>
       );
     }
 
-    final sortedRecs = List<Map<String, dynamic>>.from(service.localRecordings)
-      ..sort((a, b) {
-        final tA = (a['lastModified'] as num?)?.toInt() ?? 0;
-        final tB = (b['lastModified'] as num?)?.toInt() ?? 0;
-        return tB.compareTo(tA);
-      });
+    if (_cachedRecsVersion != service.dataVersion) {
+      _cachedRecsVersion = service.dataVersion;
+      _cachedSortedRecs = List<Map<String, dynamic>>.from(service.localRecordings)
+        ..sort((a, b) {
+          final tA = (a['lastModified'] as num?)?.toInt() ?? 0;
+          final tB = (b['lastModified'] as num?)?.toInt() ?? 0;
+          return tB.compareTo(tA);
+        });
+      final syncedPaths = <String>{};
+      final syncedNames = <String>{};
+      for (final c in service.calls) {
+        if (c.recordingSyncStatus == 'synced' && c.recordingPath != null && c.recordingPath!.isNotEmpty) {
+          final p = c.recordingPath!;
+          syncedPaths.add(p);
+          final slash = p.lastIndexOf('/');
+          syncedNames.add(slash >= 0 ? p.substring(slash + 1) : p);
+        }
+      }
+      _cachedSyncedRecPaths = syncedPaths;
+      _cachedSyncedRecNames = syncedNames;
+    }
+    final sortedRecs = _cachedSortedRecs;
 
     return Column(
       children: [
@@ -3408,6 +3463,7 @@ class _HomeScreenState extends State<HomeScreen>
             },
             child: ListView.builder(
               padding: _getTabContentPadding(context, service, horizontal: 14, top: 8),
+              cacheExtent: 600,
               itemCount: sortedRecs.length,
               itemBuilder: (ctx, idx) {
                 final rec = sortedRecs[idx];
@@ -3415,13 +3471,8 @@ class _HomeScreenState extends State<HomeScreen>
                 final name = rec['fileName']?.toString() ?? 'Call Recording';
                 final isCurrent = service.activeAudioPath == path;
 
-                final matchingCall = service.calls.where((c) {
-                  if (c.recordingPath == null) return false;
-                  if (c.recordingPath == path) return true;
-                  final p1 = c.recordingPath!;
-                  return (name.isNotEmpty && p1.endsWith(name)) || path.endsWith(p1) || p1.endsWith(path);
-                }).firstOrNull;
-                final isUploaded = matchingCall?.recordingSyncStatus == 'synced';
+                final isUploaded = _cachedSyncedRecPaths.contains(path) ||
+                    (name.isNotEmpty && _cachedSyncedRecNames.contains(name));
 
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -4071,4 +4122,22 @@ class _HomeScreenState extends State<HomeScreen>
       ),
     );
   }
+}
+
+class _CallListRow {
+  final String? header;
+  final dynamic call;
+  final bool isFirstInGroup;
+  final bool isLastInGroup;
+
+  const _CallListRow.header(this.header)
+      : call = null,
+        isFirstInGroup = false,
+        isLastInGroup = false;
+
+  const _CallListRow.call(
+    this.call, {
+    required this.isFirstInGroup,
+    required this.isLastInGroup,
+  }) : header = null;
 }

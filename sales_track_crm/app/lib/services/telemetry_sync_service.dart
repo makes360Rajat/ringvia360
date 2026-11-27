@@ -91,6 +91,8 @@ class TelemetrySyncService extends ChangeNotifier {
   Map<String, dynamic> get deviceInfo => _deviceInfo;
   Map<String, bool> get permissions => _permissions;
   int get batteryPercent => _batteryPercent;
+  int _dataVersion = 0;
+  int get dataVersion => _dataVersion;
 
   bool get hasCallLogPermission => Platform.isIOS ? true : (_permissions['call_log'] == true);
   bool get hasPhoneStatePermission => Platform.isIOS ? true : (_permissions['phone_state'] == true);
@@ -1831,7 +1833,11 @@ class TelemetrySyncService extends ChangeNotifier {
           if (k.isNotEmpty) waNumMap.putIfAbsent(k, () => []).add(i);
         }
 
+        int processed = 0;
         for (final item in rawLogs) {
+          if (++processed % 250 == 0) {
+            await Future.delayed(Duration.zero);
+          }
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
           
           if (event.kind == 'whatsapp_call') {
@@ -1925,6 +1931,7 @@ class TelemetrySyncService extends ChangeNotifier {
         final cleanCalls = dedupCallsList(_calls);
         _calls.clear();
         _calls.addAll(cleanCalls);
+        _dataVersion++;
 
         _whatsappEvents.sort((a, b) => b.time.compareTo(a.time));
 
@@ -1961,9 +1968,29 @@ class TelemetrySyncService extends ChangeNotifier {
       final dynamic raw = await _platform.invokeMethod('fetchDeviceSms');
       final rawSms = (raw as List?)?.whereType<Map>().toList();
       if (rawSms != null && rawSms.isNotEmpty) {
+        final Map<String, List<int>> smsNumMap = {};
+        for (int i = 0; i < _smsList.length; i++) {
+          final k = extractNumberKey(_smsList[i].number);
+          smsNumMap.putIfAbsent(k, () => []).add(i);
+        }
+
+        int processed = 0;
         for (final item in rawSms) {
+          if (++processed % 250 == 0) {
+            await Future.delayed(Duration.zero);
+          }
           final event = SalesTrackEvent.fromJson(Map<String, dynamic>.from(item));
-          final existing = _smsList.indexWhere((s) => isSameSms(s, event));
+          final k = extractNumberKey(event.number);
+          int existing = -1;
+          final candidates = smsNumMap[k];
+          if (candidates != null) {
+            for (final idx in candidates) {
+              if (isSameSms(_smsList[idx], event)) {
+                existing = idx;
+                break;
+              }
+            }
+          }
           if (existing >= 0) {
             final old = _smsList[existing];
             event.uid = old.uid; // Preserve original UID so CRM never creates a duplicate!
@@ -1979,12 +2006,14 @@ class TelemetrySyncService extends ChangeNotifier {
             }
           } else {
             _smsList.add(event);
+            smsNumMap.putIfAbsent(k, () => []).add(_smsList.length - 1);
             _enqueueEvent(event);
           }
         }
         final cleanSms = dedupSmsList(_smsList);
         _smsList.clear();
         _smsList.addAll(cleanSms);
+        _dataVersion++;
         debugPrint('💬 [SMS/RCS SYNC] Successfully loaded ${_smsList.length} total messages (latest: ${_smsList.firstOrNull?.name} - "${_smsList.firstOrNull?.text}")');
         await LocalDatabaseService.instance.saveEvents(_smsList);
         await LocalDatabaseService.instance.cleanupDuplicates();
@@ -2102,6 +2131,7 @@ class TelemetrySyncService extends ChangeNotifier {
         for (final item in list) {
           _localRecordings.add(Map<String, dynamic>.from(item));
         }
+        _dataVersion++;
         await _persistRecordings();
         notifyListeners();
       }
@@ -2349,19 +2379,21 @@ class TelemetrySyncService extends ChangeNotifier {
             finishedUids.addAll(batch.map((e) => e.uid));
           }
 
-          _pendingQueue.removeWhere((e) => finishedUids.contains(e.uid));
-          _pendingUids.removeWhere((u) => finishedUids.contains(u));
+          final finishedSet = finishedUids.toSet();
+          _pendingQueue.removeWhere((e) => finishedSet.contains(e.uid));
+          _pendingUids.removeWhere((u) => finishedSet.contains(u));
 
           // Mark synced status in local data stores & SQLite
           for (final call in _calls) {
-            if (finishedUids.contains(call.uid)) call.syncStatus = 'synced';
+            if (finishedSet.contains(call.uid)) call.syncStatus = 'synced';
           }
           for (final wa in _whatsappEvents) {
-            if (finishedUids.contains(wa.uid)) wa.syncStatus = 'synced';
+            if (finishedSet.contains(wa.uid)) wa.syncStatus = 'synced';
           }
           for (final sms in _smsList) {
-            if (finishedUids.contains(sms.uid)) sms.syncStatus = 'synced';
+            if (finishedSet.contains(sms.uid)) sms.syncStatus = 'synced';
           }
+          _dataVersion++;
           await LocalDatabaseService.instance.markEventsSynced(finishedUids);
 
           // Check if server specifically requested recordings
